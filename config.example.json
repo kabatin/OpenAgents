@@ -1,0 +1,78 @@
+{
+  "_comment": "OpenAgents の設定ファイル例。これを config.json にコピーして使いますが、通常は `python start.py` でダッシュボードを開いて画面から設定するのが簡単です。ここに書いた _comment のような未知のキーは、ダッシュボードが保存しても消えません。",
+  "guild_id": 1234567890123456789,
+  "_comment_guild_id": "エージェントを住まわせる Discord サーバーのID。19桁の数字で、引用符は付けても付けなくても構いません（どちらでも桁は保たれます）。",
+  "admins": [
+    9876543210987654321
+  ],
+  "_comment_admins": "管理者の Discord ユーザーID。全体共通ルールの設定や、他人のリマインダーの削除ができます。",
+  "agent_category_id": null,
+  "_comment_agent_category_id": "エージェントが新しいチャンネルを作るときの配置先カテゴリID。使わないなら null のままで構いません。",
+  "history_limit": 10,
+  "context_history_limit": 30,
+  "max_bot_chain": 4,
+  "max_concurrent_answers": 2,
+  "_comment_limits": "history_limit=Bot同士のループ検知に見る件数 / context_history_limit=文脈として読む会話の件数 / max_bot_chain=Bot発言が何回続いたら黙るか / max_concurrent_answers=同時に走らせるLLMの数（多いとPCが重くなります）",
+  "llm": {
+    "provider": "claude",
+    "model": "claude-sonnet-5",
+    "timeout_sec": 180
+  },
+  "_comment_llm": "回答を作るのに使うLLM。provider は claude / codex / custom から選べます（docs/04-llm-providers.md）。添付ファイルの読解など一部の機能は claude 専用です。",
+  "agents": [
+    {
+      "id": "agent1",
+      "name": "エージェント",
+      "token": "",
+      "home_channel_id": 1234567890123456780,
+      "archiver": true,
+      "persona_files": [
+        "personas/assistant.template.md"
+      ],
+      "role": "",
+      "skills": {
+        "reminder": true,
+        "youtube_summary": true,
+        "pdf_summary": true
+      },
+      "proactive": {
+        "enabled": false,
+        "interval_min": 30,
+        "daily_quota": 3
+      }
+    }
+  ],
+  "_comment_agents": "エージェントは何体でも追加できます。token は Discord Developer Portal で作った Bot のトークン。archiver: true は会話をDBに記録する担当で、必ずちょうど1体にしてください。2体目以降の追加手順は docs/03-adding-agents.md にあります。",
+  "integrations": {
+    "enabled": []
+  },
+  "_comment_integrations": "外部サービス連携。integrations/ 配下に置いたフォルダ名をここに並べると読み込まれます（docs/07-integrations.md）。",
+  "dev_bot": {
+    "enabled": false,
+    "token": "",
+    "dev_channel_id": ""
+  },
+  "_comment_dev_bot": "開発BOT。Discordから開発を指示し、テストを通ったものだけを人間の承認つきで反映します。使うには別途Botを作ってトークンを登録してください。",
+  "meeting_bot": {
+    "enabled": false,
+    "token": "",
+    "voice_channel_name": "",
+    "user_mapping": {}
+  },
+  "_comment_meeting_bot": "議事録BOT。指定したボイスチャンネルの会話を録音し、文字起こしと議事録を作ります。音声関連の追加インストールが必要です。",
+  "dashboard": {
+    "host": "127.0.0.1",
+    "port": 8787,
+    "password": ""
+  },
+  "_comment_dashboard": "管理画面。既定では自分のPCからしか開けません。同じ家やオフィスのLANに公開したいときだけ host を 0.0.0.0 にして、password も必ず設定してください。インターネットには公開しないでください。",
+  "supervisor": {
+    "port": 8788,
+    "restart_backoff_sec": [
+      5,
+      15,
+      60
+    ]
+  },
+  "_comment_supervisor": "全BOTの親プロセス（run.py）。落ちたBOTを自動で再起動します。backoff は再起動を繰り返すときの待ち時間（秒）。"
+}

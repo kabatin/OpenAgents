@@ -1,0 +1,7 @@
+discord.py>=2.7.1
+requests>=2.31              # YouTubeタイトル取得・外部連携の共通HTTP
+youtube-transcript-api>=1.0.0  # YouTube要約スキル
+pillow>=11.0                # 週次ダッシュボードの日本語ラベル描画（無くても代替動作）
+# Windows にはOSのタイムゾーンDBが無く、ZoneInfo("Asia/Tokyo") が
+# これ無しでは落ちる（mac/Linux はOS側のDBを使うので不要）
+tzdata>=2024.1 ; sys_platform == "win32"

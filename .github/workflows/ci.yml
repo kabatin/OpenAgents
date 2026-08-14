@@ -1,0 +1,119 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 同じブランチへ続けて push したら、前の実行は打ち切る
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python (${{ matrix.os }})
+    # mac と Windows の両方で回す。「片方でしか動かない」を早く見つけるため
+    runs-on: ${{ matrix.os }}
+    env:
+      # Windows の既定エンコーディングでは日本語のテスト名・出力が
+      # UnicodeEncodeError になる
+      PYTHONUTF8: "1"
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 依存を入れる
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 中核のテスト（プラットフォーム非依存）
+        run: python -m unittest discover -s core -t . -q
+
+      - name: プラットフォーム実装のテスト
+        run: python -m unittest discover -s platforms -t . -q
+
+  dashboard:
+    name: ダッシュボード
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - run: npm ci
+        working-directory: dashboard
+
+      - name: 型検査
+        run: npm run typecheck
+        working-directory: dashboard
+
+      - name: テスト
+        run: npm test
+        working-directory: dashboard
+
+      - name: 組み立てが通ること
+        run: npm run build
+        working-directory: dashboard
+
+  hygiene:
+    name: 公開してはいけないものが混ざっていないか
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # gitleaks は Action ではなくバイナリを直接使う。
+      # Action は push された範囲だけを見ようとして、最初の push
+      # （root コミットを含む）で範囲解決に失敗する。
+      # このリポジトリは小さいので、毎回**全履歴**を見る方が確実で速い
+      - name: シークレット走査（全履歴）
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz \
+            | tar xz -C /tmp gitleaks
+          /tmp/gitleaks detect --source . --redact --no-banner
+
+      - name: 設定ファイルが追跡されていないこと
+        run: |
+          # config.json には Bot トークンが入る。絶対に追跡されてはいけない
+          if git ls-files --error-unmatch config.json 2>/dev/null; then
+            echo "::error::config.json が追跡されています（.gitignore を確認してください）"
+            exit 1
+          fi
+          echo "OK: config.json は追跡されていません"
+
+      - name: 自分用のファイルが追跡されていないこと
+        run: |
+          # personas/ と knowledge/ は見本だけを追跡する
+          bad=$(git ls-files 'personas/*' 'knowledge/*' \
+                | grep -vE '(README\.md|\.template\.md|\.example\.md)$' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::見本以外のファイルが追跡されています:"
+            echo "$bad"
+            exit 1
+          fi
+          echo "OK: 見本だけが追跡されています"
+
+      - name: 実行時に作られるものが追跡されていないこと
+        run: |
+          bad=$(git ls-files | grep -E '(^state/|\.db$|\.log$|^venv/|node_modules/)' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::実行時生成物が追跡されています:"
+            echo "$bad"
+            exit 1
+          fi
+          echo "OK"

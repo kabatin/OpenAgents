@@ -1,0 +1,91 @@
+{
+  "_comment": "テスト用の設定。実際の config.json ではありません。19桁ID・_comment・入れ子設定を含み、保存処理が何も壊さないことを検証します。",
+  "guild_id": 1234567890123456789,
+  "admins": [
+    9876543210987654321
+  ],
+  "agent_category_id": null,
+  "history_limit": 10,
+  "context_history_limit": 30,
+  "max_bot_chain": 4,
+  "max_concurrent_answers": 2,
+  "llm": {
+    "provider": "claude",
+    "model": "claude-sonnet-5",
+    "timeout_sec": 180
+  },
+  "agents": [
+    {
+      "id": "agent1",
+      "name": "エージェント1",
+      "token": "dummy-token-1",
+      "home_channel_id": 1234567890123456780,
+      "archiver": true,
+      "persona_files": [
+        "personas/assistant.template.md"
+      ],
+      "role": "",
+      "require_mention": false,
+      "skills": {
+        "reminder": true,
+        "youtube_summary": true,
+        "pdf_summary": true
+      },
+      "proactive": {
+        "enabled": true,
+        "interval_min": 30,
+        "daily_quota": 3,
+        "rest": {
+          "start_hour": 23,
+          "end_hour": 8
+        },
+        "rescue": {
+          "enabled": false,
+          "shadow": true
+        }
+      }
+    },
+    {
+      "id": "agent2",
+      "name": "エージェント2",
+      "token": "dummy-token-2",
+      "home_channel_id": 1234567890123456781,
+      "archiver": false,
+      "persona_files": [
+        "personas/analyst.template.md"
+      ],
+      "role": "デザイン担当",
+      "require_mention": true,
+      "skills": {
+        "image_gen": {
+          "cdp_port": 9222,
+          "timeout_sec": 300
+        }
+      },
+      "proactive": {
+        "enabled": false
+      }
+    }
+  ],
+  "integrations": {
+    "enabled": []
+  },
+  "dashboard": {
+    "host": "127.0.0.1",
+    "port": 8787,
+    "password": ""
+  },
+  "supervisor": {
+    "port": 8788,
+    "restart_backoff_sec": [
+      5,
+      15,
+      60
+    ]
+  },
+  "dev_bot": {
+    "enabled": true,
+    "token": "dummy-dev-token",
+    "dev_channel_id": 1234567890123456782
+  }
+}

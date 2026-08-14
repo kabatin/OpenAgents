@@ -1,0 +1,48 @@
+# ---- 設定と秘密（絶対にコミットしない） ----
+config.json
+config.json.*
+.env
+*.pem
+service_account.json
+
+# ---- 実行時に作られるもの ----
+state/
+recordings/
+*.db
+*.db-shm
+*.db-wal
+*.log
+*.log.[0-9]
+*.tmp
+
+# ---- Python ----
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# ---- Node / ダッシュボード ----
+node_modules/
+dashboard/dist/
+dashboard/backups/
+dashboard/applied/
+dashboard/cache/
+dashboard/.playwright-mcp/
+
+# ---- 外部連携（自分専用の連携はコミットしない。サンプルだけ追跡する） ----
+integrations/*
+!integrations/README.md
+!integrations/example_*
+
+# ---- 人格・ナレッジ（テンプレだけ追跡し、自分用の実物は無視する） ----
+personas/*
+!personas/README.md
+!personas/*.template.md
+knowledge/*
+!knowledge/README.md
+!knowledge/*.example.md
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
