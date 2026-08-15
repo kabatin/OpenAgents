@@ -28,7 +28,7 @@ import {
 import { getPath } from "../config/objpath.ts";
 import { restartService } from "../ops/status.ts";
 import {
-  checkMessageContentIntent,
+  checkIntents,
   DiscordError,
   inviteUrl,
   listChannels,
@@ -96,12 +96,12 @@ setup.post("/platform/verify", async (c) => {
   const { token } = await body(c);
   try {
     const identity = await verifyToken(token ?? "");
-    const intent = await checkMessageContentIntent(token ?? "");
+    const intent = await checkIntents(token ?? "");
     return c.json({
       ok: true,
       bot: identity,
       inviteUrl: inviteUrl(identity.id),
-      messageContentIntent: intent,
+      intents: intent,
     });
   } catch (e) {
     return c.json({ ok: false, ...fail(e) }, 400);

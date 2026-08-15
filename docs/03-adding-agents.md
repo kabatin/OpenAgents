@@ -8,13 +8,13 @@
 必要です。Discord Developer Portal でもう1つ Application を作るところから始まります
 （[01-discord-bot-setup.md](01-discord-bot-setup.md) の手順1〜5をもう一度）。
 
-**MESSAGE CONTENT INTENT の設定も、Botごとに必要です。** ここを忘れると、
+**MESSAGE CONTENT INTENT と SERVER MEMBERS INTENT の設定も、Botごとに必要です。** ここを忘れると、
 その子だけ無反応になります。
 
 ## 手順
 
 1. Developer Portal で新しい Application → Bot を作る
-2. MESSAGE CONTENT INTENT をオンにして保存
+2. MESSAGE CONTENT INTENT と SERVER MEMBERS INTENT をオンにして保存
 3. Reset Token でトークンをコピー
 4. **同じサーバーに招待する**（招待リンクは新しい Application のものを使います）
 5. ダッシュボードの「全体設定」→「エージェントの増減」→「エージェントを追加」

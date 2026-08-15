@@ -158,11 +158,11 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
       const got = await api.post<{
         bot: BotIdentity;
         inviteUrl: string;
-        messageContentIntent: { enabled: boolean | null; detail: string };
+        intents: { enabled: boolean | null; detail: string };
       }>("/setup/platform/verify", { token });
       setBot(got.bot);
       setInviteUrl(got.inviteUrl);
-      setIntentWarning(got.messageContentIntent.enabled === false ? got.messageContentIntent.detail : "");
+      setIntentWarning(got.intents.enabled === false ? got.intents.detail : "");
     });
 
   /** チャンネル一覧を取り直す（guard の外側。呼ぶ側が包む）。 */
@@ -313,10 +313,13 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
               </li>
               <li>
                 <b className="text-accent">Privileged Gateway Intents</b> の
-                <b> MESSAGE CONTENT INTENT</b> を<b>オンにして保存する</b>
+                <b> MESSAGE CONTENT INTENT</b> と <b>SERVER MEMBERS INTENT</b> を
+                <b>両方オンにして保存する</b>
                 <div className="mt-1 rounded bg-hairline/40 px-2 py-1.5 text-2xs">
-                  ⚠️ ここを飛ばすと、接続はできるのに<b>発言の中身が届かず、何をしても
-                  無反応</b>になります。いちばん多いつまずきです。
+                  ⚠️ <b>2つとも必要です。</b>いちばん多いつまずきで、片方だけだと
+                  症状が違います。MESSAGE CONTENT が無いと
+                  <b>発言の中身が届かず無反応</b>に、SERVER MEMBERS が無いと
+                  <b>そもそも接続できません</b>。
                 </div>
               </li>
               <li>

@@ -18,6 +18,7 @@
 import os
 import platform
 import shutil
+import ssl
 import subprocess
 import sys
 import threading
@@ -77,6 +78,45 @@ def check_python():
             f"（いまは {sys.version.split()[0]}）",
             "  https://www.python.org/downloads/ から新しい Python を入れてください。",
         )
+
+
+def certificate_command():
+    """macOS の python.org 版に同梱される証明書インストーラのパス（無ければ None）。"""
+    if sys.platform != "darwin":
+        return None
+    path = (f"/Applications/Python {sys.version_info.major}."
+            f"{sys.version_info.minor}/Install Certificates.command")
+    return path if os.path.exists(path) else None
+
+
+def check_certificates():
+    """HTTPSの証明書が使える状態か。
+
+    python.org 版の Python は macOS のシステム証明書を使わない。入れた直後は
+    証明書バンドルが空で、Discord も LLM も**全ての HTTPS が失敗する**。
+    しかも症状はログの奥の SSLCertVerificationError だけで、画面上は
+    「BOTが繋がらない」としか見えないため、原因に辿り着けない（実際の報告）。
+
+    ネットワークには触らずに判定する（オフラインでも誤検出しない）。
+    証明書ストアにCAが1枚も無ければ、通信以前の設定漏れで確実に壊れている。
+    """
+    try:
+        loaded = ssl.create_default_context().cert_store_stats()["x509_ca"]
+    except Exception:
+        return          # 判定できないときは黙って通す（起動は妨げない）
+    if loaded > 0:
+        return
+    installer = certificate_command()
+    if installer is not None:
+        how = (f'  次を実行してください（ダブルクリックでも動きます）:\n\n'
+               f'      open "{installer}"\n\n'
+               '  終わったら、もう一度この起動をやり直してください。')
+    else:
+        how = ("  Python の証明書バンドルが空です。python.org 版を使っている場合は\n"
+               "  「Install Certificates.command」を実行してください。\n"
+               "  それ以外なら、次でも入ります:\n\n"
+               f"      {sys.executable} -m pip install --upgrade certifi")
+    fail("HTTPSの証明書が入っていないため、Discord にも AI にも接続できません", how)
 
 
 def node_version():
@@ -348,6 +388,7 @@ def main():
 
     step(1, 3, "動かすのに必要なものを確認しています")
     check_python()
+    check_certificates()
     check_node()
 
     step(2, 3, "準備をしています")

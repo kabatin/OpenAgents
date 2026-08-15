@@ -56,6 +56,45 @@ cd dashboard && npm ci
 新しいものをダッシュボードから登録し直してください。
 Client Secret（OAuth2ページのもの）ではありません。
 
+### `PrivilegedIntentsRequired` / 接続そのものに失敗する
+
+**SERVER MEMBERS INTENT が入っていません。**
+Developer Portal の **Bot** ページ → Privileged Gateway Intents で
+`SERVER MEMBERS INTENT` をオンにし、**Save Changes** を押してください。
+
+このBOTは MESSAGE CONTENT と SERVER MEMBERS の**2つとも**必要です。
+片方だけだと症状が違うので混同しやすい。
+
+| 足りないもの | 症状 |
+|---|---|
+| MESSAGE CONTENT | オンラインになるが、話しかけても無反応 |
+| SERVER MEMBERS | そもそも接続に失敗する |
+
+エージェントを増やしたときは、**Botごとに**この設定が要ります。
+
+### `SSLCertVerificationError` / `unable to get local issuer certificate`
+
+**Python に証明書が入っていません。** Discord にも AI にも繋がらなくなります。
+
+python.org からダウンロードした Python は macOS のシステム証明書を使わないため、
+入れた直後は証明書バンドルが空です。次を実行してください（ダブルクリックでも可）。
+
+```bash
+open "/Applications/Python 3.14/Install Certificates.command"
+```
+
+`3.14` の部分は入れた Python のバージョンに合わせてください。
+終わったら `python start.py` をやり直します。
+
+Homebrew 版など、上のファイルが無い環境では次でも入ります。
+
+```bash
+./venv/bin/python -m pip install --upgrade certifi
+```
+
+なお `python start.py` は起動時にこれを検査して止めるので、
+最新版を使っていればこの症状には当たらないはずです。
+
 ### 「常駐プロセス（run.py）に接続できません」
 
 `python run.py` が動いていません。ターミナルで起動するか、
@@ -75,6 +114,7 @@ Client Secret（OAuth2ページのもの）ではありません。
 **ほぼ確実に MESSAGE CONTENT INTENT が入っていません。**
 [01-discord-bot-setup.md の手順3](01-discord-bot-setup.md) を確認してください。
 オンにして保存したあと、BOTの再起動が要ります。
+（オンラインにすらならない場合は SERVER MEMBERS INTENT の方です）
 
 次に多いのは:
 

@@ -169,33 +169,76 @@ export async function postMessage(
 }
 
 /**
- * Botが「メッセージの内容」を読める設定になっているか。
+ * アプリ情報の flags から、必要な2つの Privileged Intent の状態を読む（純粋関数）。
  *
- * MESSAGE CONTENT INTENT が無効だと、Botは接続できるのに発言の中身が
- * 空で届き、**何をしても無反応**になる。最大の脱落ポイントなので、
- * セットアップ中に検出して警告する。
+ * どちらも agent_runtime.py が要求している。片方でも欠けると動かないのに
+ * 症状が違うので、まとめて1つの真偽値にせず別々に返す。
+ *   - MESSAGE CONTENT: 接続はできるが発言の中身が空で届き、何をしても無反応
+ *   - SERVER MEMBERS : そもそも接続時に弾かれる（PrivilegedIntentsRequired）
  *
- * このintentの状態はAPIから直接は読めないため、アプリ情報の flags を見る。
+ * `..._LIMITED` は「100サーバー未満なら使える」状態で、この用途では有効と同じ。
  */
-export async function checkMessageContentIntent(token: string): Promise<{
+export function intentsFromFlags(flags: number): {
+  messageContent: boolean;
+  serverMembers: boolean;
+} {
+  return {
+    // 1 << 18: GATEWAY_MESSAGE_CONTENT / 1 << 19: ..._LIMITED
+    messageContent: (flags & (1 << 18)) !== 0 || (flags & (1 << 19)) !== 0,
+    // 1 << 16: GATEWAY_GUILD_MEMBERS / 1 << 17: ..._LIMITED
+    serverMembers: (flags & (1 << 16)) !== 0 || (flags & (1 << 17)) !== 0,
+  };
+}
+
+/** 足りていない intent を、直し方つきの1文にする（純粋関数）。 */
+export function intentWarning(state: {
+  messageContent: boolean;
+  serverMembers: boolean;
+}): string {
+  const missing: string[] = [];
+  if (!state.messageContent) missing.push("MESSAGE CONTENT INTENT");
+  if (!state.serverMembers) missing.push("SERVER MEMBERS INTENT");
+  if (missing.length === 0) return "";
+  const why = !state.serverMembers
+    ? "これが無いとBOTは接続そのものができません"
+    : "これが無いと、接続はできても発言の中身が届かず無反応になります";
+  return (
+    `${missing.join(" と ")} が無効です。Developer Portal の Bot ページ` +
+    `（Privileged Gateway Intents）で有効にして Save Changes を押してください` +
+    `（${why}）`
+  );
+}
+
+/**
+ * Botに必要な Privileged Intent が有効になっているか。
+ *
+ * 最大の脱落ポイントなのでセットアップ中に検出して警告する。
+ * intent の状態はAPIから直接は読めないため、アプリ情報の flags を見る。
+ */
+export async function checkIntents(token: string): Promise<{
   enabled: boolean | null;
+  messageContent: boolean | null;
+  serverMembers: boolean | null;
   detail: string;
 }> {
   try {
     const app = (await call(token, "/applications/@me")) as { flags?: number };
-    const flags = app.flags ?? 0;
-    // 1 << 18: GATEWAY_MESSAGE_CONTENT（承認済み）
-    // 1 << 19: GATEWAY_MESSAGE_CONTENT_LIMITED（100サーバー未満での利用が有効）
-    const enabled = (flags & (1 << 18)) !== 0 || (flags & (1 << 19)) !== 0;
+    const state = intentsFromFlags(app.flags ?? 0);
+    const warning = intentWarning(state);
     return {
-      enabled,
-      detail: enabled
-        ? "メッセージ内容の受信は有効です"
-        : "MESSAGE CONTENT INTENT が無効です。Developer Portal の Bot ページで有効にしてください（これが無いと、接続はできても発言の中身が届かず無反応になります）",
+      enabled: warning === "",
+      messageContent: state.messageContent,
+      serverMembers: state.serverMembers,
+      detail: warning === "" ? "必要な権限は有効です" : warning,
     };
   } catch {
     // 取れないことと無効であることは違う。分からないなら分からないと言う
-    return { enabled: null, detail: "設定を確認できませんでした" };
+    return {
+      enabled: null,
+      messageContent: null,
+      serverMembers: null,
+      detail: "設定を確認できませんでした",
+    };
   }
 }
 

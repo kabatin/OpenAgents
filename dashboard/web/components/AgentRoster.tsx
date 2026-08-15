@@ -130,7 +130,8 @@ export function AgentRoster({
           <div className="space-y-2 rounded border border-hairline px-3 py-3">
             <p className="text-2xs text-muted">
               Developer Portal でもう1つ Application を作り、その Bot のトークンを貼ってください
-              （MESSAGE CONTENT INTENT の有効化もお忘れなく）。
+              （MESSAGE CONTENT INTENT と SERVER MEMBERS INTENT の有効化もお忘れなく。
+              Botごとに必要です）。
             </p>
             <label className="block space-y-1">
               <span className="text-xs font-medium">Botトークン</span>

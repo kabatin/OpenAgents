@@ -19,7 +19,7 @@ import {
   resolveSafe,
 } from "../server/setup/personas.ts";
 import { nextPersonaFiles } from "../server/config/store.ts";
-import { inviteUrl } from "../server/setup/discord.ts";
+import { intentsFromFlags, intentWarning, inviteUrl } from "../server/setup/discord.ts";
 import { PERSONAS_DIR } from "../server/paths.ts";
 
 describe("性格ファイルの書き込み先を閉じ込める", () => {
@@ -120,6 +120,56 @@ describe("招待URL", () => {
     expect(perms & (1n << 3n)).toBe(0n);
     // メッセージ送信は含む
     expect(perms & (1n << 11n)).not.toBe(0n);
+  });
+});
+
+describe("必要な Privileged Intent の判定", () => {
+  const MSG = 1 << 18;
+  const MSG_LIMITED = 1 << 19;
+  const MEMBERS = 1 << 16;
+  const MEMBERS_LIMITED = 1 << 17;
+
+  it("両方立っていれば警告なし", () => {
+    const state = intentsFromFlags(MSG | MEMBERS);
+    expect(state).toEqual({ messageContent: true, serverMembers: true });
+    expect(intentWarning(state)).toBe("");
+  });
+
+  it("LIMITED でも有効として扱う（100サーバー未満での承認済み）", () => {
+    expect(intentsFromFlags(MSG_LIMITED | MEMBERS_LIMITED)).toEqual({
+      messageContent: true,
+      serverMembers: true,
+    });
+  });
+
+  it("SERVER MEMBERS 欠けは「接続できない」と伝える", () => {
+    // agent_runtime が intents.members=True を要求しており、
+    // 欠けると PrivilegedIntentsRequired で接続自体が落ちる（実際の報告）
+    const w = intentWarning(intentsFromFlags(MSG));
+    expect(w).toContain("SERVER MEMBERS INTENT");
+    expect(w).not.toContain("MESSAGE CONTENT INTENT");
+    expect(w).toContain("接続そのものができません");
+  });
+
+  it("MESSAGE CONTENT 欠けは「無反応になる」と伝える", () => {
+    const w = intentWarning(intentsFromFlags(MEMBERS));
+    expect(w).toContain("MESSAGE CONTENT INTENT");
+    expect(w).not.toContain("SERVER MEMBERS INTENT");
+    expect(w).toContain("無反応");
+  });
+
+  it("両方欠けていれば両方を挙げる", () => {
+    const w = intentWarning(intentsFromFlags(0));
+    expect(w).toContain("MESSAGE CONTENT INTENT");
+    expect(w).toContain("SERVER MEMBERS INTENT");
+  });
+
+  it("無関係なフラグは判定に影響しない", () => {
+    // 1 << 14/15 は PRESENCE。このBOTは使わない
+    expect(intentsFromFlags((1 << 14) | (1 << 15))).toEqual({
+      messageContent: false,
+      serverMembers: false,
+    });
   });
 });
 
