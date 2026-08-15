@@ -48,8 +48,25 @@ type Reminder = {
   agent_id: string;
 };
 
+type Term = {
+  term: string;
+  description: string | null;
+  createdBy: string | null;
+  createdAt: string | null;
+};
+
+type GlossaryPair = {
+  wrong: string;
+  correct: string | null;
+  createdBy: string | null;
+  createdAt: string | null;
+};
+
+type Dictionary = { terms: Term[]; glossary: GlossaryPair[] };
+
 const TABS = [
   { id: "rules", label: "ルール記憶" },
+  { id: "dictionary", label: "名前辞書" },
   { id: "reminders", label: "リマインダー" },
   { id: "capabilities", label: "能力リクエスト" },
   { id: "personas", label: "Webhook人格" },
@@ -74,6 +91,7 @@ export function DataPage() {
   const { data: reminders } = useFetch<{ items: Reminder[] }>(
     tab === "reminders" ? "/data/reminders" : null,
   );
+  const { data: dict } = useFetch<Dictionary>(tab === "dictionary" ? "/data/dictionary" : null);
 
   const c = summary?.counters;
 
@@ -163,6 +181,63 @@ export function DataPage() {
               ))
             )}
           </ul>
+        )}
+
+        {tab === "dictionary" && (
+          <div>
+            <div className="px-4 py-3">
+              <div className="eyebrow">固有名詞辞書</div>
+              <p className="mt-1 max-w-[60ch] text-2xs leading-relaxed text-muted">
+                正式な表記そのものを覚えさせるもの。登録しておくと、音が近いだけの
+                知らない誤変換もAIがこの表記へ寄せます。
+              </p>
+            </div>
+            <ul>
+              {(dict?.terms ?? []).length === 0 ? (
+                <Empty>登録された固有名詞はありません</Empty>
+              ) : (
+                dict?.terms.map((t) => (
+                  <li
+                    key={t.term}
+                    className="flex items-baseline gap-2.5 border-t border-hairline px-4 py-2.5 text-xs"
+                  >
+                    <span className="w-32 shrink-0 font-medium">{t.term}</span>
+                    <span className="min-w-0 flex-1 text-muted">{t.description || "—"}</span>
+                    {t.createdBy !== null && (
+                      <span className="shrink-0 text-2xs text-faint">{t.createdBy}</span>
+                    )}
+                  </li>
+                ))
+              )}
+            </ul>
+
+            <div className="border-t border-hairline px-4 py-3">
+              <div className="eyebrow">単語帳</div>
+              <p className="mt-1 max-w-[60ch] text-2xs leading-relaxed text-muted">
+                「この誤変換はこう直す」の対応表。こちらはAIの判断を挟まず、
+                決め打ちで置き換えます。
+              </p>
+            </div>
+            <ul>
+              {(dict?.glossary ?? []).length === 0 ? (
+                <Empty>登録された単語はありません</Empty>
+              ) : (
+                dict?.glossary.map((g) => (
+                  <li
+                    key={g.wrong}
+                    className="flex items-baseline gap-2.5 border-t border-hairline px-4 py-2.5 text-xs"
+                  >
+                    <span className="w-32 shrink-0 text-faint line-through">{g.wrong}</span>
+                    <span className="shrink-0 text-faint">→</span>
+                    <span className="min-w-0 flex-1 font-medium">{g.correct || "—"}</span>
+                    {g.createdBy !== null && (
+                      <span className="shrink-0 text-2xs text-faint">{g.createdBy}</span>
+                    )}
+                  </li>
+                ))
+              )}
+            </ul>
+          </div>
         )}
 
         {tab === "reminders" && (

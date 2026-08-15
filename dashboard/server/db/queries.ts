@@ -309,6 +309,53 @@ export function deployHistory(): DeployRow[] {
   );
 }
 
+export type TermRow = {
+  term: string;
+  description: string | null;
+  createdBy: string | null;
+  createdAt: string | null;
+};
+
+/**
+ * 固有名詞辞書。正式表記そのものを覚えさせるもので、
+ * 「音が近い未知の誤変換」もLLMがここへ寄せる（db.py の terms）。
+ */
+export function terms(): TermRow[] {
+  return safeQuery(
+    (conn) =>
+      conn
+        .prepare<[], TermRow>(
+          `SELECT term, description, created_by AS createdBy,
+                  created_at AS createdAt
+             FROM terms ORDER BY created_at DESC`,
+        )
+        .all(),
+    [],
+  );
+}
+
+export type GlossaryRow = {
+  wrong: string;
+  correct: string | null;
+  createdBy: string | null;
+  createdAt: string | null;
+};
+
+/** 単語帳（誤→正の置換ペア）。固有名詞辞書と違い、決定論的に置換される。 */
+export function glossary(): GlossaryRow[] {
+  return safeQuery(
+    (conn) =>
+      conn
+        .prepare<[], GlossaryRow>(
+          `SELECT wrong, correct, created_by AS createdBy,
+                  created_at AS createdAt
+             FROM glossary ORDER BY created_at DESC`,
+        )
+        .all(),
+    [],
+  );
+}
+
 /** 自発ログの最大ID（SSEで「それ以降の新着」を取るためのカーソル） */
 export function maxActivityId(): number {
   return safeQuery(

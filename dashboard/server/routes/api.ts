@@ -17,10 +17,12 @@ import {
   counters,
   deployHistory,
   devJobs,
+  glossary,
   recentActivity,
   roadmapItems,
   rules,
   subLoops,
+  terms,
 } from "../db/queries.ts";
 import { avatarFor, letterAvatar } from "../ops/avatars.ts";
 import { logInventory, ROTATE_THRESHOLD_BYTES, tail } from "../ops/logs.ts";
@@ -187,3 +189,6 @@ api.get("/data/capabilities", (c) => c.json(capabilityRequests()));
 api.get("/data/roadmap", (c) => c.json(roadmapItems()));
 api.get("/data/dev-jobs", (c) => c.json({ jobs: devJobs(), deploys: deployHistory() }));
 api.get("/data/reminders", async (c) => c.json(await readReminders()));
+// 名前まわりは2つで1組（正式表記を覚える辞書と、決め打ちで直す単語帳）なので
+// 1タブ＝1リクエストにまとめる
+api.get("/data/dictionary", (c) => c.json({ terms: terms(), glossary: glossary() }));
