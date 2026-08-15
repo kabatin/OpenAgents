@@ -370,7 +370,12 @@ async def _collect_attachments(message):
     return out
 
 
-def resolve_runner_enabled(agent, unavailable=None):
+#: 「引数が省略された」ことを None と区別するための印。
+#: unavailable=None は「使える」を意味するので、省略の合図には使えない
+_LOOKUP = object()
+
+
+def resolve_runner_enabled(agent, unavailable=_LOOKUP):
     """runner経路を使うか。未指定なら「使えるならON」（既定ON）。
 
     明示的に true/false が書かれていればそれに従う。書かれていないときだけ、
@@ -378,12 +383,12 @@ def resolve_runner_enabled(agent, unavailable=None):
     他プロバイダでは invoke_claude が RuntimeError を投げて回答が落ちるため、
     既定ONにするには「使えない環境では静かに旧経路へ寄せる」がセットで要る。
 
-    unavailable: 使えない理由（None なら使える）。テスト用の差し込み口。
+    unavailable: 使えない理由。None＝使える。省略すると実環境を調べる。
     """
     explicit = agent.get("runner_enabled")
     if explicit is not None:
         return bool(explicit)
-    if unavailable is None:
+    if unavailable is _LOOKUP:
         unavailable = invoke_claude.check_available()
     return unavailable is None
 

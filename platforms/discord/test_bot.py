@@ -181,8 +181,23 @@ class RunnerDefaultTest(unittest.TestCase):
     そこが壊れると codex/custom 利用者は全メッセージで回答が落ちる。
     """
 
-    OK = None                     # check_available が None＝使える
+    OK = None                     # 使えない理由が無い＝使える
     NG = "Codex CLI では次の機能が使えません: Web検索"
+
+    def test_lookup_when_argument_omitted(self):
+        """引数を省いたときだけ実環境を調べる（None は「使える」の意味）。
+
+        ここを None で兼ねると、claude が入っている開発機では通り、
+        入っていないCIでは落ちる環境依存テストになる（実際に落とした）。
+        """
+        real = agent_runtime.invoke_claude.check_available
+        try:
+            agent_runtime.invoke_claude.check_available = lambda: self.NG
+            self.assertFalse(agent_runtime.resolve_runner_enabled({}))
+            agent_runtime.invoke_claude.check_available = lambda: None
+            self.assertTrue(agent_runtime.resolve_runner_enabled({}))
+        finally:
+            agent_runtime.invoke_claude.check_available = real
 
     def test_unset_defaults_on_when_available(self):
         self.assertTrue(agent_runtime.resolve_runner_enabled({}, self.OK))
