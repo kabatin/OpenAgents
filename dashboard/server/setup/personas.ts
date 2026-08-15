@@ -148,6 +148,44 @@ export async function write(area: AreaName, fileName: string, content: string): 
 }
 
 /**
+ * 自分用のファイルを消す。同梱のテンプレートは消せない。
+ * 「どのエージェントも使っていないこと」は呼び出し側が確かめる
+ * （config を触るのは store.ts の責務なので、ここは file だけを見る）。
+ */
+export async function remove(area: AreaName, fileName: string): Promise<void> {
+  const full = resolveSafe(area, fileName);
+  if (fileName.endsWith(".template.md") || fileName.endsWith(".example.md")) {
+    throw new PersonaError("同梱の見本は削除できません");
+  }
+  try {
+    await fsp.unlink(full);
+  } catch {
+    throw new PersonaError(`${fileName} を削除できませんでした`);
+  }
+}
+
+/**
+ * 見本から自分用のファイルを作るときの名前。
+ *
+ * `company.example.md` → `company.md`（READMEが案内している名前と揃える）。
+ * 既にあれば `company-2.md`, `company-3.md` と後ろに送る。
+ * 以前は常に `-copy` を付けていたが、`company-copy.md` は
+ * どこからも参照されない名前で、利用者が気づけなかった。
+ */
+export function nextCopyName(templateName: string, taken: Set<string>): string {
+  const base = templateName.replace(/\.(template|example)\.md$/, "").replace(/\.md$/, "");
+  if (!taken.has(`${base}.md`)) return `${base}.md`;
+  for (let n = 2; n < 100; n += 1) {
+    if (!taken.has(`${base}-${n}.md`)) return `${base}-${n}.md`;
+  }
+  throw new PersonaError("同じ名前のファイルが多すぎます");
+}
+
+export function copyName(area: AreaName, templateName: string): string {
+  return nextCopyName(templateName, new Set(list(area).map((f) => f.fileName)));
+}
+
+/**
  * テンプレートから新しい性格ファイルを作る。
  * `{{PLACEHOLDER}}` を置き換えてから保存する。
  */

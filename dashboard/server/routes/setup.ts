@@ -23,6 +23,7 @@ import {
   patchConfig,
   readConfig,
   removeAgent,
+  togglePersonaFile,
 } from "../config/store.ts";
 import { getPath } from "../config/objpath.ts";
 import { restartService } from "../ops/status.ts";
@@ -156,9 +157,98 @@ setup.post("/llm/test", async (c) => {
 
 // --- 性格 -------------------------------------------------------------------
 
-setup.get("/personas", (c) =>
-  c.json({ personas: personas.list("personas"), knowledge: personas.list("knowledge") }),
-);
+/** relPath → 使っているエージェント。画面の「使用中」表示と削除ガードに使う。 */
+async function usageMap(): Promise<Record<string, { id: string; name: string }[]>> {
+  const config = await readConfig();
+  const agents = (getPath(config, "agents") ?? []) as {
+    id?: string;
+    name?: string;
+    persona_files?: string[];
+  }[];
+  const map: Record<string, { id: string; name: string }[]> = {};
+  for (const a of agents) {
+    for (const rel of a.persona_files ?? []) {
+      // config には `../personas/x.md` のような相対も書けるので末尾2つで見る
+      const key = rel.split("/").slice(-2).join("/");
+      (map[key] ??= []).push({ id: String(a.id ?? ""), name: String(a.name ?? a.id ?? "") });
+    }
+  }
+  return map;
+}
+
+function withUsage(
+  files: personas.PersonaFile[],
+  usage: Record<string, { id: string; name: string }[]>,
+) {
+  return files.map((f) => ({ ...f, usedBy: usage[f.relPath] ?? [] }));
+}
+
+setup.get("/personas", async (c) => {
+  const usage = await usageMap();
+  return c.json({
+    personas: withUsage(personas.list("personas"), usage),
+    knowledge: withUsage(personas.list("knowledge"), usage),
+    agents: ((getPath(await readConfig(), "agents") ?? []) as { id?: string; name?: string }[]).map(
+      (a) => ({ id: String(a.id ?? ""), name: String(a.name ?? a.id ?? "") }),
+    ),
+  });
+});
+
+/** 見本をコピーして自分用のファイルを作る（名前はサーバーが決める）。 */
+setup.post("/personas/copy", async (c) => {
+  const { area, fileName } = await body(c);
+  try {
+    const a = (area ?? "personas") as personas.AreaName;
+    const newName = personas.copyName(a, fileName ?? "");
+    await personas.write(a, newName, personas.read(a, fileName ?? ""));
+    return c.json({ ok: true, fileName: newName, relPath: `${a}/${newName}` });
+  } catch (e) {
+    return c.json(fail(e), 400);
+  }
+});
+
+/** このファイルをエージェントに読ませる / 読ませないを切り替える。 */
+setup.post("/personas/use", async (c) => {
+  const raw = (await c.req.json().catch(() => ({}))) as {
+    agentId?: string;
+    relPath?: string;
+    use?: boolean;
+  };
+  try {
+    const result = await togglePersonaFile(
+      raw.agentId ?? "",
+      raw.relPath ?? "",
+      raw.use === true,
+    );
+    return c.json({ ok: true, backupPath: result.backupPath });
+  } catch (e) {
+    return c.json(fail(e), 400);
+  }
+});
+
+setup.post("/personas/delete", async (c) => {
+  const { area, fileName } = await body(c);
+  try {
+    const a = (area ?? "personas") as personas.AreaName;
+    const usage = await usageMap();
+    const users = usage[`${a}/${fileName}`] ?? [];
+    if (users.length > 0) {
+      // 使用中のまま消すと、次の起動で読めないファイルを指したままになる
+      return c.json(
+        {
+          message:
+            `${users.map((u) => u.name).join("・")} が使っています。` +
+            "先に「使う」をオフにしてください",
+        },
+        400,
+      );
+    }
+    await personas.remove(a, fileName ?? "");
+    return c.json({ ok: true });
+  } catch (e) {
+    return c.json(fail(e), 400);
+  }
+});
 
 setup.get("/personas/:area/:file", (c) => {
   try {

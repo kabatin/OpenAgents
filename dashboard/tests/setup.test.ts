@@ -12,7 +12,13 @@ import { describe, expect, it } from "vitest";
 
 import { appendTo, getPath, removeFrom, setPath } from "../server/config/objpath.ts";
 import { maskSecret } from "../server/config/catalog.ts";
-import { parseFrontMatter, PersonaError, resolveSafe } from "../server/setup/personas.ts";
+import {
+  nextCopyName,
+  parseFrontMatter,
+  PersonaError,
+  resolveSafe,
+} from "../server/setup/personas.ts";
+import { nextPersonaFiles } from "../server/config/store.ts";
 import { inviteUrl } from "../server/setup/discord.ts";
 import { PERSONAS_DIR } from "../server/paths.ts";
 
@@ -114,6 +120,51 @@ describe("招待URL", () => {
     expect(perms & (1n << 3n)).toBe(0n);
     // メッセージ送信は含む
     expect(perms & (1n << 11n)).not.toBe(0n);
+  });
+});
+
+describe("見本をコピーするときの名前", () => {
+  it("見本の接尾辞を落として素の名前にする", () => {
+    // `company-copy.md` はどこからも参照されない名前で、利用者が気づけなかった
+    expect(nextCopyName("company.example.md", new Set())).toBe("company.md");
+    expect(nextCopyName("assistant.template.md", new Set())).toBe("assistant.md");
+  });
+
+  it("既にあれば連番で後ろに送る", () => {
+    const taken = new Set(["company.md", "company-2.md"]);
+    expect(nextCopyName("company.example.md", taken)).toBe("company-3.md");
+  });
+});
+
+describe("読ませるファイルの付け外し", () => {
+  const files = ["personas/agent1.md", "knowledge/company.md"];
+
+  it("付けると末尾に足される（既存の並びは崩さない）", () => {
+    expect(nextPersonaFiles(files, "knowledge/user.md", true)).toEqual([
+      "personas/agent1.md",
+      "knowledge/company.md",
+      "knowledge/user.md",
+    ]);
+  });
+
+  it("二重に付けても増えない", () => {
+    expect(nextPersonaFiles(files, "knowledge/company.md", true)).toEqual([
+      "personas/agent1.md",
+      "knowledge/company.md",
+    ]);
+  });
+
+  it("外すと消える", () => {
+    expect(nextPersonaFiles(files, "knowledge/company.md", false)).toEqual([
+      "personas/agent1.md",
+    ]);
+  });
+
+  it("相対の書き方が違っても同じファイルとして扱う", () => {
+    // config には `../knowledge/company.md` の形も書ける
+    expect(nextPersonaFiles(["../knowledge/company.md"], "knowledge/company.md", false)).toEqual(
+      [],
+    );
   });
 });
 

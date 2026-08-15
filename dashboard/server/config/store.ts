@@ -301,6 +301,59 @@ async function addAgentLocked(agent: NewAgent): Promise<WriteResult> {
 }
 
 /**
+ * エージェントが読むファイル（性格＋前提知識）の付け外し。
+ *
+ * これが画面から動かせないと、前提知識は「編集はできるが絶対に読まれない」
+ * 機能になる（persona_files に載ったものだけが読まれるため）。
+ */
+export function nextPersonaFiles(files: string[], relPath: string, use: boolean): string[] {
+  // config には `../personas/x.md` のような相対も書けるので、末尾2つで同一視する
+  const key = (p: string) => p.split("/").slice(-2).join("/");
+  const without = files.filter((f) => key(f) !== key(relPath));
+  // 付けるときは末尾に足す（読み込み順＝連結順なので、既存の並びは崩さない）
+  return use ? [...without, relPath] : without;
+}
+
+export function togglePersonaFile(
+  agentId: string,
+  relPath: string,
+  use: boolean,
+): Promise<WriteResult> {
+  return serialized(() => togglePersonaFileLocked(agentId, relPath, use));
+}
+
+async function togglePersonaFileLocked(
+  agentId: string,
+  relPath: string,
+  use: boolean,
+): Promise<WriteResult> {
+  const current = await readConfig();
+  const agents = (getPath(current, "agents") ?? []) as { id?: string }[];
+  const index = agents.findIndex((a) => a.id === agentId);
+  if (index === -1) throw new ConfigError(`エージェント「${agentId}」が見つかりません`);
+
+  const files = (getPath(current, `agents.${index}.persona_files`) ?? []) as string[];
+  const nextFiles = nextPersonaFiles(files, relPath, use);
+  if (nextFiles.length === 0) {
+    throw new ConfigError("最後の1枚は外せません。先に別のファイルを使う設定にしてください");
+  }
+  const next = applyPatches(current, [
+    { path: `agents.${index}.persona_files`, value: nextFiles },
+  ]);
+  const issues = checkInvariants(next);
+  if (issues.length > 0) {
+    throw new ConfigError("この内容ではBOTが起動しなくなります", issues);
+  }
+  const backupPath = await backup(CONFIG_PATH);
+  await writeAtomic(CONFIG_PATH, next);
+  return {
+    backupPath,
+    applied: [{ path: `agents.${index}.persona_files`, value: nextFiles }],
+    config: next,
+  };
+}
+
+/**
  * エージェントを1体消す。
  * 会話の記録担当は消せない（過去ログの取り込みが止まるため）。
  */
