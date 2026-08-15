@@ -20,7 +20,12 @@ import {
 } from "../server/setup/personas.ts";
 import { nextPersonaFiles } from "../server/config/store.ts";
 import { CONFIRM_WORD, confirmationOk, stampFor, targetsFor } from "../server/setup/reset.ts";
-import { intentsFromFlags, intentWarning, inviteUrl } from "../server/setup/discord.ts";
+import {
+  APPLICATION_FLAGS,
+  intentsFromFlags,
+  intentWarning,
+  inviteUrl,
+} from "../server/setup/discord.ts";
 import { PERSONAS_DIR } from "../server/paths.ts";
 
 describe("性格ファイルの書き込み先を閉じ込める", () => {
@@ -157,10 +162,13 @@ describe("初期化（危険な操作）", () => {
 });
 
 describe("必要な Privileged Intent の判定", () => {
-  const MSG = 1 << 18;
-  const MSG_LIMITED = 1 << 19;
-  const MEMBERS = 1 << 16;
-  const MEMBERS_LIMITED = 1 << 17;
+  // 値は discord.py の ApplicationFlags と突き合わせて確認したもの。
+  // 直書きするとビットを1つずらしても緑のまま通ってしまうので、
+  // 実装と同じ定数を参照する（最初にそれで偽陽性を出した）
+  const MSG = APPLICATION_FLAGS.MESSAGE_CONTENT;
+  const MSG_LIMITED = APPLICATION_FLAGS.MESSAGE_CONTENT_LIMITED;
+  const MEMBERS = APPLICATION_FLAGS.GUILD_MEMBERS;
+  const MEMBERS_LIMITED = APPLICATION_FLAGS.GUILD_MEMBERS_LIMITED;
 
   it("両方立っていれば警告なし", () => {
     const state = intentsFromFlags(MSG | MEMBERS);
@@ -197,9 +205,28 @@ describe("必要な Privileged Intent の判定", () => {
     expect(w).toContain("SERVER MEMBERS INTENT");
   });
 
-  it("無関係なフラグは判定に影響しない", () => {
-    // 1 << 14/15 は PRESENCE。このBOTは使わない
-    expect(intentsFromFlags((1 << 14) | (1 << 15))).toEqual({
+  it("ビット位置が実際のDiscordの定義と一致している", () => {
+    // 1つずらすと「有効にしているのに無効」と言う偽陽性になる。
+    // 隣は intent ではない別のフラグなので、値そのものを固定する
+    expect(MEMBERS).toBe(16384); //  1<<14
+    expect(MEMBERS_LIMITED).toBe(32768); //  1<<15
+    expect(MSG).toBe(262144); //  1<<18
+    expect(MSG_LIMITED).toBe(524288); //  1<<19
+  });
+
+  it("紛らわしい隣のフラグを intent と取り違えない", () => {
+    // 1<<16 は VERIFICATION_PENDING_GUILD_LIMIT、1<<17 は EMBEDDED。
+    // ここを SERVER MEMBERS と誤認したのが最初の不具合
+    const neighbours =
+      APPLICATION_FLAGS.VERIFICATION_PENDING_GUILD_LIMIT | APPLICATION_FLAGS.EMBEDDED;
+    expect(intentsFromFlags(neighbours)).toEqual({
+      messageContent: false,
+      serverMembers: false,
+    });
+  });
+
+  it("PRESENCE だけ立っていても intent 有効とは見なさない", () => {
+    expect(intentsFromFlags((1 << 12) | (1 << 13))).toEqual({
       messageContent: false,
       serverMembers: false,
     });

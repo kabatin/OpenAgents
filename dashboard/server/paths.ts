@@ -47,6 +47,9 @@ export const DEV_HEARTBEAT_PATH = path.join(HEARTBEAT_DIR, "devbot");
 /** ダッシュボード自身の書き込み先（gitignore対象） */
 export const BACKUPS_DIR = path.join(DASHBOARD_DIR, "backups");
 export const APPLIED_DIR = path.join(DASHBOARD_DIR, "applied");
+/** 取得し直せるもの置き場（アイコン等）。消えても機能に影響しない */
+export const CACHE_DIR = path.join(DASHBOARD_DIR, "cache");
+export const AVATAR_CACHE_DIR = path.join(CACHE_DIR, "avatars");
 export const WEB_DIST_DIR = path.join(DASHBOARD_DIR, "dist");
 
 /** launchctl のドメインターゲット（gui/<uid>）。 */

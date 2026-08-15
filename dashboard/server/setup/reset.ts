@@ -19,8 +19,10 @@ import path from "node:path";
 
 import { closeDb } from "../db/ro.ts";
 import {
+  APPLIED_DIR,
   ARCHIVE_DB_PATH,
   BACKUPS_DIR,
+  CACHE_DIR,
   CONFIG_PATH,
   HEARTBEAT_DIR,
   LOGS_DIR,
@@ -105,6 +107,17 @@ export async function reset(
   const moved: string[] = [];
 
   await moveAside(CONFIG_PATH, path.join(BACKUPS_DIR, `config.json.${stamp}.json`), moved);
+
+  // 「最後にBOTを起動したときの設定」の控えと、取り直せるキャッシュ。
+  // 消した config との差分を取り続けるため、残すと**未適用の変更が大量に
+  // 出て、押すとエラーになる**（実際に踏んだ）。次の読み込みで作り直される
+  for (const dir of [APPLIED_DIR, CACHE_DIR]) {
+    if (await exists(dir)) {
+      await fsp.rm(dir, { recursive: true, force: true });
+      moved.push(`${path.basename(dir)}/ を削除`);
+    }
+  }
+
   if (scope === "config") return { moved };
 
   // アーカイブは同じ場所にリネームで残す（バックアップだと気づける名前で）

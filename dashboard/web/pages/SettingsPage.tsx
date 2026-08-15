@@ -18,26 +18,22 @@ function DangerZone() {
   const [typed, setTyped] = useState("");
   const [busy, setBusy] = useState<"config" | "all" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState("");
 
   const run = async (scope: "config" | "all") => {
     const label = scope === "all" ? "会話の記録も含めて全部" : "設定だけ";
-    if (!window.confirm(`${label}初期化します。よろしいですか？`)) return;
+    if (!window.confirm(`${label}初期化して、はじめの設定画面に戻ります。よろしいですか？`)) {
+      return;
+    }
     setBusy(scope);
     setError(null);
     try {
-      const got = await api.post<{ moved: string[] }>("/setup/reset", {
-        scope,
-        confirm: typed,
-      });
-      setDone(
-        `初期化しました（${got.moved.length}件を退避）。` +
-          "ブラウザを再読み込みすると、はじめの設定に戻ります。",
-      );
+      await api.post<{ moved: string[] }>("/setup/reset", { scope, confirm: typed });
       setTyped("");
+      // 画面を持ち越さず作り直す。設定が消えた状態のまま今の画面に留まると、
+      // 消えた設定との差分が「未適用の変更」として出てしまう
+      window.location.assign("/");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-    } finally {
       setBusy(null);
     }
   };
@@ -90,7 +86,6 @@ function DangerZone() {
         </div>
 
         {error !== null && <ErrorNote message={error} />}
-        {done !== "" && <p className="text-2xs text-accent-deep">{done}</p>}
       </div>
     </Card>
   );

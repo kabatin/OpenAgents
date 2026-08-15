@@ -12,11 +12,10 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 
-import { DASHBOARD_DIR, ARCHIVE_DIR } from "../paths.ts";
+import { AVATAR_CACHE_DIR, ARCHIVE_DIR } from "../paths.ts";
 import { getPath, type Json } from "../config/objpath.ts";
 import { readConfig } from "../config/store.ts";
 
-const CACHE_DIR = path.join(DASHBOARD_DIR, "cache", "avatars");
 const TTL_MS = 24 * 60 * 60 * 1000;
 const USER_AGENT = "DiscordBot (local-dashboard, 1.0)";
 
@@ -24,7 +23,7 @@ type Meta = { hash: string | null; userId: string; fetchedAtMs: number };
 
 async function readMeta(id: string): Promise<Meta | null> {
   try {
-    return JSON.parse(await fsp.readFile(path.join(CACHE_DIR, `${id}.json`), "utf8")) as Meta;
+    return JSON.parse(await fsp.readFile(path.join(AVATAR_CACHE_DIR, `${id}.json`), "utf8")) as Meta;
   } catch {
     return null;
   }
@@ -69,10 +68,10 @@ async function fetchFromDiscord(agentId: string): Promise<Buffer | null> {
     return null;
   }
   const buf = Buffer.from(await img.arrayBuffer());
-  await fsp.mkdir(CACHE_DIR, { recursive: true });
-  await fsp.writeFile(path.join(CACHE_DIR, `${agentId}.png`), buf);
+  await fsp.mkdir(AVATAR_CACHE_DIR, { recursive: true });
+  await fsp.writeFile(path.join(AVATAR_CACHE_DIR, `${agentId}.png`), buf);
   await fsp.writeFile(
-    path.join(CACHE_DIR, `${agentId}.json`),
+    path.join(AVATAR_CACHE_DIR, `${agentId}.json`),
     JSON.stringify({ hash: user.avatar, userId: user.id, fetchedAtMs: Date.now() } satisfies Meta),
   );
   return buf;
@@ -96,7 +95,7 @@ async function localPersonaAvatar(agentId: string): Promise<Buffer | null> {
 export async function avatarFor(agentId: string): Promise<Buffer | null> {
   if (!/^[a-z0-9_-]{1,32}$/i.test(agentId)) return null;
 
-  const cached = path.join(CACHE_DIR, `${agentId}.png`);
+  const cached = path.join(AVATAR_CACHE_DIR, `${agentId}.png`);
   const meta = await readMeta(agentId);
   const fresh = meta !== null && Date.now() - meta.fetchedAtMs < TTL_MS;
 

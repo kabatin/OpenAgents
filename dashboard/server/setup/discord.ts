@@ -169,6 +169,30 @@ export async function postMessage(
 }
 
 /**
+ * Discord のアプリケーションフラグ（ビット位置）。
+ *
+ * **隣り合うビットが全くの別物**なので、位置を1つずらすと「有効にしているのに
+ * 無効と言われる」偽陽性になる（実際にやらかした）。値は discord.py の
+ * ApplicationFlags と同じ。並びを崩さないよう、使わないものも残してある。
+ *
+ *   1<<12 GATEWAY_PRESENCE                 1<<16 VERIFICATION_PENDING_GUILD_LIMIT
+ *   1<<13 GATEWAY_PRESENCE_LIMITED         1<<17 EMBEDDED
+ *   1<<14 GATEWAY_GUILD_MEMBERS            1<<18 GATEWAY_MESSAGE_CONTENT
+ *   1<<15 GATEWAY_GUILD_MEMBERS_LIMITED    1<<19 GATEWAY_MESSAGE_CONTENT_LIMITED
+ *
+ * `..._LIMITED` は「100サーバー未満なら使える」状態で、この用途では有効と同じ。
+ */
+export const APPLICATION_FLAGS = {
+  GUILD_MEMBERS: 1 << 14,
+  GUILD_MEMBERS_LIMITED: 1 << 15,
+  MESSAGE_CONTENT: 1 << 18,
+  MESSAGE_CONTENT_LIMITED: 1 << 19,
+  /** 紛らわしい隣人。intent ではない（取り違え防止のため明示しておく） */
+  VERIFICATION_PENDING_GUILD_LIMIT: 1 << 16,
+  EMBEDDED: 1 << 17,
+} as const;
+
+/**
  * アプリ情報の flags から、必要な2つの Privileged Intent の状態を読む（純粋関数）。
  *
  * どちらも agent_runtime.py が要求している。片方でも欠けると動かないのに
@@ -183,10 +207,12 @@ export function intentsFromFlags(flags: number): {
   serverMembers: boolean;
 } {
   return {
-    // 1 << 18: GATEWAY_MESSAGE_CONTENT / 1 << 19: ..._LIMITED
-    messageContent: (flags & (1 << 18)) !== 0 || (flags & (1 << 19)) !== 0,
-    // 1 << 16: GATEWAY_GUILD_MEMBERS / 1 << 17: ..._LIMITED
-    serverMembers: (flags & (1 << 16)) !== 0 || (flags & (1 << 17)) !== 0,
+    messageContent:
+      (flags & APPLICATION_FLAGS.MESSAGE_CONTENT) !== 0 ||
+      (flags & APPLICATION_FLAGS.MESSAGE_CONTENT_LIMITED) !== 0,
+    serverMembers:
+      (flags & APPLICATION_FLAGS.GUILD_MEMBERS) !== 0 ||
+      (flags & APPLICATION_FLAGS.GUILD_MEMBERS_LIMITED) !== 0,
   };
 }
 
