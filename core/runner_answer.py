@@ -70,7 +70,7 @@ def build_prompt(question, convo, summary, context, att_block,
 def answer_question(db_path, guild_id, question, model=search.DEFAULT_MODEL,
                     exclude_channel_id=None, history=None, agent=None,
                     attachments=None, references=None, resume=None,
-                    session_cwd=None, extra_blocks=None):
+                    session_cwd=None, extra_blocks=None, recent_from_id=None):
     """質問→キーワード抽出→検索→回答生成（runner経由）。
 
     引数・戻り値の契約は search.answer_question と同一
@@ -129,7 +129,8 @@ def answer_question(db_path, guild_id, question, model=search.DEFAULT_MODEL,
                 p, model=model, timeout=120).text,
             syn_note=syn)
         rows = search.search_messages(db_path, keywords,
-                                      exclude_channel_id=exclude_channel_id)
+                                      exclude_channel_id=exclude_channel_id,
+                                      recent_from_id=recent_from_id)
 
     if not rows:
         # 社内ログにヒット無し → キャラとして普通に回答

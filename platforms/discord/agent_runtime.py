@@ -377,6 +377,7 @@ async def fetch_history(message):
         async for m in message.channel.history(limit=CONTEXT_HISTORY_LIMIT,
                                                before=message):
             items.append({
+                "id": m.id,
                 "author": m.author.display_name,
                 "content": (m.clean_content or "").strip(),
                 "is_bot": m.author.bot,

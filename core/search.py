@@ -186,8 +186,19 @@ def _fts_search(conn, keyword, limit):
 
 
 def search_messages(db_path, keywords, limit=24, per_keyword=12,
-                    exclude_channel_id=None):
-    """複数キーワードで検索し、ヒット回数とbm25でスコアリングして上位を返す。"""
+                    exclude_channel_id=None, recent_from_id=None):
+    """複数キーワードで検索し、ヒット回数とbm25でスコアリングして上位を返す。
+
+    exclude_channel_id: 応答中のチャンネル。ここの投稿は【直近の会話】として
+        別途プロンプトに載るため、検索結果と二重に並べない。
+    recent_from_id: そのプロンプトに載っている最古のメッセージID。指定すると
+        **除外はここから新しいぶんだけ**になり、同じchの古いログは検索対象に残る。
+        省略すると ch 全体を除外する（＝古い挙動）。
+
+    省略時にch全体を落とす旧仕様は、1チャンネルで使っていると
+    アーカイブの全件が消えて検索が一度もヒットしない。呼び出し側は
+    recent_from_id を渡すこと。
+    """
     scores = {}
     # sqlite3.connect の with はトランザクション管理であって**接続を閉じない**。
     # mac/Linux では GC が隠すが、Windows では開いたハンドルがファイル削除を
@@ -237,8 +248,10 @@ def search_messages(db_path, keywords, limit=24, per_keyword=12,
                 LEFT JOIN channels c ON c.id=m.channel_id
                 LEFT JOIN users u ON u.id=m.author_id
                 WHERE m.id IN ({placeholders})
-                  AND (? IS NULL OR m.channel_id != ?)""",
-            ids + [exclude_channel_id, exclude_channel_id],
+                  AND NOT (? IS NOT NULL AND m.channel_id = ?
+                           AND (? IS NULL OR m.id >= ?))""",
+            ids + [exclude_channel_id, exclude_channel_id,
+                   recent_from_id, recent_from_id],
         ).fetchall()
 
     by_id = {r[0]: r for r in rows}
@@ -335,7 +348,8 @@ def _build_system(template, agent):
 
 def answer_question(db_path, guild_id, question, model=DEFAULT_MODEL,
                     exclude_channel_id=None, history=None, agent=None,
-                    attachments=None, references=None, extra_blocks=None):
+                    attachments=None, references=None, extra_blocks=None,
+                    recent_from_id=None):
     """質問→キーワード抽出→検索→回答生成 を一気通貫で行う。
 
     history: 質問chの直近やりとり [{author, content, is_bot}]（古い順）。
@@ -377,7 +391,8 @@ def answer_question(db_path, guild_id, question, model=DEFAULT_MODEL,
         keywords = extract_keywords(question, model=model, history=convo,
                                     syn_note=syn)
         rows = search_messages(db_path, keywords,
-                               exclude_channel_id=exclude_channel_id)
+                               exclude_channel_id=exclude_channel_id,
+                               recent_from_id=recent_from_id)
     if not rows:
         # 社内ログにヒット無し → キャラとして普通に回答（雑談・一般質問・作業依頼）
         system = _build_system(GENERAL_SYSTEM_TMPL, agent)

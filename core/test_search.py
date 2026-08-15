@@ -7,6 +7,7 @@ import tempfile
 import unittest
 
 from core import attachments
+from core import db
 from core import llm
 from core import search
 
@@ -174,6 +175,55 @@ class AnswerQuestionAttachmentTest(unittest.TestCase):
         calls, _ = self._run("こんにちは", None)
         self.assertNotIn("【添付ファイル】", calls["prompts"][0])
         self.assertNotIn("allowed_tools", calls["kwargs"][0])
+
+
+class SearchExclusionTest(unittest.TestCase):
+    """応答中chの扱い。
+
+    ch丸ごと除外していた頃は、1チャンネル運用だとアーカイブの全件が
+    消えて検索が一度もヒットしなかった（実際の不具合）。除外は
+    「プロンプトに載っている直近ぶん」だけに限る。
+    """
+
+    HOME = 100
+    OTHER = 200
+
+    def setUp(self):
+        self.tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        self.tmp.close()
+        db.init_db(self.tmp.name)
+        with db.connect(self.tmp.name) as conn:
+            for mid, ch in ((1, self.HOME), (2, self.HOME),
+                            (3, self.HOME), (4, self.OTHER)):
+                # FTS索引は insert_message が張るので、生INSERTで済ませない
+                db.insert_message(conn, id=mid, channel_id=ch, author_id=1,
+                                  content="納品スケジュールの話",
+                                  created_at="2026-08-10T12:00")
+
+    def tearDown(self):
+        os.unlink(self.tmp.name)
+
+    def _find(self, **kw):
+        return {r["id"] for r in search.search_messages(
+            self.tmp.name, ["納品スケジュール"], **kw)}
+
+    def test_no_exclusion_returns_all(self):
+        self.assertEqual(self._find(), {1, 2, 3, 4})
+
+    def test_recent_only_keeps_older_same_channel(self):
+        # id>=3 が【直近の会話】としてプロンプトに載っている想定。
+        # 同じchでも 1,2 は検索に残る（ここが以前は消えていた）
+        self.assertEqual(
+            self._find(exclude_channel_id=self.HOME, recent_from_id=3),
+            {1, 2, 4})
+
+    def test_recent_from_id_does_not_touch_other_channels(self):
+        self.assertIn(4, self._find(exclude_channel_id=self.HOME,
+                                    recent_from_id=1))
+
+    def test_without_recent_from_id_excludes_whole_channel(self):
+        # 旧挙動（呼び出し側が未指定のとき）は保つ
+        self.assertEqual(self._find(exclude_channel_id=self.HOME), {4})
 
 
 class ConfidenceNoteTest(unittest.TestCase):

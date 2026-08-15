@@ -424,6 +424,11 @@ class AgentClient(SkillHooksMixin, MarkerActionsMixin, AgentLoopsMixin,
             if atts:
                 print(f"[{self.agent['id']}] attachments: "
                       f"saved={len(saved)} skipped={len(skipped)}")
+            # 検索から外す範囲の下限。【直近の会話】としてプロンプトに載る
+            # ぶんだけを外し、同じchの**それより古いログは検索に残す**。
+            # （ch丸ごと外すと、1ch運用ではアーカイブが全部消える）
+            hist_ids = [h["id"] for h in (history or []) if h.get("id")]
+            recent_from_id = min(hist_ids) if hist_ids else message.id
             # 発言＋直前の会話（キーワードゲートと事前注入の判定に使う）
             convo_tail = " ".join(
                 (h.get("content") or "") for h in (history or [])[-5:])
@@ -475,6 +480,7 @@ class AgentClient(SkillHooksMixin, MarkerActionsMixin, AgentLoopsMixin,
                                     message, correction=correction),
                                 attachments=att_ctx, references=references,
                                 extra_blocks=extra_blocks,
+                                recent_from_id=recent_from_id,
                                 **extra,
                             )
                         except RuntimeError:
@@ -496,6 +502,7 @@ class AgentClient(SkillHooksMixin, MarkerActionsMixin, AgentLoopsMixin,
                                     message, correction=correction),
                                 attachments=att_ctx, references=references,
                                 extra_blocks=extra_blocks,
+                                recent_from_id=recent_from_id,
                                 **extra,
                             )
                 if use_session and result.get("session_id"):

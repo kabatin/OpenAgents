@@ -181,9 +181,11 @@ class _FakeAuthor:
 
 
 class _FakeMsg:
-    def __init__(self, name, content, is_bot):
+    def __init__(self, name, content, is_bot, id=0):
         self.author = _FakeAuthor(name, is_bot)
         self.clean_content = content
+        # 検索から外す範囲の下限に使う（bot.py が最古のIDを拾う）
+        self.id = id
 
 
 class _FakeChannel:
@@ -207,11 +209,11 @@ class _FakeChannel:
 class FetchHistoryTest(unittest.IsolatedAsyncioTestCase):
     async def test_uses_context_limit_and_orders_oldest_first(self):
         channel = _FakeChannel([
-            _FakeMsg("アーカイブ担当", " こんばんは ", True),   # 最新
-            _FakeMsg("先輩", None, False),             # 空content（画像のみ等）
-            _FakeMsg("デザイン担当", "図できたよ", True),       # 最古
+            _FakeMsg("アーカイブ担当", " こんばんは ", True, id=30),   # 最新
+            _FakeMsg("先輩", None, False, id=20),      # 空content（画像のみ等）
+            _FakeMsg("デザイン担当", "図できたよ", True, id=10),       # 最古
         ])
-        trigger = _FakeMsg("先輩", "続きは？", False)
+        trigger = _FakeMsg("先輩", "続きは？", False, id=40)
         trigger.channel = channel
 
         items = await agent_runtime.fetch_history(trigger)
@@ -221,11 +223,14 @@ class FetchHistoryTest(unittest.IsolatedAsyncioTestCase):
                          agent_runtime.CONTEXT_HISTORY_LIMIT)
         # 自分の発言を含めないよう before=トリガー を渡す
         self.assertIs(channel.calls[0]["before"], trigger)
-        # 古い順・content strip・空contentも保持（ループガードに必要）
+        # 古い順・content strip・空contentも保持（ループガードに必要）。
+        # id は検索の除外範囲を決めるので落とさない
         self.assertEqual(items, [
-            {"author": "デザイン担当", "content": "図できたよ", "is_bot": True},
-            {"author": "先輩", "content": "", "is_bot": False},
-            {"author": "アーカイブ担当", "content": "こんばんは", "is_bot": True},
+            {"id": 10, "author": "デザイン担当", "content": "図できたよ",
+             "is_bot": True},
+            {"id": 20, "author": "先輩", "content": "", "is_bot": False},
+            {"id": 30, "author": "アーカイブ担当", "content": "こんばんは",
+             "is_bot": True},
         ])
 
     async def test_history_failure_returns_empty(self):
