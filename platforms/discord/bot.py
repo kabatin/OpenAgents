@@ -154,8 +154,12 @@ class AgentClient(SkillHooksMixin, MarkerActionsMixin, AgentLoopsMixin,
         # 投稿セルフレビュー（RM#14・シャドー計測）の設定
         self.self_review_cfg = agent.get("self_review") or {}
         # True: 回答生成を runner/invoke_claude 経由にする（エージェントv2
-        # Phase 0）。フラグを外せば旧経路（search.answer_question）に即戻る
-        self.runner_enabled = bool(agent.get("runner_enabled"))
+        # Phase 0）。フラグを外せば旧経路（search.answer_question）に即戻る。
+        # **未指定は「使えるならON」**: この経路は claude CLI 専用で、
+        # 他プロバイダでは invoke_claude が RuntimeError を投げて回答自体が
+        # 落ちる。既定で有効にする以上、使えない環境では黙って旧経路に寄せる
+        # （明示 true のときは従来どおり理由を出して失敗させる）
+        self.runner_enabled = agent_runtime.resolve_runner_enabled(agent)
         # create_task はイベントループが弱参照しか持たないため、
         # 参照を保持しないと実行途中でGC回収され得る（要約更新タスク用）
         self._bg_tasks = set()
@@ -457,7 +461,8 @@ class AgentClient(SkillHooksMixin, MarkerActionsMixin, AgentLoopsMixin,
             # 会話セッションの持続（resume方式カナリア）: runner経路＋
             # 添付なしターンのみ。ch単位ロックで同一セッションの同時resumeを防ぐ
             sess_cfg = self.agent.get("session_resume") or {}
-            use_session = (sess_cfg.get("enabled") and self.runner_enabled
+            use_session = (agent_runtime.resolve_session_resume(
+                               self.agent, self.runner_enabled)
                            and not (att_ctx is not None
                                     and att_ctx.has_supported))
             extra = {}

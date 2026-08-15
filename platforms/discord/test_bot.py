@@ -174,6 +174,43 @@ class ContextHistoryWindowTest(unittest.TestCase):
         self.assertGreaterEqual(agent_runtime.CONTEXT_HISTORY_LIMIT, 20)
 
 
+class RunnerDefaultTest(unittest.TestCase):
+    """runner経路とセッション継続の既定ON（未指定のときの解決）。
+
+    既定ONにできるのは「使えない環境では静かに旧経路へ寄せる」からで、
+    そこが壊れると codex/custom 利用者は全メッセージで回答が落ちる。
+    """
+
+    OK = None                     # check_available が None＝使える
+    NG = "Codex CLI では次の機能が使えません: Web検索"
+
+    def test_unset_defaults_on_when_available(self):
+        self.assertTrue(agent_runtime.resolve_runner_enabled({}, self.OK))
+
+    def test_unset_falls_back_when_unavailable(self):
+        self.assertFalse(agent_runtime.resolve_runner_enabled({}, self.NG))
+
+    def test_explicit_true_is_kept_even_if_unavailable(self):
+        # 明示指定は尊重する（使えない理由は invoke_claude が出す）
+        self.assertTrue(agent_runtime.resolve_runner_enabled(
+            {"runner_enabled": True}, self.NG))
+
+    def test_explicit_false_is_kept_even_if_available(self):
+        self.assertFalse(agent_runtime.resolve_runner_enabled(
+            {"runner_enabled": False}, self.OK))
+
+    def test_session_resume_defaults_on_with_runner(self):
+        self.assertTrue(agent_runtime.resolve_session_resume({}, True))
+
+    def test_session_resume_off_without_runner(self):
+        # runner が旧経路に落ちたら resume も自動で無効
+        self.assertFalse(agent_runtime.resolve_session_resume({}, False))
+
+    def test_session_resume_explicit_false(self):
+        self.assertFalse(agent_runtime.resolve_session_resume(
+            {"session_resume": {"enabled": False}}, True))
+
+
 class _FakeAuthor:
     def __init__(self, name, is_bot):
         self.display_name = name

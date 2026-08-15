@@ -22,6 +22,7 @@ import discord
 
 from core import config as app_config
 from core import db
+from core import invoke_claude
 from core import paths
 from core import integrations
 from core import plugins
@@ -367,6 +368,34 @@ async def _collect_attachments(message):
         seen.add(att.id)
         out.append(att)
     return out
+
+
+def resolve_runner_enabled(agent, unavailable=None):
+    """runner経路を使うか。未指定なら「使えるならON」（既定ON）。
+
+    明示的に true/false が書かれていればそれに従う。書かれていないときだけ、
+    claude CLI が使える状態かで決める。runner は Claude Code 専用の経路で、
+    他プロバイダでは invoke_claude が RuntimeError を投げて回答が落ちるため、
+    既定ONにするには「使えない環境では静かに旧経路へ寄せる」がセットで要る。
+
+    unavailable: 使えない理由（None なら使える）。テスト用の差し込み口。
+    """
+    explicit = agent.get("runner_enabled")
+    if explicit is not None:
+        return bool(explicit)
+    if unavailable is None:
+        unavailable = invoke_claude.check_available()
+    return unavailable is None
+
+
+def resolve_session_resume(agent, runner_enabled):
+    """会話セッション継続を使うか。未指定なら runner経路と同じ既定ON。
+
+    resume は runner経路の上でしか動かないので、runner が旧経路に落ちた
+    ときは自動的にオフになる（設定を書き換えずに整合する）。
+    """
+    cfg = agent.get("session_resume") or {}
+    return bool(cfg.get("enabled", True)) and runner_enabled
 
 
 async def fetch_history(message):

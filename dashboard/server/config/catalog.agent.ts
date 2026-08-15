@@ -61,9 +61,9 @@ const BASICS: Setting[] = [
   {
     path: "runner_enabled",
     label: "新しい回答経路を使う",
-    desc: "Web検索やツールを使える新しい経路で回答します。オフにすると旧経路（ツール無し）に戻ります。",
+    desc: "Web検索やツールを使える新しい経路で回答します。オフにすると旧経路（ツール無し）に戻ります。この経路は Claude Code 専用で、他のAIを選んでいるときは自動で旧経路になります。",
     kind: "bool",
-    default: false,
+    default: true,
   },
   {
     path: "self_review.enabled",
@@ -89,9 +89,9 @@ const BASICS: Setting[] = [
   {
     path: "session_resume.enabled",
     label: "会話の続きを覚える",
-    desc: "同じチャンネルでのやりとりを「続き」として記憶し続けます。添付ファイルがあるターンは対象外です。",
+    desc: "同じチャンネルでのやりとりを「続き」として記憶し続けます。添付ファイルがあるターンは対象外です。「新しい回答経路」がオフのときは一緒にオフになります。",
     kind: "bool",
-    default: false,
+    default: true,
     requires: [{ path: "runner_enabled", label: "新しい回答経路" }],
     children: [
       {
