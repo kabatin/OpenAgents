@@ -170,6 +170,31 @@ def validate(cfg):
     return problems
 
 
+def guild_mismatch_problem(archived_guild_id, configured_guild_id):
+    """アーカイブが別サーバーのものになっていないか（純粋関数）。
+
+    会話の記録は guild_id を持たないため、繋ぎ先だけ別サーバーに変えると
+    **前のサーバーの会話が消せないまま検索対象に残る**。エージェントが
+    他所の会話を引用してしまうので、混ざる前に起動を止める。
+
+    問題があれば人間向けの1文、無ければ None を返す。
+    - 未記録（初回・既存の古いDB）→ 問題なし。次の記録時に覚える
+    - 設定が空 → validate 側の担当なのでここでは触らない
+    """
+    stored = str(archived_guild_id or "").strip()
+    current = str(configured_guild_id or "").strip()
+    if not stored or not current or stored == current:
+        return None
+    return (
+        f"会話の記録は別のDiscordサーバー（{stored}）のものです"
+        f"（いまの設定は {current}）。\n"
+        "    記録にはサーバーの区別が無いため、このまま起動すると"
+        "前のサーバーの会話を引用してしまいます。\n"
+        "    ダッシュボードの「危険な操作」から初期化するか、"
+        "元のサーバーに設定を戻してください。"
+    )
+
+
 def require_valid(cfg):
     """検査に通らなければ、理由を並べて ConfigError を投げる。"""
     problems = validate(cfg)

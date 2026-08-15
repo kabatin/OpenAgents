@@ -19,6 +19,7 @@ import {
   resolveSafe,
 } from "../server/setup/personas.ts";
 import { nextPersonaFiles } from "../server/config/store.ts";
+import { CONFIRM_WORD, confirmationOk, stampFor, targetsFor } from "../server/setup/reset.ts";
 import { intentsFromFlags, intentWarning, inviteUrl } from "../server/setup/discord.ts";
 import { PERSONAS_DIR } from "../server/paths.ts";
 
@@ -120,6 +121,38 @@ describe("招待URL", () => {
     expect(perms & (1n << 3n)).toBe(0n);
     // メッセージ送信は含む
     expect(perms & (1n << 11n)).not.toBe(0n);
+  });
+});
+
+describe("初期化（危険な操作）", () => {
+  it("設定だけなら合言葉は要らない", () => {
+    expect(confirmationOk("config", "")).toBe(true);
+  });
+
+  it("全部消すには合言葉が要る", () => {
+    expect(confirmationOk("all", "")).toBe(false);
+    expect(confirmationOk("all", "はい")).toBe(false);
+    expect(confirmationOk("all", CONFIRM_WORD)).toBe(true);
+  });
+
+  it("合言葉の前後の空白は許す（コピペ対策）", () => {
+    expect(confirmationOk("all", `  ${CONFIRM_WORD} `)).toBe(true);
+  });
+
+  it("設定だけの初期化は会話の記録に触れない", () => {
+    const t = targetsFor("config");
+    expect(t).toEqual(["config.json"]);
+    expect(t.join()).not.toContain("archive.db");
+  });
+
+  it("全部消す方は会話の記録を含むと明示する", () => {
+    expect(targetsFor("all").join()).toContain("archive.db");
+  });
+
+  it("退避名にコロンやドットを残さない（ファイル名として使うため）", () => {
+    const stamp = stampFor(new Date("2026-08-15T04:11:14.123Z"));
+    expect(stamp).toBe("2026-08-15T04-11-14-123Z");
+    expect(stamp).not.toMatch(/[:.]/);
   });
 });
 

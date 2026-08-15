@@ -107,6 +107,11 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
   // ステップ3: 居場所
   const [guilds, setGuilds] = useState<Guild[]>([]);
   const [guildId, setGuildId] = useState("");
+  // 既に別サーバーの会話を記録していないか。記録に guild_id は無いので、
+  // 選んでから消すことができない＝選ぶ前に気づかせる必要がある
+  const [archive, setArchive] = useState<{ guildId: string | null; messages: number } | null>(
+    null,
+  );
   const [channels, setChannels] = useState<Channel[]>([]);
   const [channelId, setChannelId] = useState("");
 
@@ -181,8 +186,12 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
 
   const loadGuilds = () =>
     guard(async () => {
-      const got = await api.post<{ guilds: Guild[] }>("/setup/platform/guilds", { token });
+      const got = await api.post<{
+        guilds: Guild[];
+        archive: { guildId: string | null; messages: number };
+      }>("/setup/platform/guilds", { token });
       setGuilds(got.guilds);
+      setArchive(got.archive);
       setStep(2);
       // サーバーが1つなら選んだことにする。このとき**チャンネルの取得も
       // 一緒に走らせる**こと — 見た目は選択済みなのに次へ進めない、という
@@ -429,6 +438,22 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
                 サーバーが出てこない場合は、前の画面の招待リンクからBotを入れてください。
               </p>
             )}
+
+            {archive !== null &&
+              archive.guildId !== null &&
+              guildId !== "" &&
+              guildId !== archive.guildId && (
+                <div className="rounded border border-danger/30 bg-danger-soft px-3 py-2 text-2xs leading-relaxed text-danger">
+                  ⚠️ <b>別のサーバーの会話が {archive.messages.toLocaleString()} 件
+                  残っています。</b>
+                  会話の記録にはサーバーの区別が無いため、このまま進めると
+                  エージェントが<b>前のサーバーの会話を引用します</b>。
+                  設定を保存したあと、「全体設定」→「危険な操作」→
+                  <b>「全部消して最初から」</b>で記録を消してください。
+                  <br />
+                  （BOTは、記録と設定のサーバーが食い違ったままでは起動しません）
+                </div>
+              )}
 
             {channels.length > 0 && (
               <Field

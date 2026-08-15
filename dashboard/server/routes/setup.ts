@@ -26,6 +26,7 @@ import {
   togglePersonaFile,
 } from "../config/store.ts";
 import { getPath } from "../config/objpath.ts";
+import { archivedGuildId, archivedMessageCount } from "../db/queries.ts";
 import { restartService } from "../ops/status.ts";
 import {
   checkIntents,
@@ -38,6 +39,7 @@ import {
 } from "../setup/discord.ts";
 import { detectProviders, testProvider } from "../setup/llm.ts";
 import * as personas from "../setup/personas.ts";
+import { reset, ResetError } from "../setup/reset.ts";
 
 export const setup = new Hono();
 
@@ -45,6 +47,7 @@ export const setup = new Hono();
 function fail(e: unknown): { message: string; hint?: string } {
   if (e instanceof DiscordError) return { message: e.message, hint: e.hint };
   if (e instanceof personas.PersonaError) return { message: e.message };
+  if (e instanceof ResetError) return { message: e.message };
   if (e instanceof ConfigError) return { message: e.message };
   return { message: e instanceof Error ? e.message : String(e) };
 }
@@ -108,11 +111,23 @@ setup.post("/platform/verify", async (c) => {
   }
 });
 
-/** Botが参加しているサーバーの一覧。 */
+/**
+ * Botが参加しているサーバーの一覧。
+ *
+ * 既に別サーバーの会話を記録している場合は、それも一緒に返す。
+ * 記録には guild_id が無く、後から選んで消せないので、
+ * **選ぶ前に**気づけるようにしておく。
+ */
 setup.post("/platform/guilds", async (c) => {
   const { token } = await body(c);
   try {
-    return c.json({ guilds: await listGuilds(token ?? "") });
+    return c.json({
+      guilds: await listGuilds(token ?? ""),
+      archive: {
+        guildId: archivedGuildId(),
+        messages: archivedMessageCount(),
+      },
+    });
   } catch (e) {
     return c.json(fail(e), 400);
   }
@@ -285,6 +300,22 @@ setup.post("/personas/create", async (c) => {
       raw.values ?? {},
     );
     return c.json({ ok: true, file: created });
+  } catch (e) {
+    return c.json(fail(e), 400);
+  }
+});
+
+// --- 初期化（危険な操作） -------------------------------------------------------
+
+setup.post("/reset", async (c) => {
+  const raw = (await c.req.json().catch(() => ({}))) as {
+    scope?: string;
+    confirm?: string;
+  };
+  const scope = raw.scope === "all" ? "all" : "config";
+  try {
+    const result = await reset(scope, raw.confirm ?? "");
+    return c.json({ ok: true, scope, moved: result.moved });
   } catch (e) {
     return c.json(fail(e), 400);
   }

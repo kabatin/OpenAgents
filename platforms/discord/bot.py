@@ -28,6 +28,7 @@ import discord
 
 from core import action_items
 from core import attachments
+from core import config as app_config
 from core import db
 from core import episodes
 from core import wiki
@@ -199,6 +200,9 @@ class AgentClient(SkillHooksMixin, MarkerActionsMixin, AgentLoopsMixin,
             print(f"[{self.agent['id']}] guild {GUILD_ID} not found")
             return
         print(f"backfilling guild: {guild.name}")
+        # このアーカイブがどのサーバーのものかを覚える（起動時の突き合わせ用）
+        with db.connect(DB_PATH) as conn:
+            db.remember_archive_guild(conn, GUILD_ID)
         await archiving.backfill(guild, DB_PATH)
         with db.connect(DB_PATH) as conn:
             print("stats:", db.stats(conn))
@@ -801,6 +805,17 @@ async def main():
         for p in problems:
             print(f"  - {p}")
         print("\nダッシュボード（python start.py）から設定してください。")
+        sys.exit(1)
+
+    # 繋ぎ先だけ別サーバーに変えられていないか。記録には guild_id が無く、
+    # 前のサーバーの会話を選んで消せないので、混ざる前にここで止める
+    db.init_db(DB_PATH)
+    with db.connect(DB_PATH) as conn:
+        stored = db.archived_guild_id(conn)
+    mismatch = app_config.guild_mismatch_problem(stored, GUILD_ID)
+    if mismatch:
+        print("起動できません:")
+        print(f"  - {mismatch}")
         sys.exit(1)
 
     # 過去障害対策: discordロガーのINFO spam（RESUMED等）でログ肥大させない

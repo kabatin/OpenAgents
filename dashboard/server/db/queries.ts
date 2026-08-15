@@ -309,6 +309,32 @@ export function deployHistory(): DeployRow[] {
   );
 }
 
+/**
+ * このアーカイブがどのDiscordサーバーの記録か（未記録なら null）。
+ *
+ * messages/channels は guild_id を持たないため、繋ぎ先だけ別サーバーに
+ * 変えると前のサーバーの会話が消せないまま残る。選ぶ前に警告するのに使う。
+ */
+export function archivedGuildId(): string | null {
+  return safeQuery((conn) => {
+    const row = conn
+      .prepare<[], { value: string | null }>(
+        `SELECT value FROM meta WHERE key = 'archive_guild_id'`,
+      )
+      .get();
+    return row?.value ?? null;
+  }, null);
+}
+
+/** 記録されている会話の件数（0なら消しても失うものが無い）。 */
+export function archivedMessageCount(): number {
+  return safeQuery(
+    (conn) =>
+      conn.prepare<[], { n: number }>(`SELECT COUNT(*) AS n FROM messages`).get()?.n ?? 0,
+    0,
+  );
+}
+
 export type TermRow = {
   term: string;
   description: string | null;

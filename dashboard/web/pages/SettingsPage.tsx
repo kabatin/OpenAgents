@@ -6,6 +6,96 @@ import { Button, Card, Chip, Empty, ErrorNote } from "../components/ui.tsx";
 import { api, useFetch } from "../lib/api.ts";
 import type { SettingsView } from "../lib/types.ts";
 
+/**
+ * 初期化（危険な操作）。
+ *
+ * 軽い方と重い方を分けて並べる。ひとつのボタンに confirm を足すだけだと、
+ * 「設定を入れ直したいだけ」の人が会話の記録まで消してしまう。
+ * 逆に軽い方しか無いと、別サーバーへ繋ぎ替えたときに前のサーバーの会話が
+ * 残り続ける（記録に guild_id が無いので、後から選んで消せない）。
+ */
+function DangerZone() {
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState<"config" | "all" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState("");
+
+  const run = async (scope: "config" | "all") => {
+    const label = scope === "all" ? "会話の記録も含めて全部" : "設定だけ";
+    if (!window.confirm(`${label}初期化します。よろしいですか？`)) return;
+    setBusy(scope);
+    setError(null);
+    try {
+      const got = await api.post<{ moved: string[] }>("/setup/reset", {
+        scope,
+        confirm: typed,
+      });
+      setDone(
+        `初期化しました（${got.moved.length}件を退避）。` +
+          "ブラウザを再読み込みすると、はじめの設定に戻ります。",
+      );
+      setTyped("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <Card
+      title="危険な操作"
+      desc="BOTを止めてから実行します。消したものは削除せず、日時つきの名前で退避します。"
+      className="border-danger/30"
+    >
+      <div className="space-y-4 px-4 py-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-medium">設定をやり直す</div>
+            <p className="mt-0.5 text-2xs leading-relaxed text-muted">
+              <code>config.json</code> を退避して、はじめの設定画面に戻します。
+              <b>会話の記録・人格・前提知識は残ります。</b>
+            </p>
+          </div>
+          <Button busy={busy === "config"} onClick={() => void run("config")}>
+            やり直す
+          </Button>
+        </div>
+
+        <div className="border-t border-hairline pt-4">
+          <div className="text-xs font-medium text-danger">全部消して最初から</div>
+          <p className="mt-0.5 max-w-[70ch] text-2xs leading-relaxed text-muted">
+            設定に加えて <code>state/</code>（会話の記録・リマインダー・ログ）も
+            初期状態に戻します。
+            <b>別のDiscordサーバーで使い直すときは、必ずこちらを使ってください。</b>
+            会話の記録にはサーバーの区別が無いため、設定だけ変えると前のサーバーの
+            会話が残り、エージェントがそれを引用します。
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <input
+              className="focus-ring w-40 rounded border border-hairline bg-surface px-2 py-1 text-xs"
+              placeholder="初期化 と入力"
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+            />
+            <Button
+              variant="danger"
+              busy={busy === "all"}
+              disabled={typed.trim() !== "初期化"}
+              onClick={() => void run("all")}
+            >
+              全部消す
+            </Button>
+          </div>
+        </div>
+
+        {error !== null && <ErrorNote message={error} />}
+        {done !== "" && <p className="text-2xs text-accent-deep">{done}</p>}
+      </div>
+    </Card>
+  );
+}
+
 /** 議事録の話者名マッピング。新メンバーが入ったらここで追加する。 */
 function UserMapping({
   mapping,
@@ -210,6 +300,8 @@ export function SettingsPage({ onChanged }: { onChanged: () => void }) {
           ))}
         </ul>
       </Card>
+
+      <DangerZone />
     </div>
   );
 }

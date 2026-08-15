@@ -238,6 +238,37 @@ class ExampleConfigTest(unittest.TestCase):
                                 f"{rel} が見つかりません")
 
 
+class GuildMismatchTest(unittest.TestCase):
+    """繋ぎ先だけ別サーバーに変えられていないか。
+
+    会話の記録は guild_id を持たないので、混ざると選んで消せない。
+    エージェントが他所のサーバーの会話を引用する事故になる。
+    """
+
+    def test_same_guild_is_fine(self):
+        self.assertIsNone(config.guild_mismatch_problem("100", "100"))
+
+    def test_type_difference_is_not_a_mismatch(self):
+        # config は文字列、GUILD_ID は int で渡ってくる
+        self.assertIsNone(config.guild_mismatch_problem("100", 100))
+
+    def test_unrecorded_archive_is_fine(self):
+        # 初回起動と、meta が無い時代の既存DB。次の記録時に覚える
+        for stored in (None, ""):
+            self.assertIsNone(config.guild_mismatch_problem(stored, "100"))
+
+    def test_unset_config_is_left_to_validate(self):
+        for current in (None, "", 0):
+            self.assertIsNone(config.guild_mismatch_problem("100", current))
+
+    def test_different_guild_is_reported_with_both_ids(self):
+        msg = config.guild_mismatch_problem("100", "200")
+        self.assertIsNotNone(msg)
+        self.assertIn("100", msg)
+        self.assertIn("200", msg)
+        self.assertIn("初期化", msg)
+
+
 class AgentByIdTest(unittest.TestCase):
     def test_引ける(self):
         self.assertEqual(config.agent_by_id(_cfg(), "agent1")["name"],

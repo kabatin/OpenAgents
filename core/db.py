@@ -27,6 +27,16 @@ import sqlite3
 from contextlib import contextmanager
 
 SCHEMA = """
+-- このアーカイブ自身についての覚書。
+-- いまのところ用途は1つ: **どのDiscordサーバーの記録なのか**を残すこと。
+-- messages/channels は guild_id を持たないため、繋ぎ先を別サーバーへ
+-- 変えても前のサーバーの会話がそのまま検索対象に残る（選んで消せない）。
+-- 起動時にここと config を突き合わせて、混ざる前に止める。
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
+
 CREATE TABLE IF NOT EXISTS channels (
     id          INTEGER PRIMARY KEY,
     name        TEXT,
@@ -670,6 +680,32 @@ def _migrate(conn):
         # up=👍の勝ちパターン / advice=自己採点の蒸留（メッセージ非紐付け）
         conn.execute(
             "ALTER TABLE proactive_lessons ADD COLUMN polarity TEXT DEFAULT 'down'")
+
+
+#: meta テーブルのキー: このアーカイブが記録しているDiscordサーバー
+ARCHIVE_GUILD_KEY = "archive_guild_id"
+
+
+def get_meta(conn, key, default=None):
+    row = conn.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
+    return default if row is None else row[0]
+
+
+def set_meta(conn, key, value):
+    conn.execute(
+        """INSERT INTO meta(key, value) VALUES(?,?)
+           ON CONFLICT(key) DO UPDATE SET value=excluded.value""",
+        (key, None if value is None else str(value)))
+
+
+def archived_guild_id(conn):
+    """このアーカイブが記録しているサーバーID（未記録なら None）。"""
+    return get_meta(conn, ARCHIVE_GUILD_KEY)
+
+
+def remember_archive_guild(conn, guild_id):
+    """記録対象のサーバーを覚える。初回のアーカイブ時に1度だけ書かれる。"""
+    set_meta(conn, ARCHIVE_GUILD_KEY, guild_id)
 
 
 def init_db(path):
