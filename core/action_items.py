@@ -298,6 +298,10 @@ def drop_by_confirm_message(db_path, message_id):
 # リアクション（✅/❌）と同じ実挙動に到達できるようマーカーを用意する。
 CANCEL_MARKER_RE = re.compile(r"\[ACTION_CANCEL:\s*(\d+)\s*\]")
 DONE_MARKER_RE = re.compile(r"\[ACTION_DONE:\s*(\d+)\s*\]")
+# 期日変更（2026-08-19）。取消・完了はあるのに変更が無かったため、
+# 「金曜にリスケされた」のような日常の予定変更が事実台帳へ流れ込んでいた。
+DUE_MARKER_RE = re.compile(
+    r"\[ACTION_DUE:\s*(\d+)\s*\|\s*(\d{4}-\d{2}-\d{2})\s*\]")
 
 # status → 人間向けの終了ラベル（既終了の⚠️行用）
 _CLOSED_LABELS = {"done": "完了済み", "cancelled": "キャンセル済み",
@@ -305,13 +309,17 @@ _CLOSED_LABELS = {"done": "完了済み", "cancelled": "キャンセル済み",
 
 
 def extract_conversation_markers(answer):
-    """回答から ACTION_CANCEL / ACTION_DONE を全て除去し、
-    (本文, cancel_ids, done_ids) を返す（純粋関数）。
+    """回答から ACTION_CANCEL / ACTION_DONE / ACTION_DUE を全て除去し、
+    (本文, cancel_ids, done_ids, due_changes) を返す（純粋関数）。
+    due_changes は [(id, "YYYY-MM-DD")]。
     リマインダーと同様、パース成否に関わらず生マーカーはchに晒さない。"""
     cancel_ids = [int(x) for x in CANCEL_MARKER_RE.findall(answer or "")]
     done_ids = [int(x) for x in DONE_MARKER_RE.findall(answer or "")]
-    text = DONE_MARKER_RE.sub("", CANCEL_MARKER_RE.sub("", answer or ""))
-    return text.strip(), cancel_ids, done_ids
+    due_changes = [(int(i), d)
+                   for i, d in DUE_MARKER_RE.findall(answer or "")]
+    text = DUE_MARKER_RE.sub(
+        "", DONE_MARKER_RE.sub("", CANCEL_MARKER_RE.sub("", answer or "")))
+    return text.strip(), cancel_ids, done_ids, due_changes
 
 
 def format_item_line(item):
@@ -332,14 +340,23 @@ def build_skill_note(open_items):
         "タスクが不要になった・無くなったと言われたら、返信本文の最後に"
         "改行して: [ACTION_CANCEL: id]\n"
         "タスクが終わったと言われたら: [ACTION_DONE: id]\n"
+        "**期日が変わった**と言われたら: [ACTION_DUE: id | YYYY-MM-DD]\n"
+        "（例:「金曜にリスケされた」→ その週の金曜の日付に変換して指定する。"
+        "変更すると声かけ段階がリセットされ、新しい期日で2日前・当日の"
+        "声かけが改めて出る）\n"
         "規則:\n"
         "- 上の一覧だけを真実として扱う。一覧に載っているタスクは、過去の"
         "会話で何と言っていようと今も追跡中＝未キャンセル。「済み」と答えて"
         "よいのは一覧に無いときだけ\n"
         "- どのタスクの話か上の一覧から特定できないときは、マーカーを付けず"
         "本文で確認する\n"
-        "- 一覧に無いタスクの操作や、期日・担当の変更はできない。できない"
-        "依頼に「やっておく」と言わず、できないと正直に答える\n"
+        "- 期日の変更はマーカーで実行できる。**期日が動いただけの話を"
+        "[FACT:]（事実台帳）に書かないこと**（台帳側の項目なので二重管理に"
+        "なり、後で古い情報が残る）\n"
+        "- 一覧に無いタスクの操作や、担当の変更はできない。できない依頼に"
+        "「やっておく」と言わず、できないと正直に答える\n"
+        "- 相対的な日付（「金曜」「来週頭」）は現在日時から絶対日付へ変換する。"
+        "どの日か特定できないときはマーカーを付けず本文で確認する\n"
         "- 追跡タスクと関係ない話には、マーカーを絶対に付けないこと"
     )
 
@@ -349,12 +366,13 @@ def _is_owner(item, author_id):
 
 
 def apply_conversation_ops(db_path, agent_id, *, author_id, is_admin,
-                           cancel_ids, done_ids):
+                           cancel_ids, done_ids, due_changes=()):
     """会話マーカーの実行。担当か管理者だけが操作できる。
     Returns: (実行結果の-#行[], 成功した操作[{"id","action","task"}])。
     -#行の接頭辞「納期追跡」は honesty.py の実行証拠パターンと対応。"""
     ops = ([(rid, "cancelled") for rid in cancel_ids]
-           + [(rid, "done") for rid in done_ids])
+           + [(rid, "done") for rid in done_ids]
+           + [(rid, ("due", due)) for rid, due in (due_changes or ())])
     notes, applied = [], []
     if not ops:
         return notes, applied
@@ -371,6 +389,18 @@ def apply_conversation_ops(db_path, agent_id, *, author_id, is_admin,
             if not (is_admin or _is_owner(item, author_id)):
                 notes.append(f"-# ⚠️ 納期追跡: id={rid} は担当の人か管理者"
                              "だけが操作できるっス")
+                continue
+            if isinstance(status, tuple):           # 期日変更
+                _, new_due = status
+                old = db.reschedule_action_item(conn, rid, agent_id, new_due)
+                if old is None:
+                    notes.append(f"-# ⚠️ 納期追跡: id={rid} の期日を"
+                                 "変更できなかったっス")
+                    continue
+                notes.append(f"-# 📅 納期追跡の期日を変更(id={rid}): "
+                             f"{old} → {new_due}（{item['task'][:30]}）")
+                applied.append({"id": rid, "action": "due", "due": new_due,
+                                "task": item["task"]})
                 continue
             db.close_action_item(conn, rid, agent_id, status=status)
             if status == "cancelled":

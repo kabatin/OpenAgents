@@ -1576,6 +1576,26 @@ def get_action_item(conn, item_id, agent_id):
     return _action_row(row)
 
 
+def reschedule_action_item(conn, item_id, agent_id, due_date):
+    """追跡中タスクの期日変更（2026-08-19）。声かけ段階をリセットして
+    新しい期日で改めて2日前・当日・超過の声かけが出るようにする。
+    取消・完了と違い「予定が動いた」は日常なので、会話から到達できる必要が
+    あった（無かったため一時的な予定変更が事実台帳へ流れ込んでいた）。
+    Returns: 変更前の期日 or None（openでない・他エージェントの分は None）。"""
+    row = conn.execute(
+        """SELECT due_date FROM action_items
+           WHERE id=? AND agent_id=? AND status='open'""",
+        (item_id, agent_id)).fetchone()
+    if row is None:
+        return None
+    conn.execute(
+        """UPDATE action_items SET due_date=?, nudge_stage='none',
+               last_nudge_message_id=NULL
+           WHERE id=? AND agent_id=? AND status='open'""",
+        (due_date, item_id, agent_id))
+    return row[0]
+
+
 def close_action_item(conn, item_id, agent_id, *, status):
     """会話マーカーからの追跡終了（status: 'cancelled'/'done'）。
     open のものだけ閉じ、閉じられたら True。"""

@@ -239,19 +239,21 @@ class MarkerActionsMixin:
         return (text + "\n" if text else "") + "\n".join(notes)
 
     def _apply_action_markers(self, message, answer):
-        """回答中の ACTION_CANCEL / ACTION_DONE マーカーを実行し、
+        """回答中の ACTION_CANCEL / ACTION_DONE / ACTION_DUE を実行し、
         本文＋実行結果の -# 行を返す（マーカー自体は必ず除去）。
-        会話で「不要になった」と言われた追跡タスクを、リアクション（✅/❌）と
-        同じ実挙動で終了させる（実例: 口約束だけでアラートが出続けた）。"""
-        text, cancel_ids, done_ids = \
+        会話で「不要になった」「終わった」「期日が動いた」と言われた追跡タスクを、
+        リアクション（✅/❌）と同じ実挙動へ到達させる（実例: 口約束だけで
+        アラートが出続けた／期日変更の導線が無く事実台帳へ流れ込んだ）。"""
+        text, cancel_ids, done_ids, due_changes = \
             action_items.extract_conversation_markers(answer)
-        if not cancel_ids and not done_ids:
+        if not (cancel_ids or done_ids or due_changes):
             return answer
         notes, applied = action_items.apply_conversation_ops(
             DB_PATH, self.agent["id"],
             author_id=str(message.author.id),
             is_admin=str(message.author.id) in ADMIN_IDS,
-            cancel_ids=cancel_ids, done_ids=done_ids)
+            cancel_ids=cancel_ids, done_ids=done_ids,
+            due_changes=due_changes)
         for op in applied:
             proactive.log_entry(
                 DB_PATH, self.agent["id"], kind="deadline",

@@ -196,20 +196,20 @@ class ConfirmationTest(unittest.TestCase):
 
 class ConversationMarkerTest(unittest.TestCase):
     def test_markers_extracted_and_removed(self):
-        text, cancels, dones = action_items.extract_conversation_markers(
+        text, cancels, dones, dues = action_items.extract_conversation_markers(
             "了解っス\n[ACTION_CANCEL: 3]\n[ACTION_DONE: 5]")
         self.assertEqual(text, "了解っス")
         self.assertEqual(cancels, [3])
         self.assertEqual(dones, [5])
+        self.assertEqual(dues, [])
 
     def test_no_markers_returns_text_as_is(self):
-        text, cancels, dones = action_items.extract_conversation_markers(
-            "普通の返事っス")
-        self.assertEqual((text, cancels, dones), ("普通の返事っス", [], []))
+        got = action_items.extract_conversation_markers("普通の返事っス")
+        self.assertEqual(got, ("普通の返事っス", [], [], []))
 
     def test_none_answer_is_safe(self):
         self.assertEqual(action_items.extract_conversation_markers(None),
-                         ("", [], []))
+                         ("", [], [], []))
 
 
 class SkillNoteTest(unittest.TestCase):
@@ -282,3 +282,86 @@ class ConversationOpsTest(ActionItemsTestBase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RescheduleTest(unittest.TestCase):
+    """期日変更の会話導線（2026-08-19）。取消・完了はあるのに変更が無く、
+    「金曜にリスケされた」が事実台帳へ流れ込んでいた。"""
+
+    OWNER = "857938052860608523"
+
+    def setUp(self):
+        fd, self.db_path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        db.init_db(self.db_path)
+        with db.connect(self.db_path) as conn:
+            self.item_id = db.add_action_item(
+                conn, agent_id="senko", source_message_id=1, channel_id=7,
+                task="購入フロー一式をデバッグ", owners=f"<@{self.OWNER}>",
+                due_date="2026-08-17", urgent=False, created_at="t")
+            # 超過まで声かけ済みの状態にしておく
+            db.update_action_nudge(conn, self.item_id, stage="overdue",
+                                   message_id=99)
+
+    def tearDown(self):
+        os.unlink(self.db_path)
+
+    def test_marker_extraction(self):
+        text, cancels, dones, dues = action_items.extract_conversation_markers(
+            "金曜にリスケっスね\n[ACTION_DUE: 4 | 2026-08-21]")
+        self.assertEqual(text, "金曜にリスケっスね")
+        self.assertEqual(dues, [(4, "2026-08-21")])
+        self.assertEqual((cancels, dones), ([], []))
+
+    def test_malformed_date_ignored_but_removed(self):
+        text, _c, _d, dues = action_items.extract_conversation_markers(
+            "本文[ACTION_DUE: 4 | 8/21]")
+        self.assertEqual(dues, [])
+        self.assertIn("本文", text)   # 不正でも本文は残る
+
+    def test_reschedule_resets_nudge_stage(self):
+        notes, applied = action_items.apply_conversation_ops(
+            self.db_path, "senko", author_id=self.OWNER, is_admin=False,
+            cancel_ids=[], done_ids=[],
+            due_changes=[(self.item_id, "2026-08-21")])
+        self.assertIn("📅 納期追跡の期日を変更", notes[0])
+        self.assertIn("2026-08-17 → 2026-08-21", notes[0])
+        self.assertEqual(applied[0]["action"], "due")
+        with db.connect(self.db_path) as conn:
+            item = db.get_action_item(conn, self.item_id, "senko")
+        self.assertEqual(item["due_date"], "2026-08-21")
+        self.assertEqual(item["nudge_stage"], "none")   # 声かけをやり直す
+        self.assertEqual(item["status"], "open")
+
+    def test_non_owner_rejected(self):
+        notes, applied = action_items.apply_conversation_ops(
+            self.db_path, "senko", author_id="999", is_admin=False,
+            cancel_ids=[], done_ids=[],
+            due_changes=[(self.item_id, "2026-08-21")])
+        self.assertIn("担当の人か管理者", notes[0])
+        self.assertEqual(applied, [])
+
+    def test_admin_can_reschedule(self):
+        _notes, applied = action_items.apply_conversation_ops(
+            self.db_path, "senko", author_id="999", is_admin=True,
+            cancel_ids=[], done_ids=[],
+            due_changes=[(self.item_id, "2026-08-21")])
+        self.assertEqual(len(applied), 1)
+
+    def test_closed_item_not_rescheduled(self):
+        with db.connect(self.db_path) as conn:
+            db.close_action_item(conn, self.item_id, "senko", status="done")
+        notes, applied = action_items.apply_conversation_ops(
+            self.db_path, "senko", author_id=self.OWNER, is_admin=False,
+            cancel_ids=[], done_ids=[],
+            due_changes=[(self.item_id, "2026-08-21")])
+        self.assertIn("既に完了済み", notes[0])
+        self.assertEqual(applied, [])
+
+    def test_skill_note_offers_due_change_and_forbids_fact(self):
+        with db.connect(self.db_path) as conn:
+            items = db.open_action_items(conn, "senko")
+        note = action_items.build_skill_note(items)
+        self.assertIn("[ACTION_DUE: id | YYYY-MM-DD]", note)
+        self.assertIn("[FACT:]（事実台帳）に書かないこと", note)
+        self.assertNotIn("期日・担当の変更はできない", note)
