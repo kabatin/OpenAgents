@@ -69,6 +69,20 @@ def collect_audit(db_path, agent_id, now=None):
     return out
 
 
+def category_counts(items):
+    """カテゴリ別の件数（ログ用の内訳・純粋関数）。"""
+    counts = {}
+    for r in items:
+        counts[r["action"]] = counts.get(r["action"], 0) + 1
+    return counts
+
+
+def format_counts(counts):
+    """ログ・ダッシュボード用の内訳文字列（純粋関数）。"""
+    return "・".join(f"{LABELS.get(k, k)}{v}件"
+                     for k, v in sorted(counts.items())) or "0件"
+
+
 def build_audit_post(items):
     """夜の自己監査（純粋関数）。何も無ければ None＝投稿しない。"""
     if not items:

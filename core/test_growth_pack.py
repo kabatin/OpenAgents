@@ -135,7 +135,46 @@ class TestSelfreviewDistill(unittest.TestCase):
     def test_collect_only_low_scores(self):
         self._seed_scores(["2|曖昧", "5|", "1|断定", "4|長い", "3|冗長"])
         issues = svd.collect_low_issues(self.tmp.name, "agent1")
-        self.assertEqual(sorted(issues), ["断定", "曖昧"])
+        self.assertEqual(sorted(issues),
+                         [("selfreview", "断定"), ("selfreview", "曖昧")])
+
+    def _seed_other(self, kind, action, detail):
+        now = reminders.fmt(reminders.now_jst())
+        with db.connect(self.tmp.name) as conn:
+            conn.execute(
+                """INSERT INTO proactive_log(agent_id, kind, action,
+                       detail, created_at) VALUES('agent1',?,?,?,?)""",
+                (kind, action, detail, now))
+
+    def test_collect_spans_four_categories(self):
+        """夜の自己監査が見せる4カテゴリ全部が蒸留の入力になる（2026-08-18）。"""
+        self._seed_scores(["2|曖昧"])
+        self._seed_other("fake_done", "assert_flagged", "納期は8/8で確定")
+        self._seed_other("fake_done", "caught", "リマインダー登録の空約束")
+        self._seed_other("recall", "silent", "懐疑役が差し止め: 根拠が薄い")
+        issues = svd.collect_low_issues(self.tmp.name, "agent1")
+        cats = sorted(c for c, _line in issues)
+        self.assertEqual(cats, ["assertion", "fake_done", "selfreview",
+                                "skeptic"])
+        # 懐疑役は理由部分だけを渡す
+        reason = next(ln for c, ln in issues if c == "skeptic")
+        self.assertEqual(reason, "根拠が薄い")
+
+    def test_prompt_groups_by_category(self):
+        prompt = svd.build_prompt([("selfreview", "曖昧"),
+                                   ("assertion", "納期を断定"),
+                                   ("selfreview", "冗長")])
+        self.assertIn("【低評価だった回答の問題点】", prompt)
+        self.assertIn("【裏取りできないまま断定した箇所】", prompt)
+        self.assertIn("- 曖昧", prompt)
+        self.assertIn("- 冗長", prompt)
+        self.assertIn("- 納期を断定", prompt)
+
+    def test_high_score_excluded_but_others_kept(self):
+        self._seed_scores(["5|問題なし"])
+        self._seed_other("fake_done", "assert_flagged", "断定した")
+        issues = svd.collect_low_issues(self.tmp.name, "agent1")
+        self.assertEqual(issues, [("assertion", "断定した")])
 
     def test_distill_skips_when_samples_thin(self):
         self._seed_scores(["2|曖昧", "1|断定"])  # MIN_SAMPLES(3)未満

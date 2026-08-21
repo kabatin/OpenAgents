@@ -2807,6 +2807,35 @@ def selfreview_scores_since(conn, agent_id, since):
     return [{"detail": r[0], "created_at": r[1]} for r in rows]
 
 
+def reflection_items_since(conn, agent_id, since):
+    """振り返りの原料を4カテゴリ横断で返す（2026-08-18）。
+    夜の自己監査（self_audit）が毎晩見せている材料と同じ集合を、週次蒸留でも
+    使えるようにする（見えているのに昇華されない取りこぼしを解消）。
+    Returns: [{"category","detail","created_at"}]（新しい順）"""
+    rows = conn.execute(
+        """SELECT kind, action, detail, created_at FROM proactive_log
+           WHERE agent_id=? AND created_at >= ?
+             AND ((kind='fake_done' AND action IN ('assert_flagged',
+                                                   'caught'))
+                  OR (kind='selfreview' AND action='score')
+                  OR (action='silent' AND detail LIKE '懐疑役%'))
+           ORDER BY id DESC LIMIT 200""",
+        (agent_id, since)).fetchall()
+    out = []
+    for kind, action, detail, created_at in rows:
+        if kind == "selfreview":
+            category = "selfreview"
+        elif action == "assert_flagged":
+            category = "assertion"
+        elif action == "caught":
+            category = "fake_done"
+        else:
+            category = "skeptic"
+        out.append({"category": category, "detail": detail or "",
+                    "created_at": created_at})
+    return out
+
+
 def proactive_feedback_stats(conn, agent_id, since):
     """自発発言への👍👎を (kind, channel_id) 単位で集計（RM#11
     リアクション自動学習の原料）。since以降の発言が対象。"""

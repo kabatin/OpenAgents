@@ -292,3 +292,22 @@ class StyleAndToneTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SelfAuditLogTest(TestBase):
+    """夜の自己監査の内訳ログ（2026-08-18）。報告だけで終わらせない。"""
+
+    def test_category_counts_and_format(self):
+        items = [{"kind": "fake_done", "action": "assert_flagged",
+                  "detail": "a"},
+                 {"kind": "fake_done", "action": "assert_flagged",
+                  "detail": "b"},
+                 {"kind": "selfreview", "action": "score", "detail": "2|c"}]
+        counts = self_audit.category_counts(items)
+        self.assertEqual(counts, {"assert_flagged": 2, "score": 1})
+        text = self_audit.format_counts(counts)
+        self.assertIn("裏取りできない断定2件", text)
+        self.assertIn("セルフレビュー低評価1件", text)
+
+    def test_empty_counts(self):
+        self.assertEqual(self_audit.format_counts({}), "0件")

@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""自己採点の週次蒸留 — 記録するだけだったRM#14を消費するループ。
+"""振り返りの週次蒸留 — 記録するだけだった自己点検を消費するループ。
 
-投稿後セルフレビュー（self_review.py）は回答を1〜5点で採点して proactive_log に
-貯めるが、これまで読み返す者がいなかった。週1回、低スコア回答の「問題点」を
-LLMが蒸留して最大3つの短い改善助言にし、教訓帳（proactive_lessons /
-polarity='advice'）へ**差し替え**で保存する。助言は通常回答のプロンプトに
-常時注入される（bot.py）。
+夜の自己監査日誌（RM#84）は毎晩「あやしかった判断」を4カテゴリで見せていたが、
+報告して終わりで翌日の振る舞いに反映される道が無かった（2026-08-18の指摘）。
+そこで週1回、次の4カテゴリを横断で集めてLLMが蒸留し、最大3つの短い改善助言に
+して教訓帳（proactive_lessons / polarity='advice'）へ**差し替え**で保存する。
+助言は通常回答のプロンプトに常時注入される（bot.py）。
+
+  - selfreview : 投稿後セルフレビューの低スコア（3点以下）の問題点
+  - assertion  : 裏取りできない断定（honesty のシャドー計測）
+  - fake_done  : できたフリ検出に捕まった回答
+  - skeptic    : 懐疑役が投稿を差し止めた自発発言
 
 - 静かな処理: Discordへの投稿はしない。実行の痕跡は proactive_log
   （kind='selfreview_distill'）に残り、ダッシュボードのタイムラインで見える
@@ -75,30 +80,65 @@ def parse_score_detail(detail):
     return {"score": score, "issue": issue.strip()}
 
 
+CATEGORY_LABELS = {
+    "selfreview": "低評価だった回答の問題点",
+    "assertion": "裏取りできないまま断定した箇所",
+    "fake_done": "やったと言ったが実行されていなかった件",
+    "skeptic": "懐疑役が投稿を差し止めた理由",
+}
+
+
+def summarize_detail(category, detail):
+    """カテゴリ別に蒸留へ渡す1行を作る（純粋関数・対象外なら None）。"""
+    detail = (detail or "").strip().replace("\n", " ")
+    if not detail:
+        return None
+    if category == "selfreview":
+        parsed = parse_score_detail(detail)
+        if not parsed or parsed["score"] > LOW_SCORE_MAX \
+                or not parsed["issue"]:
+            return None      # 高評価は改善材料にしない
+        return parsed["issue"][:120]
+    if category == "skeptic":
+        # 「懐疑役が差し止め: 〜」の理由部分だけを取る
+        _, _, reason = detail.partition(":")
+        return (reason.strip() or detail)[:120]
+    return detail[:120]
+
+
 def collect_low_issues(db_path, agent_id, now=None):
-    """観察窓内の低スコア採点の問題点リスト（新しい順）。"""
+    """観察窓内の振り返り材料（4カテゴリ横断・新しい順）。
+    Returns: [(カテゴリ, 1行)]"""
     now = now or reminders.now_jst()
     since = reminders.fmt(now - timedelta(days=WINDOW_DAYS))
     with db.connect(db_path) as conn:
-        rows = db.selfreview_scores_since(conn, agent_id, since)
+        rows = db.reflection_items_since(conn, agent_id, since)
     issues = []
     for r in rows:
-        parsed = parse_score_detail(r["detail"])
-        if parsed and parsed["score"] <= LOW_SCORE_MAX and parsed["issue"]:
-            issues.append(parsed["issue"])
+        line = summarize_detail(r["category"], r["detail"])
+        if line:
+            issues.append((r["category"], line))
     return issues
 
 
 def build_prompt(issues):
-    """蒸留プロンプト（純粋関数）。"""
-    lines = "\n".join(f"- {i}" for i in issues[:40])
+    """蒸留プロンプト（純粋関数）。カテゴリごとにまとめて渡す。"""
+    grouped = {}
+    for category, line in issues[:60]:
+        grouped.setdefault(category, []).append(line)
+    blocks = []
+    for category, lines in grouped.items():
+        label = CATEGORY_LABELS.get(category, category)
+        body = "\n".join(f"- {ln}" for ln in lines[:20])
+        blocks.append(f"【{label}】\n{body}")
     return (
-        "社内AIアシスタントの回答を自己採点した際の「低スコア回答の問題点」"
-        "の一覧です。\n\n"
-        f"{lines}\n\n"
+        "社内AIアシスタントが自分の応答を点検して見つけた問題の一覧です"
+        "（種類ごとにまとめてあります）。\n\n"
+        + "\n\n".join(blocks) + "\n\n"
         "繰り返し現れる改善因子を最大3つに蒸留してください。各項目は"
         f"{MAX_ADVICE_LEN}文字以内・「〜する」の命令形の短文で、次回の回答時に"
-        "そのまま心がけられる形にすること。一度きりの個別事象は含めない。\n"
+        "そのまま心がけられる形にすること。一度きりの個別事象は含めない。"
+        "複数の種類にまたがる共通の癖があれば優先して挙げる。\n"
         '出力はJSON配列のみ: ["助言1", "助言2"]'
     )
 
@@ -143,5 +183,5 @@ def build_advice_block(advice_rows):
     if not advice_rows:
         return ""
     lines = [f"- {r['text']}" for r in advice_rows]
-    return ("【自己改善メモ（過去の低評価回答から自動蒸留した心がけ）】\n"
+    return ("【自己改善メモ（自分の点検記録から自動蒸留した心がけ）】\n"
             + "\n".join(lines))

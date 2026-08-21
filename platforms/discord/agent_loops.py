@@ -609,13 +609,26 @@ class AgentLoopsMixin:
         await asyncio.to_thread(self_audit.mark_audited, DB_PATH,
                                 self.agent["id"])
         text = self_audit.build_audit_post(items)
+        breakdown = self_audit.format_counts(
+            self_audit.category_counts(items))
         if text is None:
-            return   # 怪しい判断が無い日は黙る
+            # 怪しい判断が無い日は黙る（が、静かな日だったことは記録する）
+            await asyncio.to_thread(
+                proactive.log_entry, DB_PATH, self.agent["id"],
+                kind="selfaudit", action="clean", detail="対象なし")
+            return
         channel = (self.get_channel(self.home_channel_id)
                    or await self.fetch_channel(self.home_channel_id))
-        await channel.send(text[:1900],
-                           allowed_mentions=discord.AllowedMentions.none())
-        print(f"[{self.agent['id']}] self audit posted ({len(items)}件)")
+        posted = await channel.send(
+            text[:1900], allowed_mentions=discord.AllowedMentions.none())
+        # 週次蒸留の入力になっているので、監査自体の推移も追えるよう記録する
+        await asyncio.to_thread(
+            proactive.log_entry, DB_PATH, self.agent["id"],
+            kind="selfaudit", action="posted",
+            channel_id=self.home_channel_id, posted_message_id=posted.id,
+            detail=f"{len(items)}件（{breakdown}）")
+        print(f"[{self.agent['id']}] self audit posted "
+              f"({len(items)}件: {breakdown})")
 
     async def _bias_check_cycle(self):
         """バイアス点検（RM#86）: 反応の偏りを月次で自己開示（決定論）。"""
