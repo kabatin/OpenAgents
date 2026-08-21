@@ -4,6 +4,7 @@
 ./venv/bin/python -m unittest test_growth_pack -v
 """
 
+import json
 import os
 import tempfile
 import unittest
@@ -201,8 +202,8 @@ class TestSelfreviewDistill(unittest.TestCase):
     def test_parse_clamps_and_rejects(self):
         self.assertEqual(svd.parse("junk"), [])
         self.assertEqual(svd.parse('{"a":1}'), [])
-        four = svd.parse('["a","b","c","d"]')
-        self.assertEqual(len(four), svd.MAX_ADVICE)
+        over = json.dumps([f"a{i}" for i in range(svd.MAX_ADVICE + 2)])
+        self.assertEqual(len(svd.parse(over)), svd.MAX_ADVICE)
         long = svd.parse(f'["{"x" * 200}"]')
         self.assertEqual(len(long[0]), svd.MAX_ADVICE_LEN)
 
@@ -365,3 +366,112 @@ class AbTestWiringTest(unittest.TestCase):
                                  detail="タグなし", created_at=now)
         self.assertIsNone(
             ab_test.record_feedback_for_message(self.tmp.name, 556, "up"))
+
+
+class AdviceGraduationTest(unittest.TestCase):
+    """助言のマージ保存と卒業（2026-08-18）。毎週学び直しを止める。"""
+
+    def setUp(self):
+        self.tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        self.tmp.close()
+        db.init_db(self.tmp.name)
+        self.now = reminders.fmt(reminders.now_jst())
+
+    def tearDown(self):
+        os.unlink(self.tmp.name)
+
+    def _merge(self, texts):
+        with db.connect(self.tmp.name) as conn:
+            return db.replace_advice_lessons(conn, "senko", texts, self.now)
+
+    def test_same_text_increments_streak(self):
+        self._merge(["断定しない"])
+        merged = self._merge(["断定しない"])
+        self.assertEqual(merged[0]["streak"], 2)
+        merged = self._merge(["断定しない"])
+        self.assertEqual(merged[0]["streak"], 3)
+        with db.connect(self.tmp.name) as conn:
+            rows = db.advice_lessons(conn, "senko")
+        self.assertEqual(len(rows), 1)          # 重複行を作らない
+        self.assertEqual(rows[0]["streak"], 3)
+
+    def test_dropped_advice_deactivated(self):
+        self._merge(["A", "B"])
+        self._merge(["A"])                       # Bは今回出なかった
+        with db.connect(self.tmp.name) as conn:
+            texts = [r["text"] for r in db.advice_lessons(conn, "senko")]
+        self.assertEqual(texts, ["A"])
+
+    def test_cap_is_five(self):
+        self.assertEqual(svd.MAX_ADVICE, 5)
+        raw = '["1","2","3","4","5","6","7"]'
+        self.assertEqual(len(svd.parse(raw)), 5)
+
+    def test_prompt_asks_to_reuse_wording(self):
+        prompt = svd.build_prompt([("selfreview", "曖昧")],
+                                  previous=["断定しない"])
+        self.assertIn("【前回までの助言】", prompt)
+        self.assertIn("- 断定しない", prompt)
+        self.assertIn("一字一句そのまま", prompt)
+        plain = svd.build_prompt([("selfreview", "曖昧")])
+        self.assertNotIn("前回までの助言", plain)
+
+    def test_graduates_detected_at_threshold(self):
+        def fake(_p):
+            return '["断定しない"]'
+        with db.connect(self.tmp.name) as conn:
+            for d in ["2|a", "1|b", "2|c"]:
+                conn.execute(
+                    """INSERT INTO proactive_log(agent_id, kind, action,
+                           detail, created_at)
+                       VALUES('senko','selfreview','score',?,?)""",
+                    (d, self.now))
+        got = None
+        for _ in range(svd.GRADUATE_STREAK):
+            got = svd.distill_full(self.tmp.name, "senko", model="m",
+                                   invoke_fn=fake)
+        self.assertEqual(got["advice"][0]["streak"], svd.GRADUATE_STREAK)
+        self.assertEqual(len(got["graduates"]), 1)
+        post = svd.build_graduation_post(got["graduates"][0])
+        self.assertIn("3週連続", post)
+        self.assertIn("✅", post)
+
+    def test_promote_creates_global_rule_and_frees_slot(self):
+        merged = self._merge(["断定しない"])
+        with db.connect(self.tmp.name) as conn:
+            pid = db.add_advice_promotion(
+                conn, agent_id="senko", lesson_id=merged[0]["id"],
+                text="断定しない", streak=3, created_at=self.now)
+            db.set_advice_promotion_message(conn, pid, 700)
+            # 同じ助言の二重提案はしない
+            self.assertIsNone(db.add_advice_promotion(
+                conn, agent_id="senko", lesson_id=merged[0]["id"],
+                text="断定しない", streak=3, created_at=self.now))
+        text = svd.promote(self.tmp.name, 700, admin_id=1)
+        self.assertEqual(text, "断定しない")
+        with db.connect(self.tmp.name) as conn:
+            rules_all = db.rules_all_active(conn)
+            self.assertTrue(any(r["scope"] == "global"
+                                and "断定しない" in r["rule_text"]
+                                for r in rules_all))
+            self.assertEqual(db.advice_lessons(conn, "senko"), [])  # 枠が空く
+        self.assertIsNone(svd.promote(self.tmp.name, 700, admin_id=1))  # CAS
+
+    def test_dismiss_keeps_advice(self):
+        merged = self._merge(["断定しない"])
+        with db.connect(self.tmp.name) as conn:
+            pid = db.add_advice_promotion(
+                conn, agent_id="senko", lesson_id=merged[0]["id"],
+                text="断定しない", streak=3, created_at=self.now)
+            db.set_advice_promotion_message(conn, pid, 701)
+        self.assertTrue(svd.dismiss_promotion(self.tmp.name, 701))
+        self.assertFalse(svd.dismiss_promotion(self.tmp.name, 701))
+        with db.connect(self.tmp.name) as conn:
+            self.assertEqual(len(db.advice_lessons(conn, "senko")), 1)
+
+    def test_advice_block_shows_streak(self):
+        block = svd.build_advice_block([{"text": "断定しない", "streak": 3},
+                                        {"text": "新しい気づき", "streak": 1}])
+        self.assertIn("断定しない（3週連続）", block)
+        self.assertIn("新しい気づき", block)
+        self.assertNotIn("新しい気づき（", block)

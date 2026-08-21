@@ -1124,12 +1124,39 @@ class AgentLoopsMixin:
                 hour=int(sv.get("hour", selfreview_distill.HOUR_DEFAULT))):
             return
         async with ANSWER_SEM:
-            advice = await asyncio.to_thread(
-                selfreview_distill.distill, DB_PATH, self.agent["id"],
+            result = await asyncio.to_thread(
+                selfreview_distill.distill_full, DB_PATH, self.agent["id"],
                 model=self.proactive_cfg.get(
                     "screen_model", proactive.SCREEN_MODEL_DEFAULT))
+        advice = [r["text"] for r in result["advice"]]
         await asyncio.to_thread(selfreview_distill.mark_ran, DB_PATH,
                                 self.agent["id"])
+        # 定着した癖（既定3週連続）は恒久ルールへ卒業提案（✅で昇格）
+        for grad in result["graduates"]:
+            def _register(g=grad):
+                with db.connect(DB_PATH) as conn:
+                    return db.add_advice_promotion(
+                        conn, agent_id=self.agent["id"], lesson_id=g["id"],
+                        text=g["text"], streak=g["streak"],
+                        created_at=reminders.fmt(reminders.now_jst()))
+            promo_id = await asyncio.to_thread(_register)
+            if promo_id is None:
+                continue   # 同じ助言で提案中のものがある
+            try:
+                channel = (self.get_channel(self.home_channel_id)
+                           or await self.fetch_channel(self.home_channel_id))
+                posted = await channel.send(
+                    selfreview_distill.build_graduation_post(grad),
+                    allowed_mentions=discord.AllowedMentions.none())
+
+                def _link(pid=promo_id, mid=posted.id):
+                    with db.connect(DB_PATH) as conn:
+                        db.set_advice_promotion_message(conn, pid, mid)
+                await asyncio.to_thread(_link)
+                print(f"[{self.agent['id']}] advice graduation proposed "
+                      f"(streak={grad['streak']})")
+            except Exception as e:
+                print(f"[{self.agent['id']}] graduation post failed: {e}")
         detail = (" / ".join(advice) if advice
                   else "低スコアのサンプル不足（蒸留見送り）")
         await asyncio.to_thread(

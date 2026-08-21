@@ -17,6 +17,7 @@ from core import ripple
 from core import study_group
 from core import proactive
 from core import rule_distill
+from core import selfreview_distill
 from core import reminders
 from platforms.discord.agent_runtime import (
     ADMIN_IDS,
@@ -72,6 +73,11 @@ class ReactionHandlersMixin:
                 await self._maybe_ripple_reaction(payload)
             except Exception as e:
                 print(f"[ripple] reaction failed: {e}")
+            # 助言の卒業提案への✅❌（2026-08-18・管理者のみ）
+            try:
+                await self._maybe_graduation_reaction(payload)
+            except Exception as e:
+                print(f"[advice_graduation] reaction failed: {e}")
 
     async def on_raw_reaction_remove(self, payload):
         if self.is_archiver:
@@ -177,6 +183,31 @@ class ReactionHandlersMixin:
                 channel = (self.get_channel(payload.channel_id)
                            or await self.fetch_channel(payload.channel_id))
                 await channel.send("-# 🤖 自動化案は見送りっス",
+                                   allowed_mentions=ALLOWED_MENTIONS)
+
+    async def _maybe_graduation_reaction(self, payload):
+        """助言の卒業提案への✅（恒久ルールへ昇格）/❌（管理者のみ）。"""
+        if (payload.guild_id != GUILD_ID
+                or str(payload.user_id) not in ADMIN_IDS):
+            return
+        emoji = str(payload.emoji)
+        if emoji == "✅":
+            text = await asyncio.to_thread(
+                selfreview_distill.promote, DB_PATH, payload.message_id,
+                payload.user_id)
+            if text:
+                channel = (self.get_channel(payload.channel_id)
+                           or await self.fetch_channel(payload.channel_id))
+                await channel.send(
+                    "-# 🎓 全体ルールに格上げしたっス（助言枠が1つ空いたっス）",
+                    allowed_mentions=ALLOWED_MENTIONS)
+        elif emoji == "❌":
+            if await asyncio.to_thread(
+                    selfreview_distill.dismiss_promotion, DB_PATH,
+                    payload.message_id):
+                channel = (self.get_channel(payload.channel_id)
+                           or await self.fetch_channel(payload.channel_id))
+                await channel.send("-# 🎓 格上げは見送りっス（助言のまま続けるっス）",
                                    allowed_mentions=ALLOWED_MENTIONS)
 
     async def _maybe_ripple_reaction(self, payload):

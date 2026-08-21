@@ -565,6 +565,20 @@ CREATE TABLE IF NOT EXISTS facts (
 );
 CREATE INDEX IF NOT EXISTS idx_facts_status ON facts(status, topic);
 
+-- 助言の卒業（2026-08-18）。週次蒸留で同じ改善因子が繰り返し出る＝定着した癖。
+-- 助言枠（毎週差し替え）に居座らせず、恒久ルールへ昇格させて枠を空ける。
+-- 昇格の判断は人間（✅/❌）＝物差しは人間が持つ原則を守る。
+CREATE TABLE IF NOT EXISTS advice_promotions (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id             TEXT,
+    lesson_id            INTEGER,
+    text                 TEXT,
+    streak               INTEGER,
+    proposal_message_id  INTEGER,
+    status               TEXT DEFAULT 'proposed',
+    created_at           TEXT
+);
+
 -- 未回答質問の救済（進化ロードマップ#31）。24時間放置された質問を判定・救済した
 -- 記録（重複判定の防止台帳）。status: rescued / shadow / skipped_answered
 CREATE TABLE IF NOT EXISTS rescues (
@@ -699,6 +713,10 @@ def _migrate(conn):
         # up=👍の勝ちパターン / advice=自己採点の蒸留（メッセージ非紐付け）
         conn.execute(
             "ALTER TABLE proactive_lessons ADD COLUMN polarity TEXT DEFAULT 'down'")
+    if lcols and "streak" not in lcols:
+        # 助言が何回連続で蒸留されたか（定着した癖の検出＝恒久ルールへの卒業）
+        conn.execute(
+            "ALTER TABLE proactive_lessons ADD COLUMN streak INTEGER DEFAULT 1")
 
 
 #: meta テーブルのキー: このアーカイブが記録しているDiscordサーバー
@@ -2769,17 +2787,88 @@ def recent_proactive_lessons(conn, agent_id, limit=5, polarity="down"):
 
 
 def replace_advice_lessons(conn, agent_id, texts, created_at):
-    """自己採点の蒸留結果を差し替える（古い助言を無効化→新しい助言を登録）。
-    週次で最新の蒸留だけが生きる＝助言が無限に積もらない。"""
-    conn.execute(
-        "UPDATE proactive_lessons SET active=0 WHERE agent_id=? AND polarity='advice'",
-        (agent_id,))
+    """蒸留結果を助言枠へ反映する（マージ方式・2026-08-18に差し替えから変更）。
+    同じ文言が再び蒸留されたら streak を+1して活かし続ける＝「毎週同じことを
+    学び直す」のを止め、定着した癖を検出できるようにする。
+    今回出なかった助言は無効化する（枠は最新の関心事で保つ）。
+    Returns: [{"id","text","streak"}]（反映後のactive助言）"""
+    rows = conn.execute(
+        """SELECT id, text, streak FROM proactive_lessons
+           WHERE agent_id=? AND polarity='advice' AND active=1""",
+        (agent_id,)).fetchall()
+    existing = {r[1]: {"id": r[0], "streak": r[2] or 1} for r in rows}
+    out = []
     for text in texts:
-        conn.execute(
-            """INSERT INTO proactive_lessons(agent_id, kind, channel_id,
-                   message_id, text, active, created_at, polarity)
-               VALUES(?, 'selfreview', NULL, NULL, ?, 1, ?, 'advice')""",
-            (agent_id, text, created_at))
+        prev = existing.pop(text, None)
+        if prev:
+            streak = (prev["streak"] or 1) + 1
+            conn.execute(
+                "UPDATE proactive_lessons SET streak=?, created_at=? "
+                "WHERE id=?", (streak, created_at, prev["id"]))
+            out.append({"id": prev["id"], "text": text, "streak": streak})
+        else:
+            cur = conn.execute(
+                """INSERT INTO proactive_lessons(agent_id, kind, channel_id,
+                       message_id, text, active, created_at, polarity, streak)
+                   VALUES(?, 'selfreview', NULL, NULL, ?, 1, ?, 'advice', 1)""",
+                (agent_id, text, created_at))
+            out.append({"id": cur.lastrowid, "text": text, "streak": 1})
+    for text, prev in existing.items():
+        conn.execute("UPDATE proactive_lessons SET active=0 WHERE id=?",
+                     (prev["id"],))
+    return out
+
+
+def advice_lessons(conn, agent_id):
+    """active な助言（streakつき・新しい順）。"""
+    rows = conn.execute(
+        """SELECT id, text, streak, created_at FROM proactive_lessons
+           WHERE agent_id=? AND polarity='advice' AND active=1
+           ORDER BY id DESC""", (agent_id,)).fetchall()
+    return [{"id": r[0], "text": r[1], "streak": r[2] or 1,
+             "created_at": r[3]} for r in rows]
+
+
+def add_advice_promotion(conn, *, agent_id, lesson_id, text, streak,
+                         created_at):
+    """卒業提案を1件登録（同じ助言で提案中のものがあれば None）。"""
+    dup = conn.execute(
+        """SELECT 1 FROM advice_promotions WHERE lesson_id=?
+           AND status='proposed' LIMIT 1""", (lesson_id,)).fetchone()
+    if dup:
+        return None
+    cur = conn.execute(
+        """INSERT INTO advice_promotions(agent_id, lesson_id, text, streak,
+               status, created_at) VALUES(?,?,?,?,'proposed',?)""",
+        (agent_id, lesson_id, text, streak, created_at))
+    return cur.lastrowid
+
+
+def set_advice_promotion_message(conn, promo_id, message_id):
+    conn.execute(
+        "UPDATE advice_promotions SET proposal_message_id=? WHERE id=?",
+        (message_id, promo_id))
+
+
+def advice_promotion_by_message(conn, message_id):
+    row = conn.execute(
+        """SELECT id, agent_id, lesson_id, text, streak FROM advice_promotions
+           WHERE proposal_message_id=? AND status='proposed'""",
+        (message_id,)).fetchone()
+    return {"id": row[0], "agent_id": row[1], "lesson_id": row[2],
+            "text": row[3], "streak": row[4]} if row else None
+
+
+def claim_advice_promotion(conn, promo_id, to_status):
+    cur = conn.execute(
+        """UPDATE advice_promotions SET status=? WHERE id=? AND
+           status='proposed'""", (to_status, promo_id))
+    return cur.rowcount == 1
+
+
+def deactivate_lesson_by_id(conn, lesson_id):
+    conn.execute("UPDATE proactive_lessons SET active=0 WHERE id=?",
+                 (lesson_id,))
 
 
 def count_downs_for_message(conn, message_id):

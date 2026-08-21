@@ -36,7 +36,7 @@ HOUR_DEFAULT = 9
 WINDOW_DAYS = 14       # 直近2週間ぶんを見る（週次実行の取りこぼし吸収）
 LOW_SCORE_MAX = 2      # このスコア以下を「低スコア」とする
 MIN_SAMPLES = 3        # 低スコアがこれ未満の週は蒸留しない
-MAX_ADVICE = 3
+MAX_ADVICE = 5          # 助言枠（毎回の回答に注入するので焦点が保てる範囲）
 MAX_ADVICE_LEN = 60
 DISTILL_TIMEOUT_SEC = 180
 _JSON_RE = re.compile(r"\[.*\]", re.S)
@@ -91,6 +91,7 @@ CATEGORY_LABELS = {
     "skeptic": "懐疑役が投稿を差し止めた理由",
 }
 MAX_ANSWER_EXCERPT = 120
+GRADUATE_STREAK = 3     # これだけ連続で蒸留された助言は恒久ルールへ卒業提案
 
 
 def summarize_detail(category, detail):
@@ -133,8 +134,10 @@ def collect_low_issues(db_path, agent_id, now=None):
     return issues
 
 
-def build_prompt(issues):
-    """蒸留プロンプト（純粋関数）。カテゴリごとにまとめて渡す。"""
+def build_prompt(issues, previous=None):
+    """蒸留プロンプト（純粋関数）。カテゴリごとにまとめて渡す。
+    previous: 前回の助言（同じ因子なら文言をそのまま再利用させる＝連続回数を
+    数えられるようにして「毎週同じことを学び直す」のを止める）。"""
     grouped = {}
     for category, line in issues[:60]:
         grouped.setdefault(category, []).append(line)
@@ -151,7 +154,13 @@ def build_prompt(issues):
         "社内AIアシスタントが自分の応答を点検して見つけた問題の一覧です"
         "（種類ごとにまとめてあります）。\n\n"
         + "\n\n".join(blocks) + "\n\n"
-        "繰り返し現れる改善因子を最大3つに蒸留してください。各項目は"
+        + (("【前回までの助言】\n"
+            + "\n".join(f"- {p}" for p in previous)
+            + "\n\n重要: 今回も同じ改善因子が出ている場合は、前回の文言を"
+              "**一字一句そのまま**再利用してください（表現を変えない）。"
+              "解消された因子は落とし、新しい因子だけ書き換えます。\n\n")
+           if previous else "")
+        + f"繰り返し現れる改善因子を最大{MAX_ADVICE}つに蒸留してください。各項目は"
         f"{MAX_ADVICE_LEN}文字以内・「〜する」の命令形の短文で、次回の回答時に"
         "そのまま心がけられる形にすること。一度きりの個別事象は含めない。"
         "複数の種類にまたがる共通の癖があれば優先して挙げる。\n"
@@ -180,24 +189,75 @@ def parse(raw):
 
 def distill(db_path, agent_id, *, model, invoke_fn=None, now=None):
     """1回の蒸留。保存した助言リストを返す（データ不足なら空リスト）。"""
+    result = distill_full(db_path, agent_id, model=model, invoke_fn=invoke_fn,
+                          now=now)
+    return [r["text"] for r in result["advice"]]
+
+
+def distill_full(db_path, agent_id, *, model, invoke_fn=None, now=None):
+    """蒸留してマージ保存し、卒業候補も返す。
+    Returns: {"advice": [{"id","text","streak"}], "graduates": [同型]}"""
     issues = collect_low_issues(db_path, agent_id, now=now)
     if len(issues) < MIN_SAMPLES:
-        return []
+        return {"advice": [], "graduates": []}
+    with db.connect(db_path) as conn:
+        previous = [r["text"] for r in db.advice_lessons(conn, agent_id)]
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
         p, model=model, timeout=DISTILL_TIMEOUT_SEC).text)
-    advice = parse(fn(build_prompt(issues)))
+    advice = parse(fn(build_prompt(issues, previous=previous)))
     if not advice:
-        return []
+        return {"advice": [], "graduates": []}
     with db.connect(db_path) as conn:
-        db.replace_advice_lessons(conn, agent_id, advice,
-                                  reminders.fmt(now or reminders.now_jst()))
-    return advice
+        merged = db.replace_advice_lessons(
+            conn, agent_id, advice,
+            reminders.fmt(now or reminders.now_jst()))
+    graduates = [m for m in merged if m["streak"] >= GRADUATE_STREAK]
+    return {"advice": merged, "graduates": graduates}
+
+
+def build_graduation_post(graduate):
+    """卒業提案の本文（純粋関数）。定着した癖は恒久ルールへ。"""
+    return (f"🎓 この心がけ、{graduate['streak']}週連続で同じ反省が出てるっス:\n"
+            f"> {graduate['text']}\n"
+            "-# 一時的な癖じゃなく**定着した課題**っぽいので、"
+            "✅で全体ルールに格上げして助言枠を空けるっス"
+            "（❌なら助言のまま続けるっス）")
+
+
+def promote(db_path, message_id, admin_id):
+    """✅: 助言を恒久ルール（global）へ昇格し、助言枠から降ろす（CAS排他）。
+    Returns: 昇格したルール文 or None。"""
+    now = reminders.fmt(reminders.now_jst())
+    with db.connect(db_path) as conn:
+        promo = db.advice_promotion_by_message(conn, message_id)
+        if promo is None or not db.claim_advice_promotion(
+                conn, promo["id"], "applied"):
+            return None
+        db.add_rule(conn, agent_id=promo["agent_id"], scope="global",
+                    rule_text=f"心がけ: {promo['text']}",
+                    created_by=str(admin_id), source_msg_id=message_id,
+                    created_at=now)
+        db.deactivate_lesson_by_id(conn, promo["lesson_id"])
+    return promo["text"]
+
+
+def dismiss_promotion(db_path, message_id):
+    """❌: 卒業を見送る（助言のまま継続）。"""
+    with db.connect(db_path) as conn:
+        promo = db.advice_promotion_by_message(conn, message_id)
+        if promo is None:
+            return False
+        return db.claim_advice_promotion(conn, promo["id"], "dismissed")
 
 
 def build_advice_block(advice_rows):
     """通常回答プロンプト用の助言ブロック（純粋関数・無ければ空文字）。"""
     if not advice_rows:
         return ""
-    lines = [f"- {r['text']}" for r in advice_rows]
+    lines = []
+    for r in advice_rows:
+        streak = r.get("streak") or 1
+        mark = f"（{streak}週連続）" if streak >= 2 else ""
+        lines.append(f"- {r['text']}{mark}")
     return ("【自己改善メモ（自分の点検記録から自動蒸留した心がけ）】\n"
             + "\n".join(lines))
