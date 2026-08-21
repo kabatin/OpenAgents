@@ -335,6 +335,70 @@ export function archivedMessageCount(): number {
   );
 }
 
+export type ObservationRow = {
+  agentId: string;
+  channel: string | null;
+  author: string | null;
+  trigger: string | null;
+  detail: string | null;
+  createdAt: string | null;
+  channelId: number | null;
+  triggerMessageId: number | null;
+};
+
+/**
+ * 「その他」枠のシャドー記録。自発発言の4類型の外で、エージェントが
+ * 「同僚なら一言添える」と判断したもの。**投稿はされていない**ので、
+ * ホワイトリスト方式が妥当かを人間が読んで判断するための材料。
+ */
+export function observationShadow(limit = 100): ObservationRow[] {
+  return safeQuery(
+    (conn) =>
+      conn
+        .prepare<[number], ObservationRow>(
+          `SELECT p.agent_id AS agentId, c.name AS channel,
+                  u.display_name AS author,
+                  SUBSTR(m.content, 1, 160) AS trigger,
+                  p.detail AS detail, p.created_at AS createdAt,
+                  p.channel_id AS channelId,
+                  p.trigger_message_id AS triggerMessageId
+             FROM proactive_log p
+             LEFT JOIN channels c ON c.id = p.channel_id
+             LEFT JOIN messages m ON m.id = p.trigger_message_id
+             LEFT JOIN users u ON u.id = m.author_id
+            WHERE p.kind = 'others' AND p.action = 'shadow'
+            ORDER BY p.id DESC LIMIT ?`,
+        )
+        .all(limit),
+    [],
+  );
+}
+
+export type AdviceRow = {
+  id: number;
+  agentId: string;
+  text: string;
+  streak: number;
+  createdAt: string | null;
+};
+
+/** 回答に常時注入されている自己改善メモ（週次蒸留の結果・streakは連続週数）。 */
+export function adviceLessons(): AdviceRow[] {
+  return safeQuery(
+    (conn) =>
+      conn
+        .prepare<[], AdviceRow>(
+          `SELECT id, agent_id AS agentId, text,
+                  COALESCE(streak, 1) AS streak, created_at AS createdAt
+             FROM proactive_lessons
+            WHERE polarity = 'advice' AND active = 1
+            ORDER BY streak DESC, id DESC`,
+        )
+        .all(),
+    [],
+  );
+}
+
 export type TermRow = {
   term: string;
   description: string | null;

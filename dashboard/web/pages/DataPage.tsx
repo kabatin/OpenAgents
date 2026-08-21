@@ -64,6 +64,25 @@ type GlossaryPair = {
 
 type Dictionary = { terms: Term[]; glossary: GlossaryPair[] };
 
+type ShadowRow = {
+  agentId: string;
+  channel: string | null;
+  author: string | null;
+  trigger: string | null;
+  detail: string | null;
+  createdAt: string | null;
+  channelId: number | null;
+  triggerMessageId: number | null;
+};
+
+type AdviceRow = {
+  id: number;
+  agentId: string;
+  text: string;
+  streak: number;
+  createdAt: string | null;
+};
+
 const TABS = [
   { id: "rules", label: "ルール記憶" },
   { id: "dictionary", label: "名前辞書" },
@@ -71,6 +90,7 @@ const TABS = [
   { id: "capabilities", label: "能力リクエスト" },
   { id: "personas", label: "Webhook人格" },
   { id: "sheets", label: "シート登録簿" },
+  { id: "learning", label: "学びと実験" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -92,6 +112,9 @@ export function DataPage() {
     tab === "reminders" ? "/data/reminders" : null,
   );
   const { data: dict } = useFetch<Dictionary>(tab === "dictionary" ? "/data/dictionary" : null);
+  const { data: learning } = useFetch<{ shadow: ShadowRow[]; advice: AdviceRow[] }>(
+    tab === "learning" ? "/data/observations" : null,
+  );
 
   const c = summary?.counters;
 
@@ -233,6 +256,63 @@ export function DataPage() {
                     {g.createdBy !== null && (
                       <span className="shrink-0 text-2xs text-faint">{g.createdBy}</span>
                     )}
+                  </li>
+                ))
+              )}
+            </ul>
+          </div>
+        )}
+
+        {tab === "learning" && (
+          <div className="pb-2">
+            <div className="eyebrow px-4 pb-1 pt-3">
+              いま効いている自己改善メモ（週次蒸留・回答時に常時注入／3週連続で
+              恒久ルールへ格上げ提案）
+            </div>
+            <ul>
+              {(learning?.advice ?? []).length === 0 ? (
+                <Empty>蒸留された助言はまだありません</Empty>
+              ) : (
+                learning?.advice.map((a) => (
+                  <li
+                    key={a.id}
+                    className="flex items-baseline gap-2.5 border-t border-hairline px-4 py-2 text-xs first:border-t-0"
+                  >
+                    <span className="w-20 shrink-0 text-faint">{agentLabel(a.agentId)}</span>
+                    <span className="min-w-0 flex-1">{a.text}</span>
+                    <Chip tone={a.streak >= 3 ? "danger" : a.streak >= 2 ? "warn" : "neutral"}>
+                      {a.streak}週連続
+                    </Chip>
+                  </li>
+                ))
+              )}
+            </ul>
+
+            <div className="eyebrow px-4 pb-1 pt-5">
+              観察の実験（4類型の外で「同僚なら一言添える」と判断した場面。
+              <span className="font-medium">投稿はしていません</span>）
+            </div>
+            <p className="px-4 pb-2 text-2xs leading-relaxed text-muted">
+              「これは言ってほしかった」が多ければ類型を追加、「これはうざい」が多ければ
+              いまの絞り込みが正しい、という判断材料です。
+            </p>
+            <ul>
+              {(learning?.shadow ?? []).length === 0 ? (
+                <Empty>まだ記録はありません（4類型の外で言いたくなる場面がなかった）</Empty>
+              ) : (
+                learning?.shadow.map((row, i) => (
+                  <li
+                    key={`${row.triggerMessageId ?? i}-${i}`}
+                    className="border-t border-hairline px-4 py-2.5 text-xs first:border-t-0"
+                  >
+                    <div className="flex items-baseline gap-2 text-2xs text-faint">
+                      <span>{jstStamp(row.createdAt)}</span>
+                      <span>#{row.channel ?? "?"}</span>
+                      <span>{row.author ?? "?"}</span>
+                      <span className="ml-auto">{agentLabel(row.agentId)}</span>
+                    </div>
+                    <div className="mt-1 text-muted">「{row.trigger ?? ""}」</div>
+                    <div className="mt-1">→ {row.detail ?? ""}</div>
                   </li>
                 ))
               )}

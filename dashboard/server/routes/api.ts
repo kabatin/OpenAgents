@@ -13,11 +13,13 @@ import {
   readConfig,
 } from "../config/store.ts";
 import {
+  adviceLessons,
   capabilityRequests,
   counters,
   deployHistory,
   devJobs,
   glossary,
+  observationShadow,
   recentActivity,
   roadmapItems,
   rules,
@@ -185,6 +187,10 @@ api.get("/data/summary", async (c) => {
 });
 
 api.get("/data/rules", (c) => c.json(rules()));
+// 観察の実験（シャドー記録）と、いま効いている自己改善メモ
+api.get("/data/observations", (c) =>
+  c.json({ shadow: observationShadow(), advice: adviceLessons() }),
+);
 api.get("/data/capabilities", (c) => c.json(capabilityRequests()));
 api.get("/data/roadmap", (c) => c.json(roadmapItems()));
 api.get("/data/dev-jobs", (c) => c.json({ jobs: devJobs(), deploys: deployHistory() }));
