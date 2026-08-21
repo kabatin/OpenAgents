@@ -35,7 +35,7 @@ brew install ffmpeg
   - `DISCORD_MEETINGBOT_TOKEN` — Discord Botトークン
   - `MEETINGBOT_WEBHOOK_URL` — 議事録投稿先のDiscord Webhook URL
 - `config.json`（非シークレット設定のみ・git追跡外）:
-  - `guild_id` / `voice_channel_name`
+  - `guild_id` / `voice_channel_id`
   - `user_mapping`（Discord表示名→メンションIDの対応表。議事録のTODO担当者に使用）
   - `minutes_model`（省略時 claude-sonnet-4-6）
 

@@ -245,15 +245,15 @@ describe("議事録BOTの設定は config.json の一部", () => {
   it("meeting スコープのパスは meeting_bot 配下へ書かれる", () => {
     const patches = toPatches(
       parseScope("meeting"),
-      [{ path: "voice_channel_name", value: "会議室" }],
+      [{ path: "voice_channel_id", value: "123456789012345678" }],
       indexOf,
     );
     // カタログ上はセクション相対。保存時に store が接頭辞を足す
-    expect(patches).toEqual([{ path: "voice_channel_name", value: "会議室" }]);
+    expect(patches).toEqual([{ path: "voice_channel_id", value: "123456789012345678" }]);
     const next = applyPatches(config, [
-      { path: "meeting_bot.voice_channel_name", value: "会議室" },
+      { path: "meeting_bot.voice_channel_id", value: "123456789012345678" },
     ]);
-    expect(getPath(next, "meeting_bot.voice_channel_name")).toBe("会議室");
+    expect(getPath(next, "meeting_bot.voice_channel_id")).toBe("123456789012345678");
     expect(checkInvariants(next)).toEqual([]);
   });
 

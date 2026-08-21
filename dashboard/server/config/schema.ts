@@ -58,7 +58,7 @@ export const meetingConfigSchema = z
     enabled: z.boolean().optional(),
     token: z.string().optional(),
     guild_id: idLike.optional(),
-    voice_channel_name: z.string().optional(),
+    voice_channel_id: idLike.optional(),
     user_mapping: z.record(z.string()).optional(),
   })
   .passthrough();

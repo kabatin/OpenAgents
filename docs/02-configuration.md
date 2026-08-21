@@ -172,7 +172,7 @@ DBに記録します（複数だと同じ発言が二重に記録されます）
 "meeting_bot": {
   "enabled": false,
   "token": "",
-  "voice_channel_name": "",
+  "voice_channel_id": "",
   "user_mapping": {}
 }
 ```

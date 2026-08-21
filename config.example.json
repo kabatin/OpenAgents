@@ -56,7 +56,7 @@
   "meeting_bot": {
     "enabled": false,
     "token": "",
-    "voice_channel_name": "",
+    "voice_channel_id": "",
     "user_mapping": {}
   },
   "_comment_meeting_bot": "議事録BOT。指定したボイスチャンネルの会話を録音し、文字起こしと議事録を作ります。音声関連の追加インストールが必要です。",

@@ -248,9 +248,9 @@ const MEETING_BOT: Setting[] = [
     secret: true,
   },
   {
-    path: "voice_channel_name",
+    path: "voice_channel_id",
     label: "録音する音声チャンネル",
-    desc: "この名前のボイスチャンネルに人が集まると、議事録BOTが録音を始めます。",
+    desc: "このIDのボイスチャンネルに人が集まると、議事録BOTが録音を始めます。チャンネル名を変えても影響しません。IDはDiscordでチャンネルを右クリック→「IDをコピー」で確認できます。",
     kind: "string",
   },
   {

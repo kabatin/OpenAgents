@@ -164,9 +164,9 @@ def validate(cfg):
     if meeting.get("enabled"):
         if not str(meeting.get("token") or "").strip():
             problems.append("議事録BOTが有効ですが、Botトークンが未設定です")
-        if not meeting.get("voice_channel_name"):
+        if not meeting.get("voice_channel_id"):
             problems.append("議事録BOTが有効ですが、録音対象の"
-                            "ボイスチャンネル名が未設定です")
+                            "ボイスチャンネルID が未設定です")
     return problems
 
 

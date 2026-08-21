@@ -48,6 +48,16 @@ _app_config = app_config.load()
 config = _app_config.get('meeting_bot') or {}
 config.setdefault('guild_id', _app_config.get('guild_id'))
 
+# 対象VCはID参照（チャンネルを改名しても影響を受けないように。名前参照は廃止）
+try:
+    VOICE_CHANNEL_ID = int(config['voice_channel_id'])
+except (KeyError, TypeError, ValueError):
+    raise RuntimeError(
+        '議事録BOTの録音対象ボイスチャンネルが未設定です。'
+        'ダッシュボードの「議事録BOT」から設定してください'
+        '（config.json の meeting_bot.voice_channel_id）'
+    )
+
 DISCORD_TOKEN = (os.environ.get('DISCORD_MEETINGBOT_TOKEN')
                  or config.get('token'))
 if not DISCORD_TOKEN:
@@ -411,7 +421,7 @@ async def on_ready():
         guild = bot.get_guild(int(config['guild_id']))
         if not guild:
             return
-        voice_channel = discord.utils.get(guild.voice_channels, name=config['voice_channel_name'])
+        voice_channel = guild.get_channel(VOICE_CHANNEL_ID)
         if not voice_channel:
             return
 
@@ -439,13 +449,11 @@ async def on_voice_state_update(member, before, after):
     if before.channel == after.channel:
         return
 
-    target_channel_name = config['voice_channel_name']
-
     # 誰かがターゲットチャンネルに新しく参加 → Bot未参加なら自動参加
-    if (after.channel and after.channel.name == target_channel_name and
+    if (after.channel and after.channel.id == VOICE_CHANNEL_ID and
         (not before.channel or before.channel.id != after.channel.id)):
         if not is_recording and not (voice_client and voice_client.is_connected()):
-            print(f"👀 {member.name} が {target_channel_name} に参加。自動参加します。", flush=True)
+            print(f"👀 {member.name} が {after.channel.name} に参加。自動参加します。", flush=True)
             asyncio.ensure_future(auto_join_meeting())
             return
 
@@ -485,9 +493,9 @@ async def auto_join_meeting():
         print(f"❌ Guild {config['guild_id']} が見つかりません")
         return
 
-    voice_channel = discord.utils.get(guild.voice_channels, name=config['voice_channel_name'])
+    voice_channel = guild.get_channel(VOICE_CHANNEL_ID)
     if not voice_channel:
-        print(f"❌ ボイスチャンネル '{config['voice_channel_name']}' が見つかりません")
+        print(f"❌ ボイスチャンネル (ID: {VOICE_CHANNEL_ID}) が見つかりません")
         return
 
     try:
@@ -580,7 +588,7 @@ async def _recording_watchdog():
                 if elapsed >= 10:
                     try:
                         guild = bot.get_guild(int(config['guild_id']))
-                        voice_channel = discord.utils.get(guild.voice_channels, name=config['voice_channel_name']) if guild else None
+                        voice_channel = guild.get_channel(VOICE_CHANNEL_ID) if guild else None
                         if not voice_channel:
                             print("❌ 再参加先のボイスチャンネルが見つかりません", flush=True)
                             disconnected_since = time.time() - 5
