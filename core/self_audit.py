@@ -130,7 +130,10 @@ def collect_bias(db_path, agent_id, now=None, days=30):
     now = now or reminders.now_jst()
     since = reminders.fmt(now - timedelta(days=days))
     with db.connect(db_path) as conn:
-        return db.bias_stats(conn, agent_id, since)
+        stats = db.bias_stats(conn, agent_id, since)
+        # 救済記録（2026-08-18で接続）: 誰の質問が放置されがちかも同じ点検で見る
+        stats["rescues"] = db.rescue_stats(conn, agent_id, since)
+    return stats
 
 
 def analyze_bias(stats):
@@ -146,8 +149,18 @@ def analyze_bias(stats):
     if channels and channels[0]["n"] / total >= BIAS_DOMINANT:
         findings.append(f"発言の{round(100 * channels[0]['n'] / total)}%が"
                         f"#{channels[0]['name']}に集中")
+    # 救済の偏り（誰の質問が沈みやすいか）＝組織側の弱点として併記する
+    rescues = stats.get("rescues") or {}
+    r_people = rescues.get("people") or []
+    r_total = rescues.get("total") or 0
+    if r_total >= BIAS_MIN_TOTAL and r_people \
+            and r_people[0]["n"] / r_total >= BIAS_DOMINANT:
+        findings.append(
+            f"放置されがちな質問の{round(100 * r_people[0]['n'] / r_total)}%が"
+            f"{r_people[0]['name']}さんの投稿（拾い上げ{r_total}件中）")
     return {"total": total, "people": people[:5], "channels": channels[:5],
-            "findings": findings}
+            "findings": findings, "rescues": {"total": r_total,
+                                              "people": r_people[:3]}}
 
 
 def build_bias_post(agent_name, result):
@@ -158,6 +171,11 @@ def build_bias_post(agent_name, result):
         f"{p['name']}{p['n']}件" for p in result["people"]) or "—")
     lines.append("- 場所: " + "、".join(
         f"#{c['name']}{c['n']}件" for c in result["channels"]) or "—")
+    rescues = result.get("rescues") or {}
+    if rescues.get("total"):
+        who = "、".join(f"{p['name']}{p['n']}件"
+                        for p in rescues.get("people") or [])
+        lines.append(f"- 拾い上げた未回答質問: {rescues['total']}件（{who}）")
     if result["findings"]:
         lines.append("⚠️ " + "／".join(result["findings"])
                      + "。他の人・他のchも見るようにするっス")

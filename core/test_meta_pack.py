@@ -311,3 +311,37 @@ class SelfAuditLogTest(TestBase):
 
     def test_empty_counts(self):
         self.assertEqual(self_audit.format_counts({}), "0件")
+
+
+class RescueBiasTest(TestBase):
+    """救済記録をバイアス点検へ統合（2026-08-18・④）。141件が重複防止のみだった。"""
+
+    def _rescue(self, msg_id, author_id, name):
+        with db.connect(self.db_path) as conn:
+            db.upsert_channel(conn, id=7, name="g", type="text")
+            db.upsert_user(conn, id=author_id, name=f"u{author_id}",
+                           display_name=name, is_bot=False)
+            db.insert_message(conn, id=msg_id, channel_id=7,
+                              author_id=author_id, content="質問",
+                              created_at="t")
+            db.add_rescue(conn, message_id=msg_id, agent_id="senko",
+                          status="answered", posted_message_id=msg_id + 1,
+                          created_at="2026-08-10T10:00")
+
+    def test_rescue_concentration_reported(self):
+        for i in range(9):
+            self._rescue(100 + i * 2, 1, "常谷")
+        stats = self_audit.collect_bias(self.db_path, "senko",
+                                        now=datetime(2026, 8, 18, 16, 0))
+        self.assertEqual(stats["rescues"]["total"], 9)
+        result = self_audit.analyze_bias(stats)
+        # 発言側の母数が無くても救済の偏りは集計される
+        self.assertEqual(stats["rescues"]["people"][0]["name"], "常谷")
+        post = self_audit.build_bias_post("AI戦子", result) if result else ""
+        if post:
+            self.assertIn("拾い上げた未回答質問", post)
+
+    def test_no_rescues_no_line(self):
+        stats = self_audit.collect_bias(self.db_path, "senko",
+                                        now=datetime(2026, 8, 18, 16, 0))
+        self.assertEqual(stats["rescues"]["total"], 0)

@@ -713,6 +713,12 @@ def _migrate(conn):
         # up=👍の勝ちパターン / advice=自己採点の蒸留（メッセージ非紐付け）
         conn.execute(
             "ALTER TABLE proactive_lessons ADD COLUMN polarity TEXT DEFAULT 'down'")
+    gcols = [r[1] for r in conn.execute(
+        "PRAGMA table_info(golden_set)").fetchall()]
+    if gcols and "status" not in gcols:
+        # 汚れた既存行（質問と回答が無関係なペア）を無効化できるようにする
+        conn.execute(
+            "ALTER TABLE golden_set ADD COLUMN status TEXT DEFAULT 'active'")
     if lcols and "streak" not in lcols:
         # 助言が何回連続で蒸留されたか（定着した癖の検出＝恒久ルールへの卒業）
         conn.execute(
@@ -2101,8 +2107,37 @@ def add_golden(conn, *, agent_id, question, answer, source_answer_id,
     return cur.rowcount == 1
 
 
-def count_golden(conn):
+def count_golden(conn, active_only=False):
+    if active_only:
+        return conn.execute(
+            "SELECT COUNT(*) FROM golden_set WHERE status='active'"
+        ).fetchone()[0]
     return conn.execute("SELECT COUNT(*) FROM golden_set").fetchone()[0]
+
+
+def is_unsolicited_post(conn, message_id):
+    """その投稿が一方的な発信（レポート/リマインド配信/自発発言/催促など）か。
+    proactive_log に posted_message_id があるものは「質問への回答」ではない
+    ＝評価セットのQ&Aペアとして成立しない（2026-08-18の品質問題）。"""
+    return conn.execute(
+        "SELECT 1 FROM proactive_log WHERE posted_message_id=? LIMIT 1",
+        (message_id,)).fetchone() is not None
+
+
+def golden_rows(conn, active_only=True):
+    rows = conn.execute(
+        f"""SELECT id, agent_id, question, answer, source_answer_id, status
+            FROM golden_set
+            {"WHERE status='active'" if active_only else ""}
+            ORDER BY id""").fetchall()
+    return [{"id": r[0], "agent_id": r[1], "question": r[2], "answer": r[3],
+             "source_answer_id": r[4], "status": r[5]} for r in rows]
+
+
+def set_golden_status(conn, golden_id, status):
+    cur = conn.execute("UPDATE golden_set SET status=? WHERE id=?",
+                       (status, golden_id))
+    return cur.rowcount == 1
 
 
 def preceding_human_message(conn, channel_id, before_id):
@@ -2894,6 +2929,22 @@ def selfreview_scores_since(conn, agent_id, since):
            ORDER BY id DESC""",
         (agent_id, since)).fetchall()
     return [{"detail": r[0], "created_at": r[1]} for r in rows]
+
+
+def rescue_stats(conn, agent_id, since):
+    """救済（未回答質問の拾い上げ）の集計（2026-08-18）。
+    141件貯まっていたのに重複防止だけに使われていたので、バイアス点検の材料に
+    する＝「誰の質問が放置されがちか」を組織の弱点として可視化する。
+    Returns: {"total": n, "people": [{"name","n"}]}"""
+    rows = conn.execute(
+        """SELECT COALESCE(u.display_name, '不明'), COUNT(*)
+           FROM rescues r
+           LEFT JOIN messages m ON m.id = r.message_id
+           LEFT JOIN users u ON u.id = m.author_id
+           WHERE r.agent_id=? AND r.created_at >= ?
+           GROUP BY 1 ORDER BY 2 DESC""", (agent_id, since)).fetchall()
+    return {"total": sum(r[1] for r in rows),
+            "people": [{"name": r[0], "n": r[1]} for r in rows]}
 
 
 def rated_normal_answers(conn, agent_id, since, value="down", limit=30):
