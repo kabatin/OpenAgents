@@ -163,10 +163,14 @@ def collect_cycle(db_path, agent_id, *, home_channel_id,
 # ---------------------------------------------------------------- 2) 一次判定
 
 def build_screen_prompt(messages, agent_name, scope_note=None,
-                        colleagues=None, variant_note=None):
+                        colleagues=None, variant_note=None,
+                        allow_others=False):
     """一次判定プロンプト（純粋関数・テスト対象）。
     scope_note: 個体ごとの縄張り / colleagues: {id: (名前, 専門)}（RM#56）
-    variant_note: A/B実験の変種追記文（RM#12・空なら対照群）。"""
+    variant_note: A/B実験の変種追記文（RM#12・空なら対照群）
+    allow_others: 4類型の外の「同僚なら一言添える」枠（2026-08-18のシャドー
+    実験。投稿はせず記録だけ取り、ホワイトリスト方式が正しいかを実データで
+    検証する）。"""
     lines = []
     for m in messages:
         text = (m["content"] or "").strip().replace("\n", " ")
@@ -198,6 +202,14 @@ def build_screen_prompt(messages, agent_name, scope_note=None,
                          for cid, (n, sp) in colleagues.items())
             + "。雑談・既に解決済みは対象外・迷ったら挙げない）。\n\n")
            if colleagues else "")
+        + (("さらに**実験的な観察**として、上の4類型のどれにも当てはまらないが"
+            "「自分が同じチームの同僚だったら、ここは一言添えると思う」発言が"
+            "あれば others に最大1件だけ挙げる。\n"
+            "- これは**投稿されない**（記録だけを取る実験）。だから4類型の"
+            "厳しい基準ではなく、同僚としての素直な感覚で選んでよい\n"
+            "- 黙るのも立派な選択。無いなら空配列にする（無理に埋めない）\n"
+            "- 上の candidates に挙げた発言は others に重複させない\n\n")
+           if allow_others else "")
         + "加えて、発言の中に「チームとして明確に決定・確定した事項」"
         "（〜で行く/〜に決定/〜で確定 などの言い切り）があれば decisions に"
         "抽出する。検討中・個人の予定・願望は含めない（迷ったら含めない）。\n\n"
@@ -206,10 +218,46 @@ def build_screen_prompt(messages, agent_name, scope_note=None,
         '"search_terms": ["検索語"], "reason": "一言"}], '
         '"decisions": [{"message_id": 123, "decision": "決定内容を1文で", '
         '"topic": "主題"}], '
-        '"handoff": [{"message_id": 123, "to": "agent2", "reason": "一言"}]}\n'
-        '該当なしなら {"candidates": [], "decisions": [], "handoff": []}\n\n'
+        '"handoff": [{"message_id": 123, "to": "agent2", "reason": "一言"}]'
+        + ((', "others": [{"message_id": 123, "would_say": "添えるとしたら'
+            '何と言うか1文", "why": "なぜ添えたいか一言"}]')
+           if allow_others else "")
+        + "}\n"
+        '該当なしなら {"candidates": [], "decisions": [], "handoff": []'
+        + (', "others": []' if allow_others else "") + "}\n\n"
         "【発言一覧】\n" + "\n".join(lines)
     )
+
+
+MAX_OTHERS = 1
+
+
+def parse_screen_others(raw, valid_ids):
+    """「その他」枠の解釈（純粋関数・シャドー専用）。
+    Returns: [{"message_id","would_say","why"}]。壊れていれば空。"""
+    m = _JSON_RE.search(raw or "")
+    if not m:
+        return []
+    try:
+        data = json.loads(m.group(0))
+    except ValueError:
+        return []
+    out = []
+    for o in (data.get("others") or [])[:MAX_OTHERS]:
+        if not isinstance(o, dict):
+            continue
+        try:
+            mid = int(o.get("message_id"))
+        except (TypeError, ValueError):
+            continue
+        if mid not in valid_ids:
+            continue
+        said = str(o.get("would_say") or "").strip()[:200]
+        if not said:
+            continue
+        out.append({"message_id": mid, "would_say": said,
+                    "why": str(o.get("why") or "").strip()[:120]})
+    return out
 
 
 def parse_screen_response(raw, valid_ids):
@@ -293,12 +341,14 @@ def parse_screen_handoffs(raw, valid_ids, valid_targets):
 
 def screen(messages, *, agent_name, model=SCREEN_MODEL_DEFAULT,
            scope_note=None, colleagues=None, invoke_fn=None,
-           variant_note=None):
-    """一次判定: {"candidates", "decisions", "handoffs"} を返す。
-    invoke_fnはテスト差し替え口。variant_note はA/B実験の追記文（RM#12）。"""
+           variant_note=None, allow_others=False):
+    """一次判定: {"candidates", "decisions", "handoffs", "others"} を返す。
+    invoke_fnはテスト差し替え口。variant_note はA/B実験の追記文（RM#12）。
+    allow_others は「その他」枠のシャドー実験（othersは投稿しない）。"""
     prompt = build_screen_prompt(messages, agent_name, scope_note=scope_note,
                                  colleagues=colleagues,
-                                 variant_note=variant_note)
+                                 variant_note=variant_note,
+                                 allow_others=allow_others)
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
         p, model=model, timeout=SCREEN_TIMEOUT_SEC).text)
     raw = fn(prompt)
@@ -306,7 +356,8 @@ def screen(messages, *, agent_name, model=SCREEN_MODEL_DEFAULT,
     return {"candidates": parse_screen_response(raw, ids),
             "decisions": parse_screen_decisions(raw, ids),
             "handoffs": parse_screen_handoffs(
-                raw, ids, set((colleagues or {}).keys()))}
+                raw, ids, set((colleagues or {}).keys())),
+            "others": parse_screen_others(raw, ids) if allow_others else []}
 
 
 # ---------------------------------------------------------------- 3) 二次判定

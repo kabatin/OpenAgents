@@ -574,3 +574,55 @@ class LogEntryTest(ProactiveTestBase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OthersShadowTest(unittest.TestCase):
+    """「その他」枠のシャドー実験（2026-08-18）。4類型の外を投稿せず記録する。"""
+
+    MSGS = [{"id": 1, "channel": "g", "author": "常谷",
+             "content": "この配色どう思う"},
+            {"id": 2, "channel": "g", "author": "板垣",
+             "content": "納期は9月です"}]
+
+    def test_prompt_opt_in_only(self):
+        with_others = proactive.build_screen_prompt(
+            self.MSGS, "AI戦子", allow_others=True)
+        self.assertIn("others", with_others)
+        self.assertIn("投稿されない", with_others)
+        self.assertIn("黙るのも立派な選択", with_others)
+        plain = proactive.build_screen_prompt(self.MSGS, "AI戦子")
+        self.assertNotIn("others", plain)
+
+    def test_parse_others(self):
+        raw = ('{"candidates": [], "decisions": [], "handoff": [], '
+               '"others": [{"message_id": 1, "would_say": "前回は緑基調で'
+               '好評でしたっス", "why": "過去の配色評価が参考になる"}]}')
+        got = proactive.parse_screen_others(raw, {1, 2})
+        self.assertEqual(len(got), 1)
+        self.assertEqual(got[0]["message_id"], 1)
+        self.assertIn("緑基調", got[0]["would_say"])
+
+    def test_parse_others_validates(self):
+        # 未知のid・would_say空・壊れたJSONは捨てる
+        self.assertEqual(proactive.parse_screen_others(
+            '{"others": [{"message_id": 99, "would_say": "x"}]}', {1}), [])
+        self.assertEqual(proactive.parse_screen_others(
+            '{"others": [{"message_id": 1, "would_say": ""}]}', {1}), [])
+        self.assertEqual(proactive.parse_screen_others("junk", {1}), [])
+
+    def test_others_capped_at_one(self):
+        raw = ('{"others": [{"message_id": 1, "would_say": "a"},'
+               '{"message_id": 2, "would_say": "b"}]}')
+        self.assertEqual(len(proactive.parse_screen_others(raw, {1, 2})), 1)
+
+    def test_screen_returns_others_only_when_enabled(self):
+        raw = ('{"candidates": [], "decisions": [], "handoff": [], '
+               '"others": [{"message_id": 1, "would_say": "一言"}]}')
+        off = proactive.screen(self.MSGS, agent_name="AI戦子",
+                               invoke_fn=lambda p: raw)
+        self.assertEqual(off["others"], [])
+        on = proactive.screen(self.MSGS, agent_name="AI戦子",
+                              invoke_fn=lambda p: raw, allow_others=True)
+        self.assertEqual(len(on["others"]), 1)
+        # 4類型の判定は others の有無に影響されない
+        self.assertEqual(off["candidates"], on["candidates"])

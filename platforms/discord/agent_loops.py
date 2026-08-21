@@ -1333,7 +1333,24 @@ class AgentLoopsMixin:
                 model=cfg.get("screen_model", proactive.SCREEN_MODEL_DEFAULT),
                 scope_note=cfg.get("scope_note"),
                 colleagues=colleagues,
-                variant_note=variant_note)
+                variant_note=variant_note,
+                allow_others=bool(cfg.get("others_shadow")))
+        # 「その他」枠のシャドー実験（2026-08-18）: 4類型の外で「同僚なら一言
+        # 添える」と判断したものを**投稿せずログだけ**残す。2週間後に人間が
+        # 読んで、ホワイトリスト方式が正しいかを実データで判断する
+        for o in screened.get("others") or []:
+            trig = next((m for m in digest["messages"]
+                         if m["id"] == o["message_id"]), None)
+            if trig is None:
+                continue
+            await asyncio.to_thread(
+                proactive.log_entry, DB_PATH, self.agent["id"],
+                kind="others", action="shadow",
+                channel_id=trig["channel_id"],
+                trigger_message_id=trig["id"],
+                detail=f"{o['would_say']} ／理由: {o['why']}"[:400])
+            print(f"[{self.agent['id']}] others(shadow) in "
+                  f"#{trig['channel']}: {o['would_say'][:40]}")
         # 会話から検出した決定事項は静かに台帳へ（RM#4・新しい投稿は増やさない）
         if screened["decisions"]:
             by_id = {m["id"]: m for m in digest["messages"]}

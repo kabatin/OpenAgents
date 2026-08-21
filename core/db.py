@@ -2931,6 +2931,26 @@ def selfreview_scores_since(conn, agent_id, since):
     return [{"detail": r[0], "created_at": r[1]} for r in rows]
 
 
+def others_shadow_rows(conn, since, limit=50):
+    """「その他」枠のシャドー記録（2026-08-18の実験）。人間がまとめて読んで
+    「言ってほしかった/うざい」を判断するための一覧。
+    Returns: [{"agent_id","channel","author","trigger","detail","created_at"}]"""
+    rows = conn.execute(
+        """SELECT p.agent_id, COALESCE(c.name,'?'),
+                  COALESCE(u.display_name,'?'), SUBSTR(m.content,1,80),
+                  p.detail, p.created_at, p.channel_id, p.trigger_message_id
+           FROM proactive_log p
+           LEFT JOIN channels c ON c.id = p.channel_id
+           LEFT JOIN messages m ON m.id = p.trigger_message_id
+           LEFT JOIN users u ON u.id = m.author_id
+           WHERE p.kind='others' AND p.action='shadow' AND p.created_at >= ?
+           ORDER BY p.id DESC LIMIT ?""", (since, limit)).fetchall()
+    return [{"agent_id": r[0], "channel": r[1], "author": r[2],
+             "trigger": r[3] or "", "detail": r[4] or "",
+             "created_at": r[5], "channel_id": r[6],
+             "trigger_message_id": r[7]} for r in rows]
+
+
 def rescue_stats(conn, agent_id, since):
     """救済（未回答質問の拾い上げ）の集計（2026-08-18）。
     141件貯まっていたのに重複防止だけに使われていたので、バイアス点検の材料に
