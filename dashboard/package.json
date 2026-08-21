@@ -1,6 +1,6 @@
 {
   "name": "ai-agents-dashboard",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "Discord AIエージェント（アーカイブ担当・デザイン担当・マーケ担当・開発BOT）の管理ダッシュボード（ローカル専用）",
