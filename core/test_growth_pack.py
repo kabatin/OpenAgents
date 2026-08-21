@@ -251,3 +251,117 @@ class TestMigration(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ThumbsDownDistillTest(unittest.TestCase):
+    """通常回答への👎を蒸留に接続（2026-08-18）。30件が死蔵されていた。"""
+
+    def setUp(self):
+        self.tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        self.tmp.close()
+        db.init_db(self.tmp.name)
+        self.now = reminders.fmt(reminders.now_jst())
+        with db.connect(self.tmp.name) as conn:
+            db.upsert_channel(conn, id=7, name="g", type="text")
+            db.upsert_user(conn, id=99, name="senko", display_name="AI戦子",
+                           is_bot=True)
+
+    def tearDown(self):
+        os.unlink(self.tmp.name)
+
+    def _answer(self, mid, content, value, proactive_post=False):
+        with db.connect(self.tmp.name) as conn:
+            db.insert_message(conn, id=mid, channel_id=7, author_id=99,
+                              content=content, created_at=self.now)
+            db.add_feedback(conn, message_id=mid, agent_id="senko",
+                            kind="reaction", value=value, user_id="1",
+                            created_at=self.now)
+            if proactive_post:
+                db.add_proactive_log(
+                    conn, agent_id="senko", kind="recall", action="spoke",
+                    channel_id=7, posted_message_id=mid,
+                    created_at=self.now)
+
+    def test_disliked_normal_answers_become_input(self):
+        self._answer(1, "瓜生さんに直接聞くのが確実っス", "down")
+        self._answer(2, "登録するっス（権限で失敗）", "down")
+        self._answer(3, "褒められた回答", "up")            # 👍は入力にしない
+        issues = svd.collect_low_issues(self.tmp.name, "senko")
+        cats = [c for c, _ in issues]
+        self.assertEqual(cats, ["thumbs_down", "thumbs_down"])
+        texts = [t for _, t in issues]
+        self.assertTrue(any("直接聞く" in t for t in texts))
+
+    def test_proactive_posts_excluded(self):
+        """自発発言への👎は既存の抑制学習の担当なので二重に使わない。"""
+        self._answer(4, "自発発言だったもの", "down", proactive_post=True)
+        self.assertEqual(svd.collect_low_issues(self.tmp.name, "senko"), [])
+
+    def test_thumbs_down_block_comes_first(self):
+        prompt = svd.build_prompt([("selfreview", "曖昧"),
+                                   ("thumbs_down", "人に振っただけの回答")])
+        i_down = prompt.index("👎を付けた回答")
+        i_self = prompt.index("低評価だった回答")
+        self.assertLess(i_down, i_self)   # 人間の👎を最初に読ませる
+        self.assertIn("最重要", prompt)
+
+
+class AbTestWiringTest(unittest.TestCase):
+    """A/B実験の起動漏れ修正（2026-08-18）。変種ゼロで空回りしていた。"""
+
+    def setUp(self):
+        self.tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        self.tmp.close()
+        db.init_db(self.tmp.name)
+
+    def tearDown(self):
+        os.unlink(self.tmp.name)
+
+    def test_pick_for_screen_seeds_itself(self):
+        import ab_test
+        with db.connect(self.tmp.name) as conn:
+            self.assertEqual(db.active_variants(conn, ab_test.SLOT_SCREEN), [])
+        vid, note = ab_test.pick_for_screen(self.tmp.name)   # 種撒き込み
+        self.assertIsNotNone(vid)
+        self.assertIsInstance(note, str)
+        with db.connect(self.tmp.name) as conn:
+            self.assertEqual(len(db.active_variants(conn,
+                                                    ab_test.SLOT_SCREEN)), 2)
+
+    def test_variant_note_reaches_screen_prompt(self):
+        import proactive
+        msgs = [{"id": 1, "channel": "g", "author": "常谷",
+                 "content": "納期どうなってる"}]
+        prompt = proactive.build_screen_prompt(
+            msgs, "AI戦子", variant_note="- 一言添えるなら短くする")
+        self.assertIn("一言添えるなら短くする", prompt)
+        plain = proactive.build_screen_prompt(msgs, "AI戦子")
+        self.assertNotIn("一言添えるなら短くする", plain)
+
+    def test_attribution_roundtrip(self):
+        import ab_test
+        vid, _note = ab_test.pick_for_screen(self.tmp.name)
+        detail = f"根拠あり [{ab_test.tag(vid)}]"
+        self.assertEqual(ab_test.variant_from_detail(detail), vid)
+        self.assertIsNone(ab_test.variant_from_detail("タグなし"))
+        now = reminders.fmt(reminders.now_jst())
+        with db.connect(self.tmp.name) as conn:
+            db.add_proactive_log(conn, agent_id="senko", kind="recall",
+                                 action="spoke", posted_message_id=555,
+                                 detail=detail, created_at=now)
+        got = ab_test.record_feedback_for_message(self.tmp.name, 555, "up")
+        self.assertEqual(got, vid)
+        with db.connect(self.tmp.name) as conn:
+            row = next(v for v in db.active_variants(conn, ab_test.SLOT_SCREEN)
+                       if v["id"] == vid)
+        self.assertEqual(row["up"], 1)
+
+    def test_untagged_message_ignored(self):
+        import ab_test
+        now = reminders.fmt(reminders.now_jst())
+        with db.connect(self.tmp.name) as conn:
+            db.add_proactive_log(conn, agent_id="senko", kind="recall",
+                                 action="spoke", posted_message_id=556,
+                                 detail="タグなし", created_at=now)
+        self.assertIsNone(
+            ab_test.record_feedback_for_message(self.tmp.name, 556, "up"))

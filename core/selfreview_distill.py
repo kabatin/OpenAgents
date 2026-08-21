@@ -11,6 +11,8 @@
   - assertion  : 裏取りできない断定（honesty のシャドー計測）
   - fake_done  : できたフリ検出に捕まった回答
   - skeptic    : 懐疑役が投稿を差し止めた自発発言
+  - thumbs_down: **人間が👎を付けた通常回答**（最も質の高い負の信号。
+                 2026-08-18まで30件溜まったまま誰も読んでいなかった）
 
 - 静かな処理: Discordへの投稿はしない。実行の痕跡は proactive_log
   （kind='selfreview_distill'）に残り、ダッシュボードのタイムラインで見える
@@ -81,11 +83,14 @@ def parse_score_detail(detail):
 
 
 CATEGORY_LABELS = {
+    # 人間の👎は他より強い信号なので先頭に置く（プロンプト上も最初に来る）
+    "thumbs_down": "人間が👎を付けた回答（最重要・同じ失敗を繰り返さない）",
     "selfreview": "低評価だった回答の問題点",
     "assertion": "裏取りできないまま断定した箇所",
     "fake_done": "やったと言ったが実行されていなかった件",
     "skeptic": "懐疑役が投稿を差し止めた理由",
 }
+MAX_ANSWER_EXCERPT = 120
 
 
 def summarize_detail(category, detail):
@@ -107,13 +112,20 @@ def summarize_detail(category, detail):
 
 
 def collect_low_issues(db_path, agent_id, now=None):
-    """観察窓内の振り返り材料（4カテゴリ横断・新しい順）。
-    Returns: [(カテゴリ, 1行)]"""
+    """観察窓内の振り返り材料（5カテゴリ横断・新しい順）。
+    Returns: [(カテゴリ, 1行)]。👎された通常回答は本文抜粋をそのまま渡す
+    （なぜ嫌われたかはLLMが読み取る＝人間に理由を書かせない）。"""
     now = now or reminders.now_jst()
     since = reminders.fmt(now - timedelta(days=WINDOW_DAYS))
     with db.connect(db_path) as conn:
         rows = db.reflection_items_since(conn, agent_id, since)
+        disliked = db.rated_normal_answers(conn, agent_id, since,
+                                           value="down")
     issues = []
+    for r in disliked:
+        text = " ".join((r["content"] or "").split())[:MAX_ANSWER_EXCERPT]
+        if text:
+            issues.append(("thumbs_down", text))
     for r in rows:
         line = summarize_detail(r["category"], r["detail"])
         if line:
@@ -127,6 +139,10 @@ def build_prompt(issues):
     for category, line in issues[:60]:
         grouped.setdefault(category, []).append(line)
     blocks = []
+    order = list(CATEGORY_LABELS)
+    grouped = dict(sorted(grouped.items(),
+                          key=lambda kv: order.index(kv[0])
+                          if kv[0] in order else len(order)))
     for category, lines in grouped.items():
         label = CATEGORY_LABELS.get(category, category)
         body = "\n".join(f"- {ln}" for ln in lines[:20])

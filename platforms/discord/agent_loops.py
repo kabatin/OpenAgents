@@ -1293,13 +1293,20 @@ class AgentLoopsMixin:
             {a["id"]: (a["name"], a.get("role") or "全般")
              for a in AGENTS if a["id"] != self.agent["id"]
              and (a.get("proactive") or {}).get("enabled")})
+        # A/Bプロンプト実験（RM#12）: 変種を1つ選んで一次判定に効かせる。
+        # 種撒きは pick_for_screen が内部で行う（起動漏れを構造的に防ぐ）
+        variant_id, variant_note = None, ""
+        if (cfg.get("ab_test") or {}).get("enabled"):
+            variant_id, variant_note = await asyncio.to_thread(
+                ab_test.pick_for_screen, DB_PATH)
         async with ANSWER_SEM:
             screened = await asyncio.to_thread(
                 proactive.screen, digest["messages"],
                 agent_name=self.agent["name"],
                 model=cfg.get("screen_model", proactive.SCREEN_MODEL_DEFAULT),
                 scope_note=cfg.get("scope_note"),
-                colleagues=colleagues)
+                colleagues=colleagues,
+                variant_note=variant_note)
         # 会話から検出した決定事項は静かに台帳へ（RM#4・新しい投稿は増やさない）
         if screened["decisions"]:
             by_id = {m["id"]: m for m in digest["messages"]}
@@ -1391,11 +1398,15 @@ class AgentLoopsMixin:
             guild_id=GUILD_ID, fail_if_not_exists=False)
         posted = await channel.send(reply, reference=ref,
                                     allowed_mentions=ALLOWED_MENTIONS)
+        detail = cand.get("reason") or ""
+        tag = ab_test.tag(variant_id)
+        if tag:
+            detail = f"{detail} [{tag}]".strip()
         await asyncio.to_thread(
             proactive.log_entry, DB_PATH, self.agent["id"],
             kind=cand["kind"], action="spoke",
             channel_id=trigger["channel_id"], trigger_message_id=trigger["id"],
-            posted_message_id=posted.id, detail=cand.get("reason"))
+            posted_message_id=posted.id, detail=detail)
         print(f"[{self.agent['id']}] proactive spoke ({cand['kind']}) "
               f"in #{trigger['channel']}")
 

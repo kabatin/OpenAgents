@@ -2807,6 +2807,34 @@ def selfreview_scores_since(conn, agent_id, since):
     return [{"detail": r[0], "created_at": r[1]} for r in rows]
 
 
+def rated_normal_answers(conn, agent_id, since, value="down", limit=30):
+    """通常回答（自発発言でない自分の投稿）への👍/👎とその本文（新しい順）。
+    自発発言は proactive_log に posted_message_id があるので除外する。
+    2026-08-18: 30件溜まっていたのに誰も読んでいなかった＝人が明示的に押した
+    最も質の高い信号を捨てていたため、蒸留の入力に接続する。"""
+    rows = conn.execute(
+        """SELECT f.message_id, m.content, m.channel_id, f.created_at
+           FROM feedback f
+           JOIN messages m ON m.id = f.message_id
+           WHERE f.agent_id=? AND f.value=? AND f.created_at >= ?
+             AND m.deleted=0 AND m.content IS NOT NULL AND m.content != ''
+             AND NOT EXISTS (SELECT 1 FROM proactive_log p
+                             WHERE p.posted_message_id = f.message_id)
+           GROUP BY f.message_id
+           ORDER BY f.id DESC LIMIT ?""",
+        (agent_id, value, since, limit)).fetchall()
+    return [{"message_id": r[0], "content": r[1], "channel_id": r[2],
+             "created_at": r[3]} for r in rows]
+
+
+def proactive_log_detail(conn, posted_message_id):
+    """投稿id→自発発言ログのdetail（A/B帰属タグの読み出し用）。"""
+    row = conn.execute(
+        """SELECT detail FROM proactive_log WHERE posted_message_id=?
+           ORDER BY id DESC LIMIT 1""", (posted_message_id,)).fetchone()
+    return row[0] if row else None
+
+
 def reflection_items_since(conn, agent_id, since):
     """振り返りの原料を4カテゴリ横断で返す（2026-08-18）。
     夜の自己監査（self_audit）が毎晩見せている材料と同じ集合を、週次蒸留でも

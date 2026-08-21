@@ -10,6 +10,7 @@
 """
 
 import os
+import re
 
 
 from core import db
@@ -36,6 +37,16 @@ def ensure_variants(db_path, slot=SLOT_SCREEN, variants=None):
                                      body=body, created_at=now)
 
 
+def pick_for_screen(db_path):
+    """一次判定に使う変種を選ぶ（初回は自動で種撒きする）。
+    Returns: (variant_id, 追記文) or (None, "")。
+    2026-08-18: ensure_variants の呼び出しが配線されておらず、変種ゼロのまま
+    評価が空回りしていた。使う側で必ず種を撒くことで起動漏れを構造的に防ぐ。"""
+    ensure_variants(db_path)
+    got = pick(db_path)
+    return got if got else (None, "")
+
+
 def pick(db_path, slot=SLOT_SCREEN):
     """使用回数が最少の変種を選ぶ（ラウンドロビン）。(id, body) or None。"""
     with db.connect(db_path) as conn:
@@ -51,6 +62,32 @@ def record_feedback(db_path, variant_id, value):
     """その変種で生成した発言への👍👎を記録。"""
     with db.connect(db_path) as conn:
         db.bump_variant_feedback(conn, variant_id, value)
+
+
+VARIANT_TAG_RE = re.compile(r"variant=(\d+)")
+
+
+def tag(variant_id):
+    """proactive_log の detail に埋める帰属タグ（純粋関数）。"""
+    return f"variant={variant_id}" if variant_id else ""
+
+
+def variant_from_detail(detail):
+    """detail から変種idを取り出す（純粋関数・無ければ None）。"""
+    m = VARIANT_TAG_RE.search(detail or "")
+    return int(m.group(1)) if m else None
+
+
+def record_feedback_for_message(db_path, message_id, value):
+    """自発発言への👍👎を、その発言を生んだ変種へ帰属させる（RM#12）。
+    Returns: 帰属した変種id or None。"""
+    with db.connect(db_path) as conn:
+        detail = db.proactive_log_detail(conn, message_id)
+    vid = variant_from_detail(detail)
+    if vid is None:
+        return None
+    record_feedback(db_path, vid, value)
+    return vid
 
 
 def evaluate(db_path, slot=SLOT_SCREEN):

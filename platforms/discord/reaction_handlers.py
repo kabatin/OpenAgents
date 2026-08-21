@@ -7,6 +7,7 @@ bot.py から分離した AgentClient の mixin（archiver=アーカイブ担当
 
 import asyncio
 
+from core import ab_test
 from core import action_items
 from core import auto_discover
 from core import db
@@ -261,6 +262,14 @@ class ReactionHandlersMixin:
                         user_id=str(payload.user_id), value=value)
             print(f"[{self.agent['id']}] feedback {'+'if added else '-'}"
                   f"{value} on {agent_id}'s msg {payload.message_id}")
+            # A/B実験（RM#12）: その発言を生んだ変種へ👍👎を帰属させる
+            if added:
+                vid = await asyncio.to_thread(
+                    ab_test.record_feedback_for_message, DB_PATH,
+                    payload.message_id, value)
+                if vid:
+                    print(f"[{self.agent['id']}] A/B feedback {value} "
+                          f"→ variant {vid}")
             # 👍つき回答はゴールデンセットへ自動蓄積（RM#16・静かなデータ）
             if value == "up" and added:
                 saved = await asyncio.to_thread(

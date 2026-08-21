@@ -163,9 +163,10 @@ def collect_cycle(db_path, agent_id, *, home_channel_id,
 # ---------------------------------------------------------------- 2) 一次判定
 
 def build_screen_prompt(messages, agent_name, scope_note=None,
-                        colleagues=None):
+                        colleagues=None, variant_note=None):
     """一次判定プロンプト（純粋関数・テスト対象）。
-    scope_note: 個体ごとの縄張り / colleagues: {id: (名前, 専門)}（RM#56）。"""
+    scope_note: 個体ごとの縄張り / colleagues: {id: (名前, 専門)}（RM#56）
+    variant_note: A/B実験の変種追記文（RM#12・空なら対照群）。"""
     lines = []
     for m in messages:
         text = (m["content"] or "").strip().replace("\n", " ")
@@ -186,7 +187,9 @@ def build_screen_prompt(messages, agent_name, scope_note=None,
         "- 該当なしが正常。迷ったら候補にしない（誤った口出しは信頼を失う）\n"
         "- 雑談・感想・進行中の作業指示・既に誰かが答えている話題は対象外\n"
         f"- {scope_note or DEFAULT_SCOPE_NOTE}\n"
-        f"- 候補は最大{MAX_CANDIDATES}件。search_terms は過去ログ全文検索用の"
+        + ((variant_note or "").strip() + "\n" if (variant_note or "").strip()
+           else "")
+        + f"- 候補は最大{MAX_CANDIDATES}件。search_terms は過去ログ全文検索用の"
         "語（3文字以上を2〜6個、同義語も含める）\n\n"
         + (("さらに、自分の縄張り外でも「同僚AIの専門領域で、その同僚なら"
             "確実に価値を足せそうな発言」があれば handoff に最大1件だけ挙げる"
@@ -289,11 +292,13 @@ def parse_screen_handoffs(raw, valid_ids, valid_targets):
 
 
 def screen(messages, *, agent_name, model=SCREEN_MODEL_DEFAULT,
-           scope_note=None, colleagues=None, invoke_fn=None):
+           scope_note=None, colleagues=None, invoke_fn=None,
+           variant_note=None):
     """一次判定: {"candidates", "decisions", "handoffs"} を返す。
-    invoke_fnはテスト差し替え口。"""
+    invoke_fnはテスト差し替え口。variant_note はA/B実験の追記文（RM#12）。"""
     prompt = build_screen_prompt(messages, agent_name, scope_note=scope_note,
-                                 colleagues=colleagues)
+                                 colleagues=colleagues,
+                                 variant_note=variant_note)
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
         p, model=model, timeout=SCREEN_TIMEOUT_SEC).text)
     raw = fn(prompt)
