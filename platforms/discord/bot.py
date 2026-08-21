@@ -305,7 +305,8 @@ class AgentClient(SkillHooksMixin, MarkerActionsMixin, AgentLoopsMixin,
             return None
         return getattr(getattr(target, "author", None), "id", None)
 
-    def _build_agent_param(self, message=None, correction=False):
+    def _build_agent_param(self, message=None, correction=False,
+                           state_only=False):
         """search.answer_question に渡す agent dict（役割＋同僚一覧＋スキル）。
         correction=True は「自分の発言への訂正リプライ」検知時（RM#17）。"""
         parts = [self.agent.get("role") or "",
@@ -336,6 +337,10 @@ class AgentClient(SkillHooksMixin, MarkerActionsMixin, AgentLoopsMixin,
             if plugin_note:
                 parts.append(plugin_note)
             parts.append(rules.build_skill_note(active))
+            # 事実台帳スキル（2026-08-18）: 訂正・状況説明の受け皿
+            with db.connect(DB_PATH) as conn:
+                recent_facts = db.search_facts(conn, [], limit=10)
+            parts.append(facts.build_skill_note(recent_facts))
             parts.append(glossary.build_skill_note())
             terms_ctx = glossary.build_terms_context(
                 glossary.load_terms(DB_PATH))
@@ -376,7 +381,7 @@ class AgentClient(SkillHooksMixin, MarkerActionsMixin, AgentLoopsMixin,
                     parts.append(expertise)
             # 訂正の学習（RM#17）: 自分の発言への訂正リプライ検知時のみ
             if correction:
-                parts.append(rules.build_correction_note())
+                parts.append(rules.build_correction_note(state_only=state_only))
             # 自発発言の枠調整（Phase D）: マネージャ（アーカイブ担当）×管理者のみ告知
             if self.is_archiver and str(message.author.id) in ADMIN_IDS:
                 enabled = [a["id"] for a in AGENTS
@@ -451,13 +456,22 @@ class AgentClient(SkillHooksMixin, MarkerActionsMixin, AgentLoopsMixin,
                 extra_blocks = await asyncio.to_thread(
                     integrations.context_blocks, self.integrations,
                     self._integration_ctx(message, saved), gate_text)
-            # 訂正の学習（RM#17）: 自分の発言へのリプライ＋訂正語の二重ゲート
-            correction = False
-            if (not message.author.bot
-                    and rules.looks_like_correction(question)):
-                ref_author = await self._reply_author_id(message)
-                correction = (self.user is not None
-                              and ref_author == self.user.id)
+            # 訂正の学習（RM#17＋2026-08-18拡張）: 訂正語つきなら常に対象、
+            # 訂正語なしの状況説明は「自分が直前に絡んでいる文脈」に限る
+            # （事実台帳の受け皿ができたので取りこぼしを減らす）
+            correction = state_only = False
+            if not message.author.bot:
+                if rules.looks_like_correction(question):
+                    correction = True
+                elif rules.looks_like_state_update(question):
+                    ref_author = await self._reply_author_id(message)
+                    mine = (self.user is not None
+                            and ref_author == self.user.id)
+                    if not mine and self.user is not None:
+                        # リプライでなくても、直近履歴に自分の発言があれば
+                        # 「さっきの話の訂正」の可能性が高い
+                        mine = any(h.get("is_bot") for h in (history or [])[-4:])
+                    correction = state_only = mine
             # runner_enabled なら invoke_claude 経由（v2 Phase 0）。
             # 同一契約なのでフラグを外すだけで旧経路に戻せる
             answer_fn = (runner_answer.answer_question if self.runner_enabled
@@ -486,7 +500,8 @@ class AgentClient(SkillHooksMixin, MarkerActionsMixin, AgentLoopsMixin,
                                 message.channel.id,  # 応答中chは検索から除外
                                 history,
                                 self._build_agent_param(
-                                    message, correction=correction),
+                                    message, correction=correction,
+                                    state_only=state_only),
                                 attachments=att_ctx, references=references,
                                 extra_blocks=extra_blocks,
                                 recent_from_id=recent_from_id,
@@ -508,7 +523,8 @@ class AgentClient(SkillHooksMixin, MarkerActionsMixin, AgentLoopsMixin,
                                 message.channel.id,
                                 history,
                                 self._build_agent_param(
-                                    message, correction=correction),
+                                    message, correction=correction,
+                                    state_only=state_only),
                                 attachments=att_ctx, references=references,
                                 extra_blocks=extra_blocks,
                                 recent_from_id=recent_from_id,
@@ -541,6 +557,7 @@ class AgentClient(SkillHooksMixin, MarkerActionsMixin, AgentLoopsMixin,
                 if self.action_tracking:
                     answer = self._apply_action_markers(message, answer)
                 answer = self._apply_rule_markers(message, answer)
+                answer = self._apply_fact_markers(message, answer)
                 answer = self._apply_quota_markers(message, answer)
                 answer = self._apply_glossary_markers(message, answer)
                 # 「できたフリ」検出（RM#20）: 完了主張×マーカー不発を正直化

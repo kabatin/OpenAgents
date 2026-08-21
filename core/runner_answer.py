@@ -13,6 +13,7 @@ runner_enabled を外せばいつでも戻せる。
 
 import os
 
+from core import facts
 from core import invoke_claude
 from core import search
 from core import summaries
@@ -44,12 +45,15 @@ WEB_SKILL_NOTE = (
 
 
 def build_prompt(question, convo, summary, context, att_block,
-                 references=None, extra_blocks=None):
+                 references=None, extra_blocks=None, facts_block=""):
     """ユーザープロンプトを組み立てる（純粋関数・テスト対象）。
 
     system（ペルソナ＋方針）は含めない: --append-system-prompt に分離される。
     """
     parts = []
+    if facts_block:
+        # 事実台帳は「いまどうなっているか」＝最優先の一次資料として先頭に置く
+        parts.append(facts_block)
     if summary:
         parts.append(f"【このチャンネルの文脈要約】\n{summary}")
     if convo:
@@ -138,7 +142,9 @@ def answer_question(db_path, guild_id, question, model=search.DEFAULT_MODEL,
             search.GENERAL_SYSTEM_TMPL, agent) + "\n\n" + WEB_SKILL_NOTE)
         prompt = build_prompt(question, convo, summary, None, att_block,
                               references=references,
-                              extra_blocks=extra_blocks)
+                              extra_blocks=extra_blocks,
+                              facts_block=facts.build_ledger_block(
+                                  db_path, keywords, guild_id))
         result = invoke_claude.invoke(
             prompt, model=model, system=system, **invoke_kwargs)
         return {"answer": result.text, "keywords": keywords, "hits": 0,
@@ -148,7 +154,9 @@ def answer_question(db_path, guild_id, question, model=search.DEFAULT_MODEL,
     system = (persona + search._build_system(search.ANSWER_SYSTEM_TMPL, agent)
               + "\n\n" + WEB_SKILL_NOTE)
     prompt = build_prompt(question, convo, summary, context, att_block,
-                          references=references, extra_blocks=extra_blocks)
+                          references=references, extra_blocks=extra_blocks,
+                          facts_block=facts.build_ledger_block(
+                              db_path, keywords, guild_id))
     result = invoke_claude.invoke(
         prompt, model=model, system=system, **invoke_kwargs)
     return {"answer": result.text, "keywords": keywords, "hits": len(rows),

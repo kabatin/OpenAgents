@@ -26,6 +26,7 @@ from datetime import timedelta
 from core import invoke_claude
 from core import db
 from core import decisions
+from core import facts
 from core import reminders
 from core import rules
 from core import search
@@ -374,9 +375,11 @@ def decide_reply(db_path, guild_id, agent_id, cand, trigger, *, persona,
     row_hits = sfn(cand.get("search_terms") or []) or []
     # 決定事項台帳（RM#4）: FTSより確度の高い一次資料。台帳ヒットがあれば
     # FTSゼロでも二次判定に進める（台帳のリンク引用で出典ゲートを通れる）
+    facts_block = facts.build_ledger_block(
+        db_path, cand.get("search_terms") or [], guild_id)
     ledger_block = decisions.build_ledger_block(
         db_path, cand.get("search_terms") or [], guild_id)
-    if not row_hits and not ledger_block \
+    if not row_hits and not ledger_block and not facts_block \
             and cand["kind"] in CITE_REQUIRED_KINDS:
         # 裏付けゼロなら claude を呼ぶまでもなく沈黙（コスト・誤発言の両方を防ぐ）
         return None, "過去ログ・決定台帳に裏付けなし（検索ヒット0）"
@@ -406,7 +409,10 @@ def decide_reply(db_path, guild_id, agent_id, cand, trigger, *, persona,
         scope=scope_note or DEFAULT_SCOPE_NOTE)
     prompt = build_decide_prompt(cand, trigger, guild_id, recent_lines,
                                  context_block, rules_block,
-                                 ledger_block=ledger_block)
+                                 ledger_block=(
+                                     (facts_block + "\n\n" + ledger_block)
+                                     if facts_block and ledger_block
+                                     else (facts_block or ledger_block)))
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
         p, model=model, system=system, timeout=DECIDE_TIMEOUT_SEC).text)
     return gate_reply(fn(prompt), cand["kind"])

@@ -9,6 +9,7 @@ integrations/ 側に書く（integrations.py の apply_markers フックを使�
 
 from core import action_items
 from core import db
+from core import facts
 from core import glossary
 from core import honesty
 from core import proactive
@@ -29,6 +30,36 @@ from platforms.discord.agent_runtime import (
 
 class MarkerActionsMixin:
     """AgentClient に混ぜる mixin（self.* は bot.py の属性・設定を参照する）。"""
+
+    def _apply_fact_markers(self, message, answer):
+        """回答中の FACT / FACT_CANCEL を実行（2026-08-18・必ず除去）。
+        同じ主題の古い事実は自動で上書きされ、その旨も -# 行で明示する
+        （「認識更新した」の実挙動を見せる＝口約束にしない）。"""
+        text, adds, cancel_ids, errors = facts.extract_markers(answer)
+        if not (adds or cancel_ids or errors):
+            return answer
+        notes = []
+        now = reminders.fmt(reminders.now_jst())
+        with db.connect(DB_PATH) as conn:
+            for req in adds:
+                fid, superseded = db.add_fact(
+                    conn, agent_id=self.agent["id"], topic=req["topic"],
+                    fact=req["fact"], source_kind="conversation",
+                    source_message_id=message.id,
+                    channel_id=message.channel.id,
+                    stated_by=message.author.display_name, created_at=now)
+                extra = (f"・古い認識{superseded}件を上書き" if superseded
+                         else "")
+                notes.append(f"-# 🧠 事実を記録(id={fid}): "
+                             f"[{req['topic']}] {req['fact'][:60]}{extra}")
+            for fid in cancel_ids:
+                if db.cancel_fact(conn, fid):
+                    notes.append(f"-# 🗑 事実を取り消し(id={fid})")
+                else:
+                    notes.append(f"-# ⚠️ 事実id={fid} は見つからないか"
+                                 "既に取り消し済みっス")
+        notes += [f"-# ⚠️ 事実を記録できなかったっス: {e}" for e in errors]
+        return (text + "\n" if text else "") + "\n".join(notes)
 
     def _apply_rule_markers(self, message, answer, agent_id=None):
         """回答中の RULE / RULE_CANCEL / CAPABILITY マーカーを実行し、

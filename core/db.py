@@ -546,6 +546,25 @@ CREATE TABLE IF NOT EXISTS sheet_watch_state (
     PRIMARY KEY (alias, tab)
 );
 
+-- 事実台帳（2026-08-18）。決定台帳が「決めたこと」なのに対し、こちらは
+-- 「いま実際どうなっているか」を保持する。人間の訂正・状況説明の受け皿で、
+-- これが無かったため「認識更新するっス」と言っても書き込む先が存在せず
+-- 口約束で終わっていた（グッズ納期のすれ違い事例）。
+-- 同じ主題(topic)の古い事実は superseded にして最新だけを active に保つ。
+CREATE TABLE IF NOT EXISTS facts (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id           TEXT,
+    topic              TEXT,
+    fact               TEXT,
+    source_kind        TEXT,
+    source_message_id  INTEGER,
+    channel_id         INTEGER,
+    stated_by          TEXT,
+    status             TEXT DEFAULT 'active',
+    created_at         TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_facts_status ON facts(status, topic);
+
 -- 未回答質問の救済（進化ロードマップ#31）。24時間放置された質問を判定・救済した
 -- 記録（重複判定の防止台帳）。status: rescued / shadow / skipped_answered
 CREATE TABLE IF NOT EXISTS rescues (
@@ -2621,6 +2640,58 @@ def watched_sheets(conn, agent_id):
             out.append({"alias": alias, "spreadsheet_id": sid,
                         "watches": watches})
     return out
+
+
+def add_fact(conn, *, agent_id, topic, fact, source_kind, source_message_id,
+             channel_id, stated_by, created_at):
+    """事実を1件記録。同じtopicの既存activeは superseded にする（最新が正）。
+    Returns: (新id, 上書きした件数)"""
+    cur = conn.execute(
+        """UPDATE facts SET status='superseded'
+           WHERE topic=? AND status='active'""", (topic,))
+    superseded = cur.rowcount
+    cur = conn.execute(
+        """INSERT INTO facts(agent_id, topic, fact, source_kind,
+               source_message_id, channel_id, stated_by, status, created_at)
+           VALUES(?,?,?,?,?,?,?,'active',?)""",
+        (agent_id, topic, fact, source_kind, source_message_id, channel_id,
+         stated_by, created_at))
+    return cur.lastrowid, superseded
+
+
+def search_facts(conn, keywords, limit=8):
+    """事実をキーワードLIKEで検索（activeのみ・新しい順）。
+    キーワードが空/短すぎなら直近limit件を返す（決定台帳と同じ契約）。"""
+    base = ("SELECT id, topic, fact, source_message_id, channel_id, "
+            "stated_by, created_at FROM facts WHERE status='active'")
+    kws = [k.strip() for k in (keywords or []) if len(k.strip()) >= 2][:8]
+    if kws:
+        clauses = " OR ".join("(fact LIKE ? OR topic LIKE ?)" for _ in kws)
+        params = []
+        for k in kws:
+            params += [f"%{k}%", f"%{k}%"]
+        rows = conn.execute(
+            base + f" AND ({clauses}) ORDER BY id DESC LIMIT ?",
+            params + [limit]).fetchall()
+    else:
+        rows = conn.execute(base + " ORDER BY id DESC LIMIT ?",
+                            (limit,)).fetchall()
+    return [{"id": r[0], "topic": r[1], "fact": r[2],
+             "source_message_id": r[3], "channel_id": r[4],
+             "stated_by": r[5], "created_at": r[6]} for r in rows]
+
+
+def cancel_fact(conn, fact_id):
+    cur = conn.execute(
+        "UPDATE facts SET status='cancelled' WHERE id=? AND status='active'",
+        (fact_id,))
+    return cur.rowcount == 1
+
+
+def count_facts(conn):
+    row = conn.execute(
+        "SELECT COUNT(*) FROM facts WHERE status='active'").fetchone()
+    return row[0]
 
 
 def proactive_hit_stats(conn, agent_id):
