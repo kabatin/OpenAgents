@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 質問・使い方の相談
+    url: https://github.com/kabatin/OpenAgents/discussions
+    about: 「これってどうやるの？」はこちらへ。Issue より気軽にどうぞ
+  - name: 🔧 困ったときの手引き
+    url: https://github.com/kabatin/OpenAgents/blob/main/docs/09-troubleshooting.md
+    about: 起動しない・返事が来ない・ログが出ない。よくある詰まりの一覧です
+  - name: 🔒 脆弱性の報告
+    url: https://github.com/kabatin/OpenAgents/security/advisories/new
+    about: セキュリティ上の問題は公開Issueではなく、こちらから非公開で報告してください

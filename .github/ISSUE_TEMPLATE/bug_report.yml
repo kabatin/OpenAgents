@@ -1,0 +1,88 @@
+name: バグ報告 / Bug report
+description: 期待どおりに動かないところを教えてください
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        報告ありがとうございます。まず [docs/09-troubleshooting.md](https://github.com/kabatin/OpenAgents/blob/main/docs/09-troubleshooting.md)
+        に同じ症状が載っていないか確認していただけると早いかもしれません。
+
+        **トークン・実際の会話内容・サーバーIDは貼らないでください。** ログを貼るときは伏せ字にしてください。
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 何が起きたか
+      description: 期待した動きと、実際の動きを書いてください
+      placeholder: |
+        期待: @エージェント に聞いたら過去ログから答えるはず
+        実際: 「記録がありません」しか返ってこない
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 再現手順
+      placeholder: |
+        1. `python start.py` で起動
+        2. ダッシュボードで◯◯をONにする
+        3. Discordで「〜」と話しかける
+        4. こうなる
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      options:
+        - macOS
+        - Windows
+        - Linux
+        - その他
+    validations:
+      required: true
+
+  - type: dropdown
+    id: llm
+    attributes:
+      label: 使っているAI
+      options:
+        - Claude Code
+        - Codex CLI
+        - 自前のCLI
+        - まだ選んでいない / 分からない
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: OpenAgents のバージョン
+      description: リリース名（例 `v0.1.1`）か、`git rev-parse --short HEAD` の出力
+      placeholder: v0.1.1
+    validations:
+      required: true
+
+  - type: input
+    id: python-version
+    attributes:
+      label: Python のバージョン
+      description: "`python --version` の出力"
+      placeholder: Python 3.12.4
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: ログ・エラー出力
+      description: |
+        `state/logs/` の該当箇所か、ターミナルの出力を貼ってください。
+        **トークンや会話の中身は伏せてから**貼ってください。
+      render: text
+    validations:
+      required: false
