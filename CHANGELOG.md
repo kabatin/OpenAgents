@@ -7,6 +7,10 @@
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-08-26
+
+導入と更新の入口を用意したリリース。機能そのものの変更はありません。
+
 ### 追加
 
 - **`openagents` コマンド（npm）** — `npm i -g openagents` で入れて、
@@ -82,6 +86,7 @@
 - 添付読解・Web検索などツールを使う機能は Claude Code 選択時のみ
 - ドキュメントは日本語が正（英語は README のみ）
 
-[Unreleased]: https://github.com/kabatin/OpenAgents/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/kabatin/OpenAgents/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/kabatin/OpenAgents/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/kabatin/OpenAgents/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/kabatin/OpenAgents/releases/tag/v0.1.0
