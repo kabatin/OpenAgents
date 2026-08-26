@@ -3,13 +3,35 @@
 `openagents` コマンドは、**導入と更新の入口**です。
 中身の面倒（venv・依存・画面の組み立て）は従来どおり `start.py` が見ます。
 
+このコマンドを使わなくても何も困りません（更新は `git pull --ff-only &&
+python start.py` で足ります）。入れておくと、更新から常駐プロセスの
+入れ替えまでを1コマンドで済ませられます。
+
+## 入れる
+
+リポジトリに同梱されているので、そこから入れます。**まだ npm には
+公開していません**（理由は下の「名前について」）。
+
 ```bash
-npm install -g openagents
-openagents setup
+cd <置き場>/cli
+npm install -g .
 ```
 
-git clone で入れている人は、このコマンドを使わなくても何も困りません。
-入れておくと `openagents update` が使えるようになります。
+開発しながら使うなら `npm link`（リポジトリ内の変更が即座に反映されます）。
+外すときは `npm uninstall -g openagents`。
+
+### 名前について
+
+npm の `openagents` という名前は空いていますが、`openagents-org/openagents`
+（★4.0k）、`xlang-ai/OpenAgents`（★4.9k）、`OpenAgentsInc/openagents` など、
+同名の先行プロジェクトが複数あり、npm 上ではいずれも
+`@openagents-org/*` `@openagentsinc/*` とスコープ付きで公開しています。
+無印が空いているのは、**先行者が揃ってスコープ付きを選んだから**です。
+
+公開するならスコープ付き（`@kabatin/openagents` など）にするのが妥当で、
+その場合もコマンド名は `openagents` のまま変えずに済みます。
+[npm のパッケージ名係争ポリシー](https://docs.npmjs.com/policies/disputes)も
+併せて確認してください。
 
 ---
 
@@ -103,9 +125,9 @@ openagents update --restart    # 取得して、動いている常駐も入れ�
 
 ---
 
-## npm を使わない場合
+## CLI を使わない場合
 
-CLI が無くても、やることは変わりません。
+やることは変わりません。
 
 ```bash
 cd <置き場>

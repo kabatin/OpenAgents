@@ -13,13 +13,16 @@
 
 ### 追加
 
-- **`openagents` コマンド（npm）** — `npm i -g openagents` で入れて、
-  `openagents setup` で導入から設定画面まで。`start` / `stop` / `status` /
-  `update` / `where` を持つ。中身は薄いランチャで、依存はゼロ。
-  venv の作成・依存の導入・画面の組み立ては従来どおり `start.py` が担当する
+- **`openagents` コマンド** — `cli/` に同梱。`openagents setup` で導入から
+  設定画面まで。`start` / `stop` / `status` / `update` / `where` を持つ。
+  中身は薄いランチャで、依存はゼロ。venv の作成・依存の導入・画面の組み立ては
+  従来どおり `start.py` が担当する。
+  **npm への公開は見送り**（同名の先行プロジェクトが複数あり、いずれも
+  スコープ付きで公開しているため。→ [docs/11-cli.md](docs/11-cli.md)）。
+  当面は `cd cli && npm install -g .` で入れる
 - **`openagents update [--restart]`** — `git pull --ff-only` で更新し、
-  `start.py` の準備処理を呼び直す。npm で入れた人も git clone で入れた人も
-  同じ経路を通る。手元に変更があるときは**退避も破棄もせずに止まる**
+  `start.py` の準備処理を呼び直す。手元に変更があるときは
+  **退避も破棄もせずに止まる**（未追跡ファイルは数えない）
 - **操作用APIの `POST /shutdown`** — 常駐プロセス（`run.py`）ごと行儀よく
   終わらせる窓口。従来は個々のBOTの再起動しかできず、更新しても `run.py` 自身が
   古いコードを抱えたまま残っていた。127.0.0.1 固定・POST のみは従来どおり

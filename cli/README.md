@@ -7,8 +7,14 @@ They sit in your Discord, remember what was said, answer when asked — and
 occasionally speak up on their own when they notice something. Everything runs
 on your machine; the conversation archive is a SQLite file on your own disk.
 
+> **Not published to npm yet.** Install it from the repository:
+>
+> ```bash
+> git clone https://github.com/kabatin/OpenAgents.git
+> cd OpenAgents/cli && npm install -g .
+> ```
+
 ```bash
-npm install -g openagents
 openagents setup
 ```
 

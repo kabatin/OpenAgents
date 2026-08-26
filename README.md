@@ -53,15 +53,6 @@ You need **Python 3.10+**, **Node.js 20+**, and either
 **[Claude Code](https://claude.com/claude-code)** or
 **[Codex CLI](https://github.com/openai/codex)**.
 
-**With npm** (recommended):
-
-```bash
-npm install -g openagents
-openagents setup
-```
-
-**From source** — identical result; the npm command is a thin launcher around it:
-
 ```bash
 git clone https://github.com/kabatin/OpenAgents.git
 cd OpenAgents
@@ -149,14 +140,16 @@ One process supervises every enabled bot: restarts on crash with backoff,
 detects hangs via heartbeats, and rotates logs. To start it at login, see
 [docs/05-autostart.md](docs/05-autostart.md) — one command on either OS.
 
-Updating is one command, whichever way you installed:
+To update:
 
 ```bash
-openagents update --restart    # or, from source: git pull && python start.py
+git pull --ff-only && python start.py
 ```
 
-It refuses to run if you have uncommitted local changes rather than stashing
-them behind your back. See [docs/11-cli.md](docs/11-cli.md).
+Dependencies are reinstalled and the dashboard rebuilt only when they actually
+changed. There is also an `openagents` command bundled in `cli/` that wraps
+this — including restarting the running supervisor in place — see
+[docs/11-cli.md](docs/11-cli.md).
 
 ![Operations page](docs/images/ops.png)
 *Crash detection, automatic restarts, and a live log tail*

@@ -1,11 +1,20 @@
 name: npm へ公開
 
-# リリースタグを打ったときだけ動く。手動でも回せるようにしてあるのは、
-# 公開だけが失敗したときに、タグを打ち直さずやり直せるようにするため
+# **まだ npm には公開していないので、手動起動だけにしてある。**
+# タグ push で自動発火させると、GitHub のリリース用に v* を打っただけで
+# 公開が走ってしまう。パッケージ名を決めて初回公開を済ませたら、
+# 下の tags トリガを有効にしてよい（docs/11-cli.md の「名前について」）。
+#
+#   on:
+#     push:
+#       tags: ["v*"]
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "publish せず、配る中身の確認までで止める"
+        type: boolean
+        default: true
 
 jobs:
   publish:
@@ -45,7 +54,12 @@ jobs:
         working-directory: cli
 
       - name: publish
+        if: ${{ !inputs.dry_run }}
         run: npm publish --provenance --access public
         working-directory: cli
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: 確認のみで終了したことを伝える
+        if: ${{ inputs.dry_run }}
+        run: echo "::notice::確認だけで終了しました（publish していません）"

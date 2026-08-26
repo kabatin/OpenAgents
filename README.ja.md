@@ -51,15 +51,6 @@ SQLite ファイル1個です。外に出るのは、あなたの質問と検索
 そして **[Claude Code](https://claude.com/claude-code)** か
 **[Codex CLI](https://github.com/openai/codex)** のどちらか。
 
-**npm で入れる**（おすすめ）:
-
-```bash
-npm install -g openagents
-openagents setup
-```
-
-**ソースから入れる** — 結果は同じです。npm 版はこれを包んだだけの薄い入口です:
-
 ```bash
 git clone https://github.com/kabatin/OpenAgents.git
 cd OpenAgents
@@ -161,14 +152,15 @@ PC起動時に自動で立ち上げたい場合は
 [docs/05-autostart.md](docs/05-autostart.md) を見てください
 （mac・Windows それぞれ1コマンドです）。
 
-更新も1コマンドです（どちらの入れ方でも同じ経路を通ります）:
+更新はこれだけです:
 
 ```bash
-openagents update --restart    # ソースから入れた場合: git pull && python start.py
+git pull --ff-only && python start.py
 ```
 
-手元に変更があるときは、**勝手に退避せずに止まります**。
-くわしくは [docs/11-cli.md](docs/11-cli.md) へ。
+依存の入れ直しと管理画面の組み立ては、**実際に変わったときだけ**行われます。
+これを包んだ `openagents` コマンドも `cli/` に同梱してあり、そちらは
+動いている常駐プロセスの入れ替えまでやります → [docs/11-cli.md](docs/11-cli.md)
 
 ![運用画面](docs/images/ops.png)
 *落ちたBOTの自動検出と再起動・ログの追いかけ表示*
