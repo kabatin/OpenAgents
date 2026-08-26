@@ -51,6 +51,15 @@ SQLite ファイル1個です。外に出るのは、あなたの質問と検索
 そして **[Claude Code](https://claude.com/claude-code)** か
 **[Codex CLI](https://github.com/openai/codex)** のどちらか。
 
+**npm で入れる**（おすすめ）:
+
+```bash
+npm install -g openagents
+openagents setup
+```
+
+**ソースから入れる** — 結果は同じです。npm 版はこれを包んだだけの薄い入口です:
+
 ```bash
 git clone https://github.com/kabatin/OpenAgents.git
 cd OpenAgents
@@ -152,6 +161,15 @@ PC起動時に自動で立ち上げたい場合は
 [docs/05-autostart.md](docs/05-autostart.md) を見てください
 （mac・Windows それぞれ1コマンドです）。
 
+更新も1コマンドです（どちらの入れ方でも同じ経路を通ります）:
+
+```bash
+openagents update --restart    # ソースから入れた場合: git pull && python start.py
+```
+
+手元に変更があるときは、**勝手に退避せずに止まります**。
+くわしくは [docs/11-cli.md](docs/11-cli.md) へ。
+
 ![運用画面](docs/images/ops.png)
 *落ちたBOTの自動検出と再起動・ログの追いかけ表示*
 
@@ -223,6 +241,7 @@ Slack や LINE を足したい方は [docs/10-adding-platforms.md](docs/10-addin
 | [08 全体設計](docs/08-architecture.md) | 仕組みを知りたい人へ |
 | [09 困ったとき](docs/09-troubleshooting.md) | よくある詰まり |
 | [10 プラットフォーム追加](docs/10-adding-platforms.md) | Slack等を実装する |
+| [11 コマンド操作](docs/11-cli.md) | `openagents` コマンド・更新のしかた |
 
 その他: [変更履歴](CHANGELOG.md) · [開発に参加する](CONTRIBUTING.md) ·
 [セキュリティ](SECURITY.md) · [行動規範](CODE_OF_CONDUCT.md)
