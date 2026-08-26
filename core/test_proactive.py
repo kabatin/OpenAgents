@@ -12,6 +12,7 @@ from datetime import datetime
 
 from core import db
 from core import proactive
+from core import reminders
 
 NOW = datetime(2026, 7, 31, 12, 0)
 LINK = "https://discord.com/channels/1/2/3"
@@ -119,8 +120,12 @@ class ScreenTest(ProactiveTestBase):
         prompt = proactive.build_screen_prompt(self.MSGS, "エージェント1")
         self.assertIn("id=10", prompt)
         self.assertIn("納期いつだっけ", prompt)
+        # ⑤colleagueはオプトイン（allow_colleague）なので既定では出さない
         for kind in proactive.KINDS:
-            self.assertIn(kind, prompt)
+            if kind == proactive.COLLEAGUE_KIND:
+                self.assertNotIn(kind, prompt)
+            else:
+                self.assertIn(kind, prompt)
 
     def test_prompt_truncates_long_content(self):
         msgs = [dict(self.MSGS[0], content="あ" * 500)]
@@ -626,3 +631,105 @@ class OthersShadowTest(unittest.TestCase):
         self.assertEqual(len(on["others"]), 1)
         # 4類型の判定は others の有無に影響されない
         self.assertEqual(off["candidates"], on["candidates"])
+
+
+class ColleagueKindTest(unittest.TestCase):
+    """⑤同僚枠の本採用（シャドー実験からの昇格）。
+
+    重要な設計: 投稿経路をbypassせず既存パイプライン（二次判定→懐疑役→
+    横断排他→枠）に合流させる。出典ゲートは適用外だが、代わりに
+    「事実を断定したら黙る」「長すぎたら黙る」で縛る。
+    """
+
+    def test_registered_as_fifth_kind(self):
+        self.assertIn("colleague", proactive.KINDS)
+        self.assertIn("colleague", proactive.KIND_LABELS)
+        # 出典リンクは要求しない（事実を述べない類型なので出典が存在しない）
+        self.assertNotIn("colleague", proactive.CITE_REQUIRED_KINDS)
+
+    def test_prompt_opt_in(self):
+        msgs = [{"id": 1, "channel": "g", "author": "人A",
+                 "content": "誕生日おめでとう"}]
+        on = proactive.build_screen_prompt(msgs, "エージェント1",
+                                           allow_colleague=True)
+        self.assertIn("colleague:", on)
+        self.assertIn("事実や数字を述べる用途では使わない", on)
+        off = proactive.build_screen_prompt(msgs, "エージェント1")
+        self.assertNotIn("colleague:", off)
+
+    def test_gate_allows_short_social_reply(self):
+        text, note = proactive.gate_reply("おめでとうございます🎉", "colleague")
+        self.assertEqual(text, "おめでとうございます🎉")
+        self.assertEqual(note, "発言")
+
+    def test_gate_blocks_factual_assertion(self):
+        """⑤が事実を語り出したら①③④の領分なので止める。"""
+        for bad in ["納期は9/5で確定です", "販売数は120件です",
+                    "開催は8/29に決まりました", "たしか3000円のはずです"]:
+            text, note = proactive.gate_reply(bad, "colleague")
+            self.assertIsNone(text, bad)
+            self.assertIn("事実を断定", note)
+
+    def test_gate_blocks_long_reply(self):
+        long_text = "そうですね、" + "あ" * 200
+        text, note = proactive.gate_reply(long_text, "colleague")
+        self.assertIsNone(text)
+        self.assertIn("長すぎる", note)
+
+    def test_other_kinds_unaffected_by_colleague_gate(self):
+        """①③④は従来どおり出典リンクで判定される（相互に干渉しない）。"""
+        with_link = f"その件は決まっています {LINK}"
+        text, _ = proactive.gate_reply(with_link, "info")
+        self.assertIsNotNone(text)
+        self.assertIsNone(proactive.gate_reply("根拠なしの断定", "info")[0])
+
+    def test_screen_returns_colleague_candidate(self):
+        msgs = [{"id": 1, "channel": "g", "author": "人A",
+                 "content": "人Bさん誕生日おめでとう！"}]
+        raw = ('{"candidates": [{"message_id": 1, "kind": "colleague", '
+               '"search_terms": [], "reason": "チームの節目"}], '
+               '"decisions": [], "handoff": []}')
+        got = proactive.screen(msgs, agent_name="エージェント1",
+                               invoke_fn=lambda p: raw, allow_colleague=True)
+        self.assertEqual(got["candidates"][0]["kind"], "colleague")
+
+
+class ColleagueQuotaTest(unittest.TestCase):
+    """⑤専用の日次上限（全体枠とは別勘定）。"""
+
+    def setUp(self):
+        fd, self.db_path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        db.init_db(self.db_path)
+        self.now = reminders.now_jst()
+
+    def tearDown(self):
+        os.unlink(self.db_path)
+
+    def _spoke(self, kind):
+        with db.connect(self.db_path) as conn:
+            db.add_proactive_log(
+                conn, agent_id="agent1", kind=kind, action="spoke",
+                created_at=reminders.fmt(self.now))
+
+    def test_quota_counts_only_colleague(self):
+        self.assertEqual(
+            proactive.colleague_quota_left(self.db_path, "agent1", self.now),
+            proactive.COLLEAGUE_DAILY_MAX)
+        self._spoke("recall")      # 他類型は⑤の枠を食わない
+        self.assertEqual(
+            proactive.colleague_quota_left(self.db_path, "agent1", self.now),
+            proactive.COLLEAGUE_DAILY_MAX)
+        self._spoke("colleague")
+        self.assertEqual(
+            proactive.colleague_quota_left(self.db_path, "agent1", self.now), 0)
+
+    def test_count_helper_filters_by_kind(self):
+        self._spoke("colleague")
+        self._spoke("recall")
+        midnight = reminders.fmt(self.now.replace(hour=0, minute=0))
+        with db.connect(self.db_path) as conn:
+            self.assertEqual(db.count_proactive_spoken_since(
+                conn, "agent1", midnight), 2)
+            self.assertEqual(db.count_proactive_spoken_since(
+                conn, "agent1", midnight, kind="colleague"), 1)

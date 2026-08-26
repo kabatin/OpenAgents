@@ -66,6 +66,8 @@ type Dictionary = { terms: Term[]; glossary: GlossaryPair[] };
 
 type ShadowRow = {
   agentId: string;
+  kind: string;
+  action: string;
   channel: string | null;
   author: string | null;
   trigger: string | null;
@@ -289,16 +291,18 @@ export function DataPage() {
             </ul>
 
             <div className="eyebrow px-4 pb-1 pt-5">
-              観察の実験（4類型の外で「同僚なら一言添える」と判断した場面。
-              <span className="font-medium">投稿はしていません</span>）
+              同僚としての一言（⑤colleague）
             </div>
             <p className="px-4 pb-2 text-2xs leading-relaxed text-muted">
-              「これは言ってほしかった」が多ければ類型を追加、「これはうざい」が多ければ
-              いまの絞り込みが正しい、という判断材料です。
+              まずシャドー（投稿せず記録のみ）で試し、良さそうだったので本採用した枠です。
+              有効にすると1日1回まで実際に発言します。「事実を述べたら黙る」
+              「長すぎたら黙る」で縛っており、コードが止めたものは{" "}
+              <span className="font-medium">止めた</span> と表示されます。
+              👎が続いた型は自動で抑制されます。
             </p>
             <ul>
               {(learning?.shadow ?? []).length === 0 ? (
-                <Empty>まだ記録はありません（4類型の外で言いたくなる場面がなかった）</Empty>
+                <Empty>まだ記録はありません（一言添えたくなる場面がなかった）</Empty>
               ) : (
                 learning?.shadow.map((row, i) => (
                   <li
@@ -309,6 +313,21 @@ export function DataPage() {
                       <span>{jstStamp(row.createdAt)}</span>
                       <span>#{row.channel ?? "?"}</span>
                       <span>{row.author ?? "?"}</span>
+                      <Chip
+                        tone={
+                          row.action === "spoke"
+                            ? "accent"
+                            : row.action === "shadow"
+                              ? "neutral"
+                              : "warn"
+                        }
+                      >
+                        {row.action === "spoke"
+                          ? "発言した"
+                          : row.action === "shadow"
+                            ? "シャドー"
+                            : "止めた"}
+                      </Chip>
                       <span className="ml-auto">{agentLabel(row.agentId)}</span>
                     </div>
                     <div className="mt-1 text-muted">「{row.trigger ?? ""}」</div>

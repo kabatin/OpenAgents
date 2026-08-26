@@ -42,13 +42,19 @@ CONTEXT_MESSAGES = 15         # 二次判定に渡すchの直近文脈
 MAX_REPLY_CHARS = 1800        # Discord 2000字制限内に収める最終ガード
 SILENT_TOKEN = "[SILENT]"
 
-KINDS = ("contradiction", "assist", "info", "recall")
+KINDS = ("contradiction", "assist", "info", "recall", "colleague")
 KIND_LABELS = {"contradiction": "①過去の決定との矛盾の指摘",
                "assist": "②困りごとへの支援情報",
                "info": "③確実性のある情報の提供",
-               "recall": "④過去ログで答えられる疑問への回答"}
-# 出典リンク必須の類型（②支援は一般知識でも成立し得るため対象外）
+               "recall": "④過去ログで答えられる疑問への回答",
+               "colleague": "⑤同僚としての一言（事実を述べない相槌・受け答え）"}
+# 出典リンク必須の類型（②支援は一般知識でも成立し得るため対象外。
+# ⑤同僚は事実を述べないので出典が存在しない＝代わりに「断定禁止」で縛る）
 CITE_REQUIRED_KINDS = {"contradiction", "info", "recall"}
+# ⑤同僚枠は情報価値ではなく場への参加が目的。暴走したときの被害が他類型と
+# 質が違う（純ノイズがチャットを流す）ので、専用の日次上限を別に持つ。
+COLLEAGUE_KIND = "colleague"
+COLLEAGUE_DAILY_MAX = 1
 LINK_RE = re.compile(r"https?://(?:\w+\.)?discord(?:app)?\.com/channels/\d+")
 _JSON_RE = re.compile(r"\{.*\}", re.S)
 
@@ -164,7 +170,7 @@ def collect_cycle(db_path, agent_id, *, home_channel_id,
 
 def build_screen_prompt(messages, agent_name, scope_note=None,
                         colleagues=None, variant_note=None,
-                        allow_others=False):
+                        allow_others=False, allow_colleague=False):
     """一次判定プロンプト（純粋関数・テスト対象）。
     scope_note: 個体ごとの縄張り / colleagues: {id: (名前, 専門)}（RM#56）
     variant_note: A/B実験の変種追記文（RM#12・空なら対照群）
@@ -181,12 +187,18 @@ def build_screen_prompt(messages, agent_name, scope_note=None,
         f"あなたはチームのチャットを見守るAIエージェント「{agent_name}」の観察係。\n"
         "以下は前回の観察以降の社内メンバーの発言一覧。この中に、自発的に"
         "一言添える価値が確実にありそうな発言があるかだけを判定する。\n\n"
-        "候補にしてよいのは次の4類型だけ:\n"
+        "候補にしてよいのは次の類型だけ:\n"
         "- contradiction: 過去に決まったこと・言われていたことと食い違う発言\n"
         "- assist: 明確に困っている・詰まっている人に役立つ情報を出せそうな発言\n"
         "- info: 記録で裏付けられた確実な情報を足せばミスを防げる発言\n"
         "- recall: 「そういえば〇〇って〜だっけ？」のような、過去のやりとりを"
-        "調べれば答えられそうな疑問\n\n"
+        "調べれば答えられそうな疑問\n"
+        + (("- colleague: 上のどれでもないが「自分が同じチームの同僚だったら"
+            "ここは一言添えると思う」発言（自分の実装や担当への言及・"
+            "チームの節目への祝意など）。**事実や数字を述べる用途では使わない**"
+            "（それは①③④の仕事）。1周期に1件まで\n")
+           if allow_colleague else "")
+        + "\n"
         "原則:\n"
         "- 該当なしが正常。迷ったら候補にしない（誤った口出しは信頼を失う）\n"
         "- 雑談・感想・進行中の作業指示・既に誰かが答えている話題は対象外\n"
@@ -341,14 +353,15 @@ def parse_screen_handoffs(raw, valid_ids, valid_targets):
 
 def screen(messages, *, agent_name, model=SCREEN_MODEL_DEFAULT,
            scope_note=None, colleagues=None, invoke_fn=None,
-           variant_note=None, allow_others=False):
+           variant_note=None, allow_others=False, allow_colleague=False):
     """一次判定: {"candidates", "decisions", "handoffs", "others"} を返す。
     invoke_fnはテスト差し替え口。variant_note はA/B実験の追記文（RM#12）。
     allow_others は「その他」枠のシャドー実験（othersは投稿しない）。"""
     prompt = build_screen_prompt(messages, agent_name, scope_note=scope_note,
                                  colleagues=colleagues,
                                  variant_note=variant_note,
-                                 allow_others=allow_others)
+                                 allow_others=allow_others,
+                                 allow_colleague=allow_colleague)
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
         p, model=model, timeout=SCREEN_TIMEOUT_SEC).text)
     raw = fn(prompt)
@@ -366,10 +379,14 @@ PROACTIVE_SYSTEM_TMPL = """あなたはチームのチャットのアシスタ�
 自分の判断で会話に一言添えるかどうかを決める場面（自発発言）。
 
 # 自発発言の契約（必ず守る）
-- 発言できるのは4類型のみ: ①過去の決定との矛盾の指摘 ②困っている人への支援
+- 発言できるのは次の類型のみ: ①過去の決定との矛盾の指摘 ②困っている人への支援
   ③データで裏付けられた確実な情報 ④過去ログで答えられる疑問への回答
+  ⑤同僚としての一言（事実を述べない相槌・受け答え・節目への祝意）
 - ①③④は、過去ログ検索結果の中の実在するリンクを出典として本文に必ず含める。
   検索結果から確証が得られなければ発言しない
+- ⑤は**事実・数字・状況を述べない**（それらは①③④の仕事）。1〜2文で短く、
+  相手の発言に乗るだけにする。「調べたら参考になるかも」のような、自分で
+  確かめていない提案もしない（やるなら調べてから①③④として言う）
 - 迷ったら {silent} とだけ出力する。沈黙は減点にならない。
   誤った・些末な口出しはチームの信頼を失う
 - 既に誰かが答えている・解決済みの話題には重ねて発言しない
@@ -407,6 +424,14 @@ def build_decide_prompt(cand, trigger, guild_id, recent_lines, context_block,
     return "\n\n".join(parts)
 
 
+# ⑤同僚枠が事実を語り出したときの封じ込め（出典ゲートの⑤版）。
+# 「〜は8/8で確定」のような断定は、出典を伴わないまま流れると害になる。
+COLLEAGUE_ASSERT_RE = re.compile(
+    r"で確定|に決定|と決ま|で決ま|のはず|だったはず|件です|円です|"
+    r"\d{1,2}\s*[/月]\s*\d{1,2}")
+COLLEAGUE_MAX_CHARS = 120
+
+
 def gate_reply(text, kind):
     """出典ゲート（コードによる強制・純粋関数・テスト対象）。
     Returns: (投稿してよい本文 | None, 記録用メモ)"""
@@ -416,9 +441,26 @@ def gate_reply(text, kind):
     if kind in CITE_REQUIRED_KINDS and not LINK_RE.search(t):
         # ①③④は出典リンク無しでは発言させない（憶測の構造的封じ込め）
         return None, "出典リンク無しのためコードが沈黙化"
+    if kind == COLLEAGUE_KIND:
+        # ⑤は場への参加が目的。事実を語り始めたら①③④の領分なので止める
+        if COLLEAGUE_ASSERT_RE.search(t):
+            return None, "⑤同僚枠が事実を断定したためコードが沈黙化"
+        if len(t) > COLLEAGUE_MAX_CHARS:
+            # 長い＝何かを説明しようとしている＝⑤の使い方ではない
+            return None, "⑤同僚枠が長すぎるためコードが沈黙化"
     if len(t) > MAX_REPLY_CHARS:
         t = t[:MAX_REPLY_CHARS] + "…"
     return t, "発言"
+
+
+def colleague_quota_left(db_path, agent_id, now=None):
+    """⑤同僚枠の残り回数（日次・全体枠とは別勘定）。"""
+    now = now or reminders.now_jst()
+    midnight = reminders.fmt(now.replace(hour=0, minute=0))
+    with db.connect(db_path) as conn:
+        used = db.count_proactive_spoken_since(
+            conn, agent_id, midnight, kind=COLLEAGUE_KIND)
+    return max(0, COLLEAGUE_DAILY_MAX - used)
 
 
 def decide_reply(db_path, guild_id, agent_id, cand, trigger, *, persona,

@@ -337,6 +337,8 @@ export function archivedMessageCount(): number {
 
 export type ObservationRow = {
   agentId: string;
+  kind: string;
+  action: string;
   channel: string | null;
   author: string | null;
   trigger: string | null;
@@ -347,16 +349,18 @@ export type ObservationRow = {
 };
 
 /**
- * 「その他」枠のシャドー記録。自発発言の4類型の外で、エージェントが
- * 「同僚なら一言添える」と判断したもの。**投稿はされていない**ので、
- * ホワイトリスト方式が妥当かを人間が読んで判断するための材料。
+ * 同僚枠の記録。実験時はシャドー（kind='others'・投稿なし）で、
+ * ⑤colleague として本採用したあとは実際に投稿される（kind='colleague'）。
+ * action で spoke（発言した）/ shadow（記録のみ）/ silent（コードが止めた）
+ * を見分ける。
  */
 export function observationShadow(limit = 100): ObservationRow[] {
   return safeQuery(
     (conn) =>
       conn
         .prepare<[number], ObservationRow>(
-          `SELECT p.agent_id AS agentId, c.name AS channel,
+          `SELECT p.agent_id AS agentId, p.kind AS kind, p.action AS action,
+                  c.name AS channel,
                   u.display_name AS author,
                   SUBSTR(m.content, 1, 160) AS trigger,
                   p.detail AS detail, p.created_at AS createdAt,
@@ -366,7 +370,8 @@ export function observationShadow(limit = 100): ObservationRow[] {
              LEFT JOIN channels c ON c.id = p.channel_id
              LEFT JOIN messages m ON m.id = p.trigger_message_id
              LEFT JOIN users u ON u.id = m.author_id
-            WHERE p.kind = 'others' AND p.action = 'shadow'
+            WHERE (p.kind = 'others' AND p.action = 'shadow')
+               OR (p.kind = 'colleague')
             ORDER BY p.id DESC LIMIT ?`,
         )
         .all(limit),
