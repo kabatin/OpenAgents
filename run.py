@@ -77,8 +77,18 @@ def main():
                or control.DEFAULT_PORT)
     supervisor = sup.Supervisor(cfg)
 
+    # 停止の合図は1本にまとめる。Ctrl-C も、CLI からの /shutdown も、
+    # 同じ経路を通って下の finally（stop_all → httpd.shutdown）に落ちる
+    stopping = threading.Event()
+
+    def _request_stop():
+        if stopping.is_set():
+            return
+        stopping.set()
+        print("\n停止しています…", flush=True)
+
     try:
-        httpd = control.serve(supervisor, port)
+        httpd = control.serve(supervisor, port, on_shutdown=_request_stop)
     except OSError as e:
         print(f"操作用APIのポート {port} を使えませんでした: {e}")
         print("  すでに run.py が動いていませんか？")
@@ -87,13 +97,8 @@ def main():
     supervisor.start_all()
     _print_summary(supervisor, port)
 
-    stopping = threading.Event()
-
     def _shutdown(signum, frame):     # noqa: ARG001
-        if stopping.is_set():
-            return
-        stopping.set()
-        print("\n停止しています…", flush=True)
+        _request_stop()
 
     signal.signal(signal.SIGINT, _shutdown)
     if hasattr(signal, "SIGTERM"):

@@ -29,8 +29,8 @@ DEFAULT_PORT = 8788
 def route(method, path):
     """パスを (種類, 引数) に振り分ける（純粋関数・テスト対象）。
 
-    戻り値: ("status", None) / ("restart", "devbot") / ("not_found", None)
-            / ("method_not_allowed", None)
+    戻り値: ("status", None) / ("restart", "devbot") / ("shutdown", None)
+            / ("not_found", None) / ("method_not_allowed", None)
     """
     parts = [p for p in path.split("?")[0].split("/") if p]
     if not parts:
@@ -40,6 +40,14 @@ def route(method, path):
         if method != "GET":
             return ("method_not_allowed", None)
         return ("status", None)
+    if head == "shutdown":
+        # 常駐プロセスごと終う。個別BOTの stop では足りない場面
+        # （更新後、run.py 自身が古い supervisor.py を抱えたまま）のためにある
+        if method != "POST":
+            return ("method_not_allowed", None)
+        if len(parts) != 1:
+            return ("not_found", None)
+        return ("shutdown", None)
     if head in ("restart", "start", "stop"):
         # 状態を変える操作は POST のみ（GETでの副作用を作らない）
         if method != "POST":
@@ -54,6 +62,8 @@ def route(method, path):
 
 class _Handler(BaseHTTPRequestHandler):
     supervisor = None
+    #: 常駐プロセスに終了を伝える手段（run.py が渡す）。None なら shutdown は断る
+    on_shutdown = None
     server_version = "OpenAgentsSupervisor/1.0"
 
     def _send(self, status, payload):
@@ -73,6 +83,14 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(404, {"message": "不明なパスです"})
         if kind == "health":
             return self._send(200, {"ok": True})
+        if kind == "shutdown":
+            if self.on_shutdown is None:
+                return self._send(501, {"message": "この起動方法では停止できません"})
+            # **先に応答を返してから**終了を伝える。逆にすると、
+            # サーバが畳まれて応答が届かず、呼んだ側からは失敗に見える
+            self._send(200, {"ok": True, "action": "shutdown"})
+            self.on_shutdown()
+            return None
         sup = self.supervisor
         if sup is None:
             return self._send(503, {"message": "起動中です"})
@@ -96,9 +114,16 @@ class _Handler(BaseHTTPRequestHandler):
         """既定のアクセスログは出さない（BOTのログに混ざって読みにくい）。"""
 
 
-def serve(supervisor, port=DEFAULT_PORT):
-    """control API を別スレッドで動かし、HTTPServer を返す。"""
-    handler = type("Handler", (_Handler,), {"supervisor": supervisor})
+def serve(supervisor, port=DEFAULT_PORT, on_shutdown=None):
+    """control API を別スレッドで動かし、HTTPServer を返す。
+
+    `on_shutdown` は「常駐プロセスごと終わってよい」と伝える呼び出し。
+    渡さなければ `/shutdown` は 501 を返す（＝止められない、と正直に言う）。
+    """
+    handler = type("Handler", (_Handler,), {
+        "supervisor": supervisor,
+        "on_shutdown": staticmethod(on_shutdown) if on_shutdown else None,
+    })
     httpd = ThreadingHTTPServer((HOST, port), handler)
     thread = threading.Thread(target=httpd.serve_forever,
                               name="control-api", daemon=True)

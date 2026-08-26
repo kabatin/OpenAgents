@@ -11,6 +11,7 @@
 import os
 import shutil
 import tempfile
+import threading
 import time
 import unittest
 
@@ -232,6 +233,20 @@ class RouteTest(unittest.TestCase):
             self.assertEqual(control.route("GET", f"/{action}/archivebot"),
                              ("method_not_allowed", None))
 
+    def test_常駐ごとの停止もPOSTのみ(self):
+        # CLI の `openagents stop` / `update --restart` が使う。
+        # GETで通ると、ブラウザに踏ませるだけで常駐を落とせてしまう
+        self.assertEqual(control.route("POST", "/shutdown"),
+                         ("shutdown", None))
+        self.assertEqual(control.route("GET", "/shutdown"),
+                         ("method_not_allowed", None))
+
+    def test_常駐停止は引数を取らない(self):
+        # /shutdown/archivebot のような呼び方を受けると、
+        # 「1体だけ止まる」と誤解されたまま全部が止まる
+        self.assertEqual(control.route("POST", "/shutdown/archivebot"),
+                         ("not_found", None))
+
     def test_状態取得をPOSTでは受けない(self):
         self.assertEqual(control.route("POST", "/status"),
                          ("method_not_allowed", None))
@@ -247,6 +262,41 @@ class RouteTest(unittest.TestCase):
     def test_外向きには待ち受けない(self):
         # ここを 0.0.0.0 にすると、同じLANの誰でもBOTを止められる
         self.assertEqual(control.HOST, "127.0.0.1")
+
+
+class ShutdownEndpointTest(unittest.TestCase):
+    """/shutdown を実際に叩いて、常駐へ終了が伝わることを確かめる。"""
+
+    def _serve(self, on_shutdown):
+        # ポート0で開かせ、実際に割り当てられた番号を使う
+        # （固定ポートだと、開発機で run.py が動いていると落ちる）
+        httpd = control.serve(None, 0, on_shutdown=on_shutdown)
+        self.addCleanup(httpd.shutdown)
+        return httpd.server_address[1]
+
+    def _post(self, port, path="/shutdown"):
+        import urllib.error
+        import urllib.request
+        request = urllib.request.Request(
+            f"http://{control.HOST}:{port}{path}", method="POST")
+        try:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                return response.status
+        except urllib.error.HTTPError as e:
+            return e.code
+
+    def test_停止が伝わる(self):
+        called = threading.Event()
+        port = self._serve(called.set)
+        self.assertEqual(self._post(port), 200)
+        # 応答を返してから呼ぶ作りなので、少しだけ待つ
+        self.assertTrue(called.wait(5))
+
+    def test_手段が無ければ正直に断る(self):
+        # 501 を返すのは「止められない」と言うため。
+        # 200 を返して黙って無視すると、CLI は止まったと思って次へ進む
+        port = self._serve(None)
+        self.assertEqual(self._post(port), 501)
 
 
 class RunnerLifecycleTest(unittest.TestCase):
