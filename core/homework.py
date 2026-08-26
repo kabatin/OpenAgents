@@ -189,6 +189,90 @@ def save_commitments(db_path, agent_id, candidates, messages, *,
     return saved
 
 
+# ------------------------------------------------- 3.5) 声かけ前の完了確認
+
+RESOLVED_CONTEXT_LIMIT = 60   # 声かけ前に読み直す「その後の会話」の発言数上限
+
+
+def _fmt_reactions(pairs):
+    """[(emoji, 名前)] → 「👍(佐藤)・✅(鈴木)」（純粋関数）。"""
+    return "・".join(f"{e}({n})" for e, n in pairs)
+
+
+def build_resolution_prompt(item, later_messages, source_reactions=()):
+    """完了確認プロンプト（純粋関数・テスト対象）。
+    リアクションも判断材料に含める（「👍で完結」が見えず、
+    完了済みの話を掘り起こしていた）。"""
+    lines = []
+    for m in later_messages:
+        text = (m["content"] or "").strip().replace("\n", " ")
+        if len(text) > PER_MESSAGE_CHARS:
+            text = text[:PER_MESSAGE_CHARS] + "…"
+        rx = _fmt_reactions(m.get("reactions") or ())
+        lines.append(f"- {m['author']}: {text}"
+                     + (f"　←リアクション: {rx}" if rx else ""))
+    src = _fmt_reactions(source_reactions)
+    src_line = (f"【宿題発言へのリアクション】{src}\n\n" if src else "")
+    return (
+        "チャットの見守りAIの内部確認。ある人が「あとでやる」と言った宿題に"
+        "ついて、数日後に「あれどうなりました?」と声をかける直前の最終チェック。\n\n"
+        f"【宿題】{item['task']}（{item['owner']} 本人の自己コミット）\n\n"
+        + src_line +
+        "【その後の同チャンネルのやりとり】\n" + "\n".join(lines) + "\n\n"
+        "この宿題は、上のやりとりの中で既に完了・解決・不要になったと読み取れるか。\n"
+        "- 完了報告・結果共有・「もうやった」等があれば resolved\n"
+        "- 完了を示す発言に👍✅等のリアクションで合意が付いている場合も resolved\n"
+        "- 話題が消えただけ・進捗が読み取れない場合は resolved にしない"
+        "（声かけする価値がある）\n\n"
+        '出力はJSONのみ: {"resolved": true} または {"resolved": false}'
+    )
+
+
+def parse_resolution_response(raw):
+    """完了確認JSONの解釈（純粋関数）。壊れたJSON・判断不能は「未解決」扱い＝
+    明確に resolved と読めた時だけ声かけを抑止する（機能を黙って殺さない）。"""
+    m = _JSON_RE.search(raw or "")
+    if not m:
+        return False
+    try:
+        return json.loads(m.group(0)).get("resolved") is True
+    except ValueError:
+        return False
+
+
+def check_resolved(db_path, item, *, model=SCREEN_MODEL_DEFAULT,
+                   invoke_fn=None):
+    """トリガー発言より後の同chの会話を読み、宿題が既に完了していそうなら True。
+
+    検知後の会話で完了済みになった話を掘り起こして声かけしていたため追加した。
+    後続会話なし＝確認不要（claudeを呼ばず声かけへ）。確認自体の失敗も声かけへ
+    倒す（LLM障害で機能全体が黙って止まるのを防ぐ）。"""
+    with db.connect(db_path) as conn:
+        later = db.channel_messages_after(
+            conn, item["channel_id"], item["source_message_id"],
+            limit=RESOLVED_CONTEXT_LIMIT)
+        rx = db.reactions_for_messages(
+            conn, [item["source_message_id"]] + [m["id"] for m in later])
+    src_rx = rx.get(item["source_message_id"]) or ()
+    if not later and not src_rx:
+        return False
+    later = [{**m, "reactions": rx.get(m["id"]) or ()} for m in later]
+    prompt = build_resolution_prompt(item, later, source_reactions=src_rx)
+    fn = invoke_fn or (lambda p: invoke_claude.invoke(
+        p, model=model, timeout=DETECT_TIMEOUT_SEC).text)
+    try:
+        return parse_resolution_response(fn(prompt))
+    except Exception as e:
+        print(f"homework resolution check failed (item={item.get('id')}): {e}")
+        return False
+
+
+def mark_resolved(db_path, item_id):
+    """会話で完了済みと判断した宿題を終端にする（声かけしない）。"""
+    with db.connect(db_path) as conn:
+        db.set_homework_status(conn, item_id, "resolved")
+
+
 # ---------------------------------------------------------------- 4) 声かけ
 
 def followup_action(follow_up_date, today, expire_days=EXPIRE_DAYS_DEFAULT):

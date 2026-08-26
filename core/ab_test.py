@@ -16,7 +16,7 @@ import re
 from core import db
 from core import reminders
 SLOT_SCREEN = "screen_note"
-MIN_SAMPLES = 12       # 各変種これだけ使われるまで比較しない
+MIN_JUDGED = 8         # 各変種の評価（👍👎）がこれだけ貯まるまで比較しない
 MIN_GAP = 0.25         # 👍率の差がこれ以上でないと提案しない
 
 # 変種は人間が書いた固定文（LLMに自己書き換えさせない＝安全弁）
@@ -91,16 +91,19 @@ def record_feedback_for_message(db_path, message_id, value):
 
 
 def evaluate(db_path, slot=SLOT_SCREEN):
-    """比較結果（純粋な集計）。提案できる差があれば dict、無ければ None。"""
+    """比較結果（純粋な集計）。提案できる差があれば dict、無ければ None。
+
+    ゲートは使用回数ではなく**評価件数**で見る。使用回数で見ていたときは、
+    評価ゼロの変種が👍率0%扱いになり、相手に👍が1件付いただけで
+    「差あり」と誤検知して2時間ごとに提案を投げ続けていた。"""
     with db.connect(db_path) as conn:
         rows = db.active_variants(conn, slot)
     scored = []
     for r in rows:
         n = r["up"] + r["down"]
-        if r["used"] < MIN_SAMPLES:
-            return None            # サンプル不足の変種があるうちは比較しない
-        rate = (r["up"] / n) if n else 0.0
-        scored.append({**r, "rate": rate, "judged": n})
+        if n < MIN_JUDGED:
+            return None            # 評価不足の変種があるうちは比較しない
+        scored.append({**r, "rate": r["up"] / n, "judged": n})
     if len(scored) < 2:
         return None
     scored.sort(key=lambda x: -x["rate"])

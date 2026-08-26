@@ -68,6 +68,38 @@ class PlanParseTest(unittest.TestCase):
             [])
 
 
+class DuplicateGuardTest(unittest.TestCase):
+    """決定台帳が同じ決定を言い回し違いで再抽出するたびに、別イベント扱いで
+    逆算案が連投された回帰テスト。"""
+
+    def test_rephrased_same_event_is_duplicate(self):
+        self.assertTrue(event_planner.is_same_event(
+            "9月1日(火)の観戦会の会場を第一ホールで確定",
+            "9/1(火)の観戦会の会場を第一ホールに決定"))
+        self.assertTrue(event_planner.is_same_event(
+            "9/8(火)の観戦会の会場を第二ホールに決定",
+            "9/8(火)の観戦会は第二ホールで開催することに決定"))
+
+    def test_extra_detail_still_duplicate(self):
+        # 片方に住所などの追記があっても同一イベントとみなす
+        self.assertTrue(event_planner.is_same_event(
+            "9月1日(火)の観戦会の会場を第一ホール"
+            "（○○市△△区1丁目2-3）に決定",
+            "9/1(火)の観戦会の会場を第一ホールに決定"))
+
+    def test_different_event_same_date_not_duplicate(self):
+        self.assertFalse(event_planner.is_same_event(
+            "9/8(火)の観戦会の会場を第二ホールに決定",
+            "9/8に新ユニフォームの発表会を実施する"))
+
+    def test_find_duplicate(self):
+        names = ["9/1(火)の観戦会の会場を第一ホールに決定"]
+        self.assertIsNotNone(event_planner.find_duplicate(
+            {"name": "9月1日(火)の観戦会の会場を第一ホールで確定"}, names))
+        self.assertIsNone(event_planner.find_duplicate(
+            {"name": "9/1に新ユニフォームの発表会を実施する"}, names))
+
+
 class ProposalFlowTest(unittest.TestCase):
     EVENT = {"decision_id": 1, "name": "サマーカップは8/29に開催する",
              "event_date": "2026-08-29", "channel_id": 5,

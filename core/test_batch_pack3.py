@@ -88,24 +88,35 @@ class AbTestTest(TestBase):
         third = ab_test.pick(self.db_path)
         self.assertEqual(third[0], first[0])
 
-    def test_no_evaluation_until_enough_samples(self):
+    def test_no_evaluation_until_enough_judged(self):
         ab_test.ensure_variants(self.db_path)
         for _ in range(4):
             vid, _b = ab_test.pick(self.db_path)
             ab_test.record_feedback(self.db_path, vid, "up")
         self.assertIsNone(ab_test.evaluate(self.db_path))
 
+    def test_usage_alone_never_triggers_report(self):
+        # 使用回数だけ溜まり評価ゼロの変種が👍率0%扱いになり、相手に👍が
+        # 1件付いただけで「差あり」と誤検知していた回帰テスト
+        ab_test.ensure_variants(self.db_path)
+        ids = set()
+        for _ in range(ab_test.MIN_JUDGED * 4):
+            vid, _b = ab_test.pick(self.db_path)
+            ids.add(vid)
+        ab_test.record_feedback(self.db_path, min(ids), "up")  # 片方に👍1件だけ
+        self.assertIsNone(ab_test.evaluate(self.db_path))
+
     def test_reports_only_on_clear_gap(self):
         ab_test.ensure_variants(self.db_path)
         ids = {}
-        for _ in range(ab_test.MIN_SAMPLES * 2):
+        for _ in range(ab_test.MIN_JUDGED * 2):
             vid, _b = ab_test.pick(self.db_path)
             ids.setdefault(vid, 0)
             ids[vid] += 1
         a_id, b_id = sorted(ids)
-        for _ in range(8):        # A: 👍8/8=100%
+        for _ in range(ab_test.MIN_JUDGED):        # A: 👍8/8=100%
             ab_test.record_feedback(self.db_path, a_id, "up")
-        for _ in range(8):        # B: 👍0/8=0%
+        for _ in range(ab_test.MIN_JUDGED):        # B: 👍0/8=0%
             ab_test.record_feedback(self.db_path, b_id, "down")
         result = ab_test.evaluate(self.db_path)
         self.assertIsNotNone(result)
@@ -117,13 +128,14 @@ class AbTestTest(TestBase):
     def test_small_gap_no_report(self):
         ab_test.ensure_variants(self.db_path)
         ids = set()
-        for _ in range(ab_test.MIN_SAMPLES * 2):
+        for _ in range(ab_test.MIN_JUDGED * 2):
             vid, _b = ab_test.pick(self.db_path)
             ids.add(vid)
-        for vid in ids:           # 両方 👍3/4 = 差ゼロ
-            for _ in range(3):
+        for vid in ids:           # 両方 👍6/8 = 差ゼロ
+            for _ in range(6):
                 ab_test.record_feedback(self.db_path, vid, "up")
-            ab_test.record_feedback(self.db_path, vid, "down")
+            for _ in range(2):
+                ab_test.record_feedback(self.db_path, vid, "down")
         self.assertIsNone(ab_test.evaluate(self.db_path))
 
 

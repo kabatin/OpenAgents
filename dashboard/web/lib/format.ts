@@ -68,6 +68,14 @@ export const ACTION_LABEL: Record<string, string> = {
   rescue_shadow: "救援（シャドー）",
   prep_shadow: "事前パック（シャドー）",
   stale_shadow: "状況確認（シャドー）",
+  hw_track: "宿題を追跡開始",
+  hw_shadow: "宿題の声かけ（シャドー）",
+  hw_nudge: "宿題の声かけ",
+  hw_resolved: "宿題は会話で完了済みと判断",
+  attention_tracked: "気になる話題を様子見",
+  attention_shadow: "自発介入（シャドー）",
+  attention_spoke: "会話に口を挟んだ",
+  attention_resolved: "人間だけで解決したので取り下げ",
 };
 
 export const KIND_LABEL: Record<string, string> = {
@@ -92,6 +100,8 @@ export const KIND_LABEL: Record<string, string> = {
   prep: "事前パック",
   ripple: "波紋",
   stale: "停滞",
+  homework: "宿題",
+  attention: "自発介入",
 };
 
 export function actionLabel(a: string): string {

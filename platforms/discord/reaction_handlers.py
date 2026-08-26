@@ -36,6 +36,7 @@ class ReactionHandlersMixin:
     async def on_raw_reaction_add(self, payload):
         # 未キャッシュのメッセージにも効くよう raw を使う（archiverのみ）
         if self.is_archiver:
+            await self._archive_reaction(payload, added=True)
             await self._record_reaction(payload, added=True)
             # 採用・解雇提案への管理者👍を承認として処理（best-effort）
             try:
@@ -81,7 +82,33 @@ class ReactionHandlersMixin:
 
     async def on_raw_reaction_remove(self, payload):
         if self.is_archiver:
+            await self._archive_reaction(payload, added=False)
             await self._record_reaction(payload, added=False)
+
+    async def _archive_reaction(self, payload, added):
+        """**全リアクション**をアーカイブする。`_record_reaction` とは役割が違う:
+        あちらはエージェントの投稿への👍👎を物差しとして貯めるもので、
+        こちらは人間同士の「👍で完結」も残す。これが無いと片付いた会話が
+        機械から見えず、宿題の掘り起こし等が誤発動する。
+        Bot分も保存し、読む側（reactions_for_messages）で選別する。"""
+        if payload.guild_id != GUILD_ID:
+            return
+
+        def _write():
+            with db.connect(DB_PATH) as conn:
+                if added:
+                    db.add_reaction(
+                        conn, message_id=payload.message_id,
+                        emoji=str(payload.emoji), user_id=payload.user_id,
+                        created_at=reminders.fmt(reminders.now_jst()))
+                else:
+                    db.remove_reaction(
+                        conn, message_id=payload.message_id,
+                        emoji=str(payload.emoji), user_id=payload.user_id)
+        try:
+            await asyncio.to_thread(_write)
+        except Exception as e:
+            print(f"[reactions] archive failed: {e}")
 
     async def _maybe_action_item_reaction(self, payload):
         """納期追跡への人間のリアクション処理（Phase B）。

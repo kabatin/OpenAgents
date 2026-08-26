@@ -81,6 +81,35 @@ CREATE TABLE IF NOT EXISTS attachments (
 );
 CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id);
 
+-- リアクションの記録。feedback とは役割が違う: feedback は**エージェントの
+-- 投稿への👍👎**だけを物差しとして貯める。こちらは**人間同士のやりとりも含む
+-- 全部**を残す。これが無いと「👍で完結した会話」が機械から見えず、
+-- 宿題の掘り起こしなどが「まだ終わっていない」と誤発動する。
+CREATE TABLE IF NOT EXISTS reactions (
+    message_id  INTEGER,
+    emoji       TEXT,
+    user_id     INTEGER,
+    created_at  TEXT,
+    PRIMARY KEY (message_id, emoji, user_id)
+);
+
+-- 注意ループの発言候補。採点した直後には発言せず、grace時間だけ寝かせて
+-- から再確認する（その間に人間だけで片付くことが多いため）。
+CREATE TABLE IF NOT EXISTS attention_items (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id           TEXT,
+    channel_id         INTEGER,
+    anchor_message_id  INTEGER,
+    score              INTEGER,
+    mode               TEXT,
+    say                TEXT,
+    reason             TEXT,
+    status             TEXT DEFAULT 'pending',
+    due_at             TEXT,
+    spoken_message_id  INTEGER,
+    created_at         TEXT
+);
+
 -- 全文検索(キーワード補助)。日本語の部分一致のため trigram トークナイザを使用
 -- （検索語は3文字以上が必要。意味検索はPhase2のベクトルが担う）。
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
@@ -1370,6 +1399,135 @@ def max_message_id(conn):
     return row[0] if row and row[0] else 0
 
 
+_ATTENTION_COLS = ("id", "agent_id", "channel_id", "anchor_message_id",
+                   "score", "mode", "say", "reason", "status", "due_at",
+                   "spoken_message_id", "created_at")
+
+
+def add_attention_item(conn, *, agent_id, channel_id, anchor_message_id,
+                       score, mode, say, reason, due_at, created_at):
+    """注意ループの発言候補を登録（発言はgrace後の再確認を通ってから）。"""
+    cur = conn.execute(
+        """INSERT INTO attention_items(agent_id, channel_id,
+               anchor_message_id, score, mode, say, reason, status,
+               due_at, created_at)
+           VALUES(?,?,?,?,?,?,?,'pending',?,?)""",
+        (agent_id, int(channel_id), int(anchor_message_id), int(score),
+         mode, say, reason, due_at, created_at))
+    return cur.lastrowid
+
+
+def pending_attention_exists(conn, agent_id, channel_id):
+    """同一chに未処理候補があるか（1chにつき同時1懸念まで）。"""
+    return conn.execute(
+        """SELECT 1 FROM attention_items
+           WHERE agent_id=? AND channel_id=? AND status='pending' LIMIT 1""",
+        (agent_id, int(channel_id))).fetchone() is not None
+
+
+def pending_attention_items(conn, agent_id):
+    """未処理の発言候補（古い順）。dueの判定は呼び出し側（純粋関数）で行う。"""
+    rows = conn.execute(
+        f"""SELECT {','.join(_ATTENTION_COLS)} FROM attention_items
+            WHERE agent_id=? AND status='pending' ORDER BY due_at ASC""",
+        (agent_id,)).fetchall()
+    return [dict(zip(_ATTENTION_COLS, r)) for r in rows]
+
+
+def set_attention_status(conn, item_id, status, spoken_message_id=None):
+    """候補の終端: spoken / resolved / expired。"""
+    conn.execute(
+        """UPDATE attention_items SET status=?, spoken_message_id=?
+           WHERE id=?""", (status, spoken_message_id, int(item_id)))
+
+
+def attention_spoken_today(conn, agent_id, today_prefix):
+    """今日の発言数（日次上限の判定用。proactive_logを台帳として使う）。"""
+    return conn.execute(
+        """SELECT count(*) FROM proactive_log
+           WHERE agent_id=? AND kind='attention' AND action='attention_spoke'
+             AND created_at LIKE ?""",
+        (agent_id, today_prefix + "%")).fetchone()[0]
+
+
+def last_attention_spoken_at(conn, agent_id, channel_id):
+    """同一chで最後に発言した時刻（クールダウン判定用）。無ければ None。"""
+    row = conn.execute(
+        """SELECT max(created_at) FROM proactive_log
+           WHERE agent_id=? AND kind='attention' AND action='attention_spoke'
+             AND channel_id=?""", (agent_id, int(channel_id))).fetchone()
+    return row[0] if row else None
+
+
+def max_message_id_in_channel(conn, channel_id):
+    """chの最新メッセージid（注意ループのcheckpoint初期化用）。"""
+    row = conn.execute(
+        "SELECT max(id) FROM messages WHERE channel_id=? AND deleted=0",
+        (int(channel_id),)).fetchone()
+    return row[0] or 0
+
+
+def channels_with_humans(conn, exclude_channel_ids=()):
+    """人間の発言があるchの一覧（注意ループの走査対象）。"""
+    excl = [int(c) for c in (exclude_channel_ids or ())]
+    sql = """SELECT DISTINCT m.channel_id FROM messages m
+             JOIN users u ON u.id=m.author_id
+             WHERE u.is_bot=0 AND m.deleted=0"""
+    if excl:
+        sql += f" AND m.channel_id NOT IN ({','.join('?' * len(excl))})"
+    return [r[0] for r in conn.execute(sql, excl)]
+
+
+def add_reaction(conn, *, message_id, emoji, user_id, created_at):
+    """リアクションを記録（冪等）。「👍で完結」等の会話の終端を機械が読める形で残す。
+    Bot分も保存し、読む側で users.is_bot により選別する。"""
+    conn.execute(
+        """INSERT OR IGNORE INTO reactions(message_id, emoji, user_id,
+               created_at) VALUES(?,?,?,?)""",
+        (int(message_id), emoji, int(user_id), created_at))
+
+
+def remove_reaction(conn, *, message_id, emoji, user_id):
+    """リアクション取り消しを反映する。"""
+    conn.execute(
+        "DELETE FROM reactions WHERE message_id=? AND emoji=? AND user_id=?",
+        (int(message_id), emoji, int(user_id)))
+
+
+def reactions_for_messages(conn, message_ids, humans_only=True):
+    """{message_id: [(emoji, 表示名), ...]}。プロンプトに添える用。"""
+    ids = [int(m) for m in message_ids]
+    if not ids:
+        return {}
+    sql = f"""SELECT r.message_id, r.emoji, COALESCE(u.display_name, '?')
+              FROM reactions r
+              LEFT JOIN users u ON u.id=r.user_id
+              WHERE r.message_id IN ({','.join('?' * len(ids))})"""
+    if humans_only:
+        sql += " AND COALESCE(u.is_bot, 0)=0"
+    out = {}
+    for mid, emoji, name in conn.execute(sql + " ORDER BY r.rowid", ids):
+        out.setdefault(mid, []).append((emoji, name))
+    return out
+
+
+def channel_messages_after(conn, channel_id, after_id, limit=60):
+    """同一chの after_id より新しい人間の発言（直近limit件を古い順で）。
+    宿題の声かけ前に「その後のやりとり」で完了済みか読み直す用。"""
+    rows = conn.execute(
+        """SELECT m.id, u.display_name, m.content, m.created_at
+           FROM messages m
+           LEFT JOIN users u ON u.id=m.author_id
+           WHERE m.channel_id=? AND m.id>? AND m.deleted=0
+             AND COALESCE(u.is_bot, 1)=0
+             AND m.content IS NOT NULL AND m.content != ''
+           ORDER BY m.id DESC LIMIT ?""",
+        (int(channel_id), int(after_id), int(limit))).fetchall()
+    return [{"id": r[0], "author": r[1] or "?", "content": r[2],
+             "created_at": r[3]}
+            for r in reversed(rows)]
+
+
 def human_messages_after(conn, after_id, exclude_channel_ids=(), limit=80):
     """全chの after_id より新しい「人間の」発言を古い順で返す（観察ループ用）。
     Bot・Webhook（usersに行が無い投稿者はBot扱い）・削除済み・空本文は除く。"""
@@ -1436,14 +1594,17 @@ def add_proactive_log(conn, *, agent_id, kind, action, channel_id=None,
     return cur.lastrowid
 
 
-def count_proactive_spoken_since(conn, agent_id, since):
+def count_proactive_spoken_since(conn, agent_id, since, kind=None):
     """since（fmt形式文字列）以降の自発「発言」数。日次枠の執行に使う。
-    納期声かけ(action='nudge')・追跡開始(action='track')は枠と別勘定で数えない。"""
-    row = conn.execute(
-        """SELECT COUNT(*) FROM proactive_log
-           WHERE agent_id=? AND action='spoke' AND created_at >= ?""",
-        (agent_id, since)).fetchone()
-    return row[0]
+    納期声かけ(action='nudge')・追跡開始(action='track')は枠と別勘定で数えない。
+    kind指定でその類型だけ数える（⑤同僚枠の専用上限に使う）。"""
+    sql = ("""SELECT COUNT(*) FROM proactive_log
+              WHERE agent_id=? AND action='spoke' AND created_at >= ?""")
+    params = [agent_id, since]
+    if kind is not None:
+        sql += " AND kind=?"
+        params.append(kind)
+    return conn.execute(sql, params).fetchone()[0]
 
 
 def get_proactive_quota(conn, agent_id, default):
@@ -2029,6 +2190,13 @@ def add_event(conn, *, agent_id, name, event_date, source_decision_id,
         (agent_id, name, event_date, source_decision_id, channel_id,
          milestones_json, status, created_at))
     return cur.lastrowid if cur.rowcount else None
+
+
+def event_names_on_date(conn, event_date):
+    """同じ開催日の既存イベント名（言い回し違いの重複提案を防ぐ判定用）。"""
+    rows = conn.execute(
+        "SELECT name FROM events WHERE event_date=?", (event_date,)).fetchall()
+    return [r[0] for r in rows]
 
 
 def undetected_decisions_for_events(conn, limit=50):

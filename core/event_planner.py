@@ -72,6 +72,33 @@ def detect_events(decisions_rows, today):
     return out
 
 
+# 同一イベント判定: 文字2-gramの重なり率がこれ以上なら言い回し違いとみなす
+SAME_EVENT_OVERLAP = 0.6
+
+
+def _bigrams(text):
+    t = re.sub(r"[\s（）()、。]", "", text or "")
+    return {t[i:i + 2] for i in range(len(t) - 1)}
+
+
+def is_same_event(a, b):
+    """名前の言い回し違いを同一イベントとみなすか（純粋関数）。
+
+    決定台帳が同じ決定を再抽出するたびに逆算案が連投されていたため追加した。
+    片方に住所等の追記があっても拾えるよう、Jaccardでなく重なり率
+    （共通2-gram数 ÷ 短い方の2-gram数）で判定する。"""
+    ga, gb = _bigrams(a), _bigrams(b)
+    if not ga or not gb:
+        return False
+    return len(ga & gb) / min(len(ga), len(gb)) >= SAME_EVENT_OVERLAP
+
+
+def find_duplicate(candidate, existing_names):
+    """既存イベント名の中から candidate と同一とみなせるものを返す（純粋関数）。"""
+    return next((n for n in existing_names
+                 if is_same_event(candidate["name"], n)), None)
+
+
 def build_plan_prompt(event, today, context_block):
     """逆算案の生成プロンプト（純粋関数・テスト対象）。"""
     return (

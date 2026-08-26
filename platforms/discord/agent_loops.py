@@ -14,6 +14,7 @@ from datetime import timedelta
 import discord
 
 from core import action_items
+from core import attention
 from core import briefing
 from core import comeback
 from core import db
@@ -146,6 +147,12 @@ class AgentLoopsMixin:
                          lambda: self._homework_detect_cycle(hw)))
             plan.append(("homework followup",
                          lambda: self._homework_followup_cycle(hw)))
+        at = cfg.get("attention") or {}
+        if at.get("enabled"):
+            plan.append(("attention scan",
+                         lambda: self._attention_scan_cycle(at)))
+            plan.append(("attention speak",
+                         lambda: self._attention_speak_cycle(at)))
         if cfg.get("weekly_report"):
             plan.append(("weekly report", self._maybe_weekly_report))
         bf = cfg.get("briefing") or {}
@@ -876,12 +883,14 @@ class AgentLoopsMixin:
         key = "abreport:" + self.agent["id"]
 
         def _claim():
+            # 使用回数基準だと、変種が使われるたびに毎サイクル再送になっていた。
+            # 評価（👍👎）が新しく付いて集計が変わった時だけ再報告する
             with db.connect(DB_PATH) as conn:
                 state = db.get_proactive_state(conn, key)
                 last = (state or {}).get("last_checked_message_id") or 0
-                total = result["best"]["used"] + result["worst"]["used"]
+                total = result["best"]["judged"] + result["worst"]["judged"]
                 if total <= last:
-                    return False   # 前回報告から使用回数が増えていない
+                    return False   # 前回報告から評価件数が増えていない
                 db.set_proactive_state(
                     conn, key, last_checked_message_id=total,
                     last_run_at=reminders.fmt(reminders.now_jst()))
@@ -1180,7 +1189,26 @@ class AgentLoopsMixin:
         cands = await asyncio.to_thread(_detect)
         if not cands:
             return
-        event = cands[0]
+
+        # 決定台帳が同じ決定を言い回し違いで再抽出するたびに別イベント扱いで
+        # 連投されたため、同日＋似た名前は検知済みにして流す
+        def _screen_duplicates():
+            with db.connect(DB_PATH) as conn:
+                for cand in cands:
+                    names = db.event_names_on_date(conn, cand["event_date"])
+                    if event_planner.find_duplicate(cand, names) is None:
+                        return cand
+                    db.add_event(
+                        conn, agent_id=self.agent["id"], name=cand["name"],
+                        event_date=cand["event_date"],
+                        source_decision_id=cand["decision_id"],
+                        channel_id=cand.get("channel_id"),
+                        milestones_json="[]", status="duplicate",
+                        created_at=reminders.fmt(reminders.now_jst()))
+            return None
+        event = await asyncio.to_thread(_screen_duplicates)
+        if event is None:
+            return
         async with ANSWER_SEM:
             milestones = await asyncio.to_thread(
                 event_planner.plan, event, DB_PATH)
@@ -1334,7 +1362,8 @@ class AgentLoopsMixin:
                 scope_note=cfg.get("scope_note"),
                 colleagues=colleagues,
                 variant_note=variant_note,
-                allow_others=bool(cfg.get("others_shadow")))
+                allow_others=bool(cfg.get("others_shadow")),
+                allow_colleague=bool(cfg.get("colleague")))
         # 「その他」枠のシャドー実験（2026-08-18）: 4類型の外で「同僚なら一言
         # 添える」と判断したものを**投稿せずログだけ**残す。2週間後に人間が
         # 読んで、ホワイトリスト方式が正しいかを実データで判断する
@@ -1391,6 +1420,24 @@ class AgentLoopsMixin:
                     kind="none", action="silent",
                     detail=f"{len(digest['messages'])}件確認・候補なし")
             return
+        # ⑤同僚枠は専用の日次上限で絞る（純ノイズが流れる被害は他類型と質が
+        # 違うため、全体枠とは別勘定にする）
+        if any(c["kind"] == proactive.COLLEAGUE_KIND for c in cands):
+            left = await asyncio.to_thread(
+                proactive.colleague_quota_left, DB_PATH, self.agent["id"])
+            if left <= 0:
+                dropped = [c for c in cands
+                           if c["kind"] == proactive.COLLEAGUE_KIND]
+                cands = [c for c in cands
+                         if c["kind"] != proactive.COLLEAGUE_KIND]
+                for c in dropped:
+                    await asyncio.to_thread(
+                        proactive.log_entry, DB_PATH, self.agent["id"],
+                        kind=proactive.COLLEAGUE_KIND, action="silent",
+                        trigger_message_id=c["message_id"],
+                        detail="⑤同僚枠の日次上限に達していた")
+                if not cands:
+                    return
         # 1周期の発言は最大1件（保守的に始める。枠が緩んだら見直す）
         cand = cands[0]
         trigger = next(m for m in digest["messages"]
@@ -1586,6 +1633,148 @@ class AgentLoopsMixin:
             print(f"[{self.agent['id']}] homework tracking {len(saved)} "
                   "commitment(s)")
 
+    async def _attention_scan_cycle(self, at):
+        """注意ループ・知覚と採点: 会話が途切れたchの差分を安いモデルで採点し、
+        閾値以上を候補として寝かせる（発言はまだしない）。"""
+        cfg = self.proactive_cfg
+        exclude = set(cfg.get("exclude_channel_ids") or ())
+        exclude |= {str(a.get("home_channel_id")) for a in AGENTS
+                    if a.get("home_channel_id")}
+        threshold = int(at.get("threshold", attention.THRESHOLD_DEFAULT))
+        channels = await asyncio.to_thread(self._attention_channels, exclude)
+        for cid in channels:
+            def _has_pending(c=cid):
+                with db.connect(DB_PATH) as conn:
+                    return db.pending_attention_exists(
+                        conn, self.agent["id"], c)
+            if await asyncio.to_thread(_has_pending):
+                continue   # 1chにつき同時1懸念（再確認が新着も読むので十分）
+            msgs = await asyncio.to_thread(
+                attention.collect_channel, DB_PATH, self.agent["id"], cid,
+                lull_minutes=int(at.get("lull_minutes",
+                                        attention.LULL_MINUTES_DEFAULT)))
+            if not msgs:
+                continue
+            async with ANSWER_SEM:
+                judged = await asyncio.to_thread(
+                    attention.score, msgs, agent_name=self.agent["name"],
+                    model=cfg.get("screen_model",
+                                  attention.SCREEN_MODEL_DEFAULT))
+            if not judged or judged["score"] < threshold:
+                continue
+            await asyncio.to_thread(
+                attention.save_candidate, DB_PATH, self.agent["id"], cid,
+                judged, grace_hours=at.get("grace_hours",
+                                           attention.GRACE_HOURS_DEFAULT))
+            await asyncio.to_thread(
+                proactive.log_entry, DB_PATH, self.agent["id"],
+                kind="attention", action="attention_tracked", channel_id=cid,
+                trigger_message_id=judged["anchor_message_id"],
+                detail=f"{judged['score']}点: {judged['reason'][:200]}")
+            print(f"[{self.agent['id']}] attention tracked ch={cid} "
+                  f"score={judged['score']}")
+
+    def _attention_channels(self, exclude):
+        with db.connect(DB_PATH) as conn:
+            return db.channels_with_humans(conn, exclude_channel_ids=exclude)
+
+    async def _attention_speak_cycle(self, at):
+        """注意ループ・再確認と発言: dueを迎えた候補を「その後の会話」で
+        再確認し、人間だけで解決していれば黙って取り下げ、宙ぶらりんなら発言。
+        日次上限・ch毎クールダウン・8〜22時のみ。"""
+        now = reminders.now_jst()
+        if now.hour not in attention.SPEAK_HOURS:
+            return
+
+        def _load():
+            with db.connect(DB_PATH) as conn:
+                return db.pending_attention_items(conn, self.agent["id"])
+        items = await asyncio.to_thread(_load)
+        for item in items:
+            act = attention.speak_action(
+                item, now, expire_hours=at.get(
+                    "expire_hours", attention.EXPIRE_HOURS_DEFAULT))
+            if act == "wait":
+                continue
+            if act == "expire":
+                await asyncio.to_thread(self._attention_close, item,
+                                        "expired", None)
+                continue
+            if not await asyncio.to_thread(self._attention_quota_ok, item,
+                                           at, now):
+                continue   # 上限・クールダウン中は次周期へ持ち越し
+            async with ANSWER_SEM:
+                resolved, say = await asyncio.to_thread(
+                    attention.recheck, DB_PATH, item,
+                    agent_name=self.agent["name"],
+                    model=self.proactive_cfg.get(
+                        "screen_model", attention.SCREEN_MODEL_DEFAULT))
+            if resolved:
+                await asyncio.to_thread(self._attention_close, item,
+                                        "resolved", None)
+                await asyncio.to_thread(
+                    proactive.log_entry, DB_PATH, self.agent["id"],
+                    kind="attention", action="attention_resolved",
+                    channel_id=item["channel_id"],
+                    trigger_message_id=item["anchor_message_id"],
+                    detail=item["reason"][:200])
+                continue
+            if at.get("shadow", True):   # 既定シャドー（configで本番解禁）
+                await asyncio.to_thread(self._attention_close, item,
+                                        "spoken", None)
+                await asyncio.to_thread(
+                    proactive.log_entry, DB_PATH, self.agent["id"],
+                    kind="attention", action="attention_shadow",
+                    channel_id=item["channel_id"],
+                    trigger_message_id=item["anchor_message_id"],
+                    detail=attention.build_message(say)[:400])
+                continue
+            try:
+                channel = (self.get_channel(int(item["channel_id"]))
+                           or await self.fetch_channel(
+                               int(item["channel_id"])))
+                ref = discord.MessageReference(
+                    message_id=item["anchor_message_id"],
+                    channel_id=int(item["channel_id"]), guild_id=GUILD_ID,
+                    fail_if_not_exists=False)
+                posted = await channel.send(
+                    attention.build_message(say), reference=ref,
+                    allowed_mentions=ALLOWED_MENTIONS)
+                await asyncio.to_thread(self._attention_close, item,
+                                        "spoken", posted.id)
+                await asyncio.to_thread(
+                    proactive.log_entry, DB_PATH, self.agent["id"],
+                    kind="attention", action="attention_spoke",
+                    channel_id=item["channel_id"],
+                    trigger_message_id=item["anchor_message_id"],
+                    posted_message_id=posted.id, detail=say[:300])
+                print(f"[{self.agent['id']}] attention spoke "
+                      f"ch={item['channel_id']}")
+            except Exception as e:
+                print(f"[{self.agent['id']}] attention speak failed "
+                      f"(item={item['id']}): {e}")
+
+    def _attention_close(self, item, status, message_id):
+        with db.connect(DB_PATH) as conn:
+            db.set_attention_status(conn, item["id"], status, message_id)
+
+    def _attention_quota_ok(self, item, at, now):
+        """日次上限とch毎クールダウンの判定（発言側の安全弁）。"""
+        with db.connect(DB_PATH) as conn:
+            spoken = db.attention_spoken_today(
+                conn, self.agent["id"], now.strftime("%Y-%m-%d"))
+            if spoken >= int(at.get("daily_limit",
+                                    attention.DAILY_LIMIT_DEFAULT)):
+                return False
+            last = db.last_attention_spoken_at(
+                conn, self.agent["id"], item["channel_id"])
+        if last:
+            cooldown = int(at.get("cooldown_hours",
+                                  attention.COOLDOWN_HOURS_DEFAULT))
+            if now - reminders.parse_dt(last) < timedelta(hours=cooldown):
+                return False
+        return True
+
     async def _homework_followup_cycle(self, hw):
         """宿題の声かけ（Phase E）: follow_up日を過ぎた宿題へ本人に一度だけ確認する。
         既定はシャドー（実投稿せず proactive_log に「こう聞くつもりだった」を記録）。
@@ -1602,6 +1791,22 @@ class AgentLoopsMixin:
             await asyncio.to_thread(homework.mark_expired, DB_PATH, expire)
         shadow = hw.get("shadow", True)   # 既定シャドー（安全側・投稿しない）
         for item in ask:
+            # 検知後の会話で既に完了した話を掘り起こさないよう、声かけ直前に
+            # 「その後のやりとり」を読み直す（シャドーでも通して、判定の質を
+            # proactive_log で確認できるようにする）
+            async with ANSWER_SEM:
+                resolved = await asyncio.to_thread(
+                    homework.check_resolved, DB_PATH, item)
+            if resolved:
+                await asyncio.to_thread(
+                    homework.mark_resolved, DB_PATH, item["id"])
+                await asyncio.to_thread(
+                    proactive.log_entry, DB_PATH, self.agent["id"],
+                    kind="homework", action="hw_resolved",
+                    channel_id=item["channel_id"],
+                    trigger_message_id=item["source_message_id"],
+                    detail=item["task"][:60])
+                continue
             text = homework.build_followup_text(item, GUILD_ID)
             if shadow:
                 # 実投稿せず「こう聞くつもりだった」を記録するだけ（検知の質を
