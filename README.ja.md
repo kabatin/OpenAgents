@@ -1,4 +1,4 @@
-# OpenAgents
+<img src="docs/images/hero.svg" alt="OpenAgents — チャットに住みつくAIエージェントを、自分のPCで動かす" width="100%">
 
 [![CI](https://github.com/kabatin/OpenAgents/actions/workflows/ci.yml/badge.svg)](https://github.com/kabatin/OpenAgents/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/kabatin/OpenAgents)](https://github.com/kabatin/OpenAgents/releases)
@@ -11,6 +11,8 @@
 Discordに常駐して、過去の会話を覚えていて、聞けば答える。
 放っておいても気づいたことを教えてくれる。そういう同僚を作るための道具です。
 
+[English →](README.md)
+
 - 🖥 **自分のPCで動きます。** 会話の記録は手元のSQLiteに入り、外には出ません
 - 💬 **設定はブラウザから。** 設定ファイルを開く必要はありません
 - 🧩 **何体でも増やせます。** 役割ごとに性格を分けられます
@@ -19,6 +21,27 @@ Discordに常駐して、過去の会話を覚えていて、聞けば答える�
 
 > ⚠️ **まだ初期段階のプロジェクトです。** 実運用はしていますが、
 > 設定の形は今後変わる可能性があります。
+
+---
+
+## これは何を解決するのか
+
+**忘れるチャットボットは、態度の悪い検索窓でしかない。**
+たいていのボットは、インターネットを学習したモデルの記憶から答えます。
+チームが実際に何と言ったかは知りません。OpenAgents は全メッセージを手元に
+蓄積し、**検索してから**答えます。「あの件どうなった？」に、元の発言への
+ジャンプリンク付きで返せます。
+
+**チームの会話ログは、外のサービスに預けるようなものではない。**
+全部が自分の管理下の1台で動きます。アーカイブは自分のディスク上の
+SQLite ファイル1個です。外に出るのは、あなたの質問と検索で引いた文脈だけ。
+まるごとアップロードされることはなく、間に立つサーバーもありません。
+
+**役に立つ同僚とは、先に言ってくれる人のことだ。**
+聞かれて答えるのは最低条件です。OpenAgents は30種類の観察ループを回し、
+**言うべきことがあるときだけ**発言します。誰も見ていない期日、2週間前の口約束、
+過去の決定と矛盾する新しい決定。1日の発言上限と深夜の休止、そして
+「投稿せず記録だけ」のシャドーモードで、任せる前に**正しさを見てから**判断できます。
 
 ---
 
@@ -46,6 +69,7 @@ python start.py
 **IDを手で調べる作業はありません。** 一覧から選ぶだけです。
 
 ![セットアップウィザード](docs/images/setup-wizard.png)
+*各手順をその場で検証します — 通らないトークンは貼った瞬間に分かります*
 
 Discord側の手順を先に読みたい方は [docs/01-discord-bot-setup.md](docs/01-discord-bot-setup.md) へ。
 
@@ -58,7 +82,6 @@ Discord側の手順を先に読みたい方は [docs/01-discord-bot-setup.md](do
 
 ![管理画面 — 概要](docs/images/overview.png)
 *自発行動のタイムライン — 呼ばれずに動いた記録が「発言した／シャドー」の別つきで残ります*
-
 
 ### 聞けば答える
 
@@ -78,8 +101,18 @@ Discord側の手順を先に読みたい方は [docs/01-discord-bot-setup.md](do
 - 朝のブリーフィング、週次レポート、週1のタブロイド風社内新聞
 - 長く休んでいた人が戻ったら、不在中のあらすじを1回だけ渡す
 
-暴走はしません — **1日の発言回数に上限**（既定3回）、深夜は休み、
-新機能はまず**シャドーモード**（投稿せず記録だけ）で試せます。
+暴走はしません。どのループも、1文字でも投稿する前に同じ関門を通ります:
+
+```mermaid
+flowchart LR
+    T["数分おき<br/>30種の観察ループが<br/>チャンネルを見回る"] --> Q{"本当に言うべき<br/>ことがあるか？"}
+    Q -->|ない| T
+    Q -->|ある| S{"シャドー<br/>モードか？"}
+    S -->|はい| L["記録だけで投稿しない<br/>— 管理画面で中身を見て<br/>発言させるかを人間が決める"]
+    S -->|いいえ| B{"今日の上限内か？<br/>深夜ではないか？"}
+    B -->|いいえ| L
+    B -->|はい| M["Discordに投稿"]
+```
 
 ### できないことは、できないと言う
 
@@ -95,6 +128,16 @@ Discord側の手順を先に読みたい方は [docs/01-discord-bot-setup.md](do
 人格定義と実際の発言のズレを点検したり、担当の居ない仕事を見つけて
 **新しいAIの採用を提案**したり（管理者の👍で自動採用）。
 開発BOTを有効にすれば、Discordで指示した機能改修を**人間の承認つきで**自分に取り込みます。
+
+### 全部トグルで切り替えられる
+
+![設定画面](docs/images/settings.png)
+*各機能は「OFF ／ シャドー ／ 本番」の3択。設定キー名ではなく、使う人の言葉で書いてあります*
+
+### 性格もブラウザで
+
+![性格編集](docs/images/personas.png)
+*エージェントごとに口調・担当・前提知識を持たせられます*
 
 ## 動かし続ける
 
@@ -112,13 +155,23 @@ PC起動時に自動で立ち上げたい場合は
 ![運用画面](docs/images/ops.png)
 *落ちたBOTの自動検出と再起動・ログの追いかけ表示*
 
-### 性格もブラウザで
-
-![性格編集](docs/images/personas.png)
-
 ---
 
 ## 構成
+
+```mermaid
+flowchart LR
+    D["💬 Discord"] <--> P["platforms/discord"]
+
+    subgraph host["あなたのPC — プロセスは1本"]
+        direction LR
+        P --> C["core/<br/>検索 · 回答生成 · 観察ループ"]
+        C --> DB[("state/archive.db<br/>SQLite + trigram全文検索")]
+        W["dashboard/<br/>管理画面（localhost）"] -. "config.json" .-> C
+    end
+
+    C --> AI["Claude Code / Codex CLI<br/>質問＋検索で引いた文脈だけを渡す"]
+```
 
 ```
 core/          プラットフォーム非依存の中核（検索・回答生成・観察ループ）
@@ -137,6 +190,9 @@ config.json    設定はこの1枚だけ
 `core/` は Discord も Slack も知りません。`platforms/` の実装が
 `core.chat.ChatPlatform` を満たすことで繋がります
 （依存の向きが逆になっていないことをテストが機械的に検査しています）。
+
+3体いても**プロセスは1本**で、アーカイブも1つを共有します。だから
+どのエージェントも、別チャンネルで起きた会話を踏まえて答えられます。
 
 Slack や LINE を足したい方は [docs/10-adding-platforms.md](docs/10-adding-platforms.md) へ。
 
@@ -168,6 +224,9 @@ Slack や LINE を足したい方は [docs/10-adding-platforms.md](docs/10-addin
 | [09 困ったとき](docs/09-troubleshooting.md) | よくある詰まり |
 | [10 プラットフォーム追加](docs/10-adding-platforms.md) | Slack等を実装する |
 
+その他: [変更履歴](CHANGELOG.md) · [開発に参加する](CONTRIBUTING.md) ·
+[セキュリティ](SECURITY.md) · [行動規範](CODE_OF_CONDUCT.md)
+
 ---
 
 ## 安全のために
@@ -181,6 +240,12 @@ Slack や LINE を足したい方は [docs/10-adding-platforms.md](docs/10-addin
 そこは各サービスの規約を確認したうえでお使いください。
 
 ---
+
+## 開発に参加する
+
+Issue も Pull Request も歓迎します。ドキュメントが日本語しかないので、
+翻訳もとても助かります。まずは [CONTRIBUTING.md](CONTRIBUTING.md) を見てください。
+いちばん大事な約束（設定を足したら同じコミットでダッシュボードにも足す）が書いてあります。
 
 ## ライセンス
 

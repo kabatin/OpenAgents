@@ -1,4 +1,4 @@
-# OpenAgents
+<img src="docs/images/hero.svg" alt="OpenAgents — Self-hosted AI agents that live in your team chat." width="100%">
 
 [![CI](https://github.com/kabatin/OpenAgents/actions/workflows/ci.yml/badge.svg)](https://github.com/kabatin/OpenAgents/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/kabatin/OpenAgents)](https://github.com/kabatin/OpenAgents/releases)
@@ -21,6 +21,29 @@ occasionally speak up on their own when they notice something.
 
 > ⚠️ **Early-stage project.** It runs in production for its author, but the
 > configuration format may still change.
+
+---
+
+## Why this exists
+
+**A chat bot that forgets is just a search box with worse manners.**
+Most bots answer from a model's memory of the internet, not from what your
+team actually said. OpenAgents archives every message locally and searches it
+before answering, so "what did we decide about that?" gets an answer with a
+jump link to the message it came from.
+
+**Your team's chat log is not a thing you should hand to a SaaS.**
+Everything runs on one machine you control. The archive is a SQLite file on
+your disk. Only your question and the retrieved context go to whichever AI
+provider you picked — nothing is uploaded wholesale, and there is no server
+in the middle.
+
+**The useful colleague is the one who speaks up first.**
+Being answerable is table stakes. OpenAgents runs 30 observation loops that
+periodically look at the channel and speak *only* when there is something to
+say: a deadline nobody is watching, a promise made two weeks ago, a decision
+that contradicts an earlier one. With a daily cap, a night-time quiet period,
+and a shadow mode so you can watch it be right before you let it talk.
 
 ---
 
@@ -48,6 +71,7 @@ A browser opens and walks you through the rest:
 **No IDs to look up by hand.** Everything is a dropdown.
 
 ![Setup wizard](docs/images/setup-wizard.png)
+*The wizard checks each step as you go — a token that doesn't work says so immediately*
 
 ---
 
@@ -58,6 +82,7 @@ The full catalogue is in **[docs/00-features.md](docs/00-features.md)** (Japanes
 The essentials:
 
 ![Dashboard overview](docs/images/overview.png)
+*The unprompted-activity timeline — every self-initiated action is logged, marked either "posted" or "shadow"*
 
 **Answers from real history.** Every message is archived locally; when someone
 asks "what happened with that?", the agent searches the log and answers with
@@ -69,9 +94,20 @@ speaks only when it has something: extracting action items from meeting minutes
 and **nudging owners before deadlines**, remembering "I'll do it later"
 promises and following up, answering questions nobody answered for 24h,
 flagging decisions that **contradict earlier ones**, morning briefings, weekly
-reports, even a tabloid-style weekly newspaper. It won't spam you: there's a
-**daily cap on unprompted messages**, it sleeps at night, and every behaviour
-can run in *shadow mode* (recorded, not posted) first.
+reports, even a tabloid-style weekly newspaper.
+
+It won't spam you. Every loop passes the same gate before a word is posted:
+
+```mermaid
+flowchart LR
+    T["every few minutes<br/>30 observation loops<br/>scan the channels"] --> Q{"anything actually<br/>worth saying?"}
+    Q -->|no| T
+    Q -->|yes| S{"in shadow<br/>mode?"}
+    S -->|yes| L["recorded, never posted<br/>— you review it in the<br/>dashboard and decide"]
+    S -->|no| B{"under today's cap?<br/>outside quiet hours?"}
+    B -->|no| L
+    B -->|yes| M["post to Discord"]
+```
 
 **Admits failure — mechanically.** If the agent claims it did something that
 didn't actually run, that's detected deterministically and **corrected in the
@@ -84,6 +120,16 @@ behaviour, proposes hiring a new agent when it finds unowned work (one 👍 from
 an admin auto-creates it), and — with the dev bot enabled — ships code changes
 to itself **only after human approval**.
 
+### Everything is a toggle
+
+![Settings](docs/images/settings.png)
+*Each behaviour is off, shadow, or live — described in plain language, not config keys*
+
+### Personalities are edited in the browser too
+
+![Persona editor](docs/images/personas.png)
+*Give each agent its own voice, remit, and background knowledge*
+
 ## Keeping it running
 
 ```bash
@@ -95,10 +141,25 @@ detects hangs via heartbeats, and rotates logs. To start it at login, see
 [docs/05-autostart.md](docs/05-autostart.md) — one command on either OS.
 
 ![Operations page](docs/images/ops.png)
+*Crash detection, automatic restarts, and a live log tail*
 
 ---
 
 ## Layout
+
+```mermaid
+flowchart LR
+    D["💬 Discord"] <--> P["platforms/discord"]
+
+    subgraph host["your machine — a single process"]
+        direction LR
+        P --> C["core/<br/>search · generation · observation loops"]
+        C --> DB[("state/archive.db<br/>SQLite + trigram FTS")]
+        W["dashboard/<br/>web UI on localhost"] -. "config.json" .-> C
+    end
+
+    C --> AI["Claude Code / Codex CLI<br/>your question + retrieved context"]
+```
 
 ```
 core/          Platform-independent: search, generation, observation loops
@@ -114,7 +175,9 @@ config.json    The only config file
 
 `core/` knows nothing about Discord. Platform code satisfies
 `core.chat.ChatPlatform`, and a test enforces that the dependency never points
-the other way. To add Slack or another platform, see
+the other way. Three agents run as three bot accounts inside **one** process,
+sharing a single archive — so any of them can answer from a conversation that
+happened in another channel. To add Slack or another platform, see
 [docs/10-adding-platforms.md](docs/10-adding-platforms.md).
 
 ---
@@ -146,6 +209,9 @@ language. Contributions translating it are very welcome.
 | [09](docs/09-troubleshooting.md) | When things break |
 | [10](docs/10-adding-platforms.md) | Adding Slack, LINE, Telegram… |
 
+Also: [CHANGELOG](CHANGELOG.md) · [CONTRIBUTING](CONTRIBUTING.md) ·
+[SECURITY](SECURITY.md) · [CODE_OF_CONDUCT](CODE_OF_CONDUCT.md)
+
 ---
 
 ## Privacy and safety
@@ -162,6 +228,13 @@ provider you choose.** Check that provider's terms before using this with
 sensitive material.
 
 ---
+
+## Contributing
+
+Issues and pull requests are welcome — translation especially, since the docs
+are Japanese-only today. Start with [CONTRIBUTING.md](CONTRIBUTING.md); it
+explains the one rule that matters most (if you add a setting, add it to the
+dashboard catalogue in the same commit).
 
 ## License
 
