@@ -1,0 +1,37 @@
+{
+  "name": "openagents",
+  "version": "0.1.1",
+  "description": "Self-hosted AI agents that live in your team chat — installer and launcher",
+  "keywords": [
+    "discord",
+    "discord-bot",
+    "ai-agents",
+    "self-hosted",
+    "claude-code",
+    "llm",
+    "chatbot"
+  ],
+  "homepage": "https://github.com/kabatin/OpenAgents#readme",
+  "bugs": "https://github.com/kabatin/OpenAgents/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kabatin/OpenAgents.git",
+    "directory": "cli"
+  },
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "openagents": "bin/openagents.js"
+  },
+  "files": [
+    "bin",
+    "lib",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.js\""
+  }
+}

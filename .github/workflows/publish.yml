@@ -1,0 +1,51 @@
+name: npm へ公開
+
+# リリースタグを打ったときだけ動く。手動でも回せるようにしてあるのは、
+# 公開だけが失敗したときに、タグを打ち直さずやり直せるようにするため
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    name: openagents を publish
+    runs-on: ubuntu-latest
+    permissions:
+      # provenance（このコードから作られた証明）の署名に要る
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          registry-url: https://registry.npmjs.org
+
+      - name: タグと package.json の版が一致すること
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          # ここで止めないと、v0.2.0 のタグから 0.1.1 が公開される。
+          # 公開後の版は取り消せないので、事前に落とすしかない
+          tag="${GITHUB_REF_NAME#v}"
+          pkg=$(node -p "require('./cli/package.json').version")
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::タグ($tag) と cli/package.json($pkg) がずれています"
+            exit 1
+          fi
+          echo "OK: $pkg"
+
+      - name: テスト
+        run: npm test
+        working-directory: cli
+
+      - name: 中身の確認（何を配るのかをログに残す）
+        run: npm pack --dry-run
+        working-directory: cli
+
+      - name: publish
+        run: npm publish --provenance --access public
+        working-directory: cli
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
