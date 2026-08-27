@@ -104,7 +104,7 @@ class SinkDrainTest(unittest.TestCase):
 
     def test_flush_drains_buffer(self):
         sink = self._make_sink()
-        user = SimpleNamespace(id=7, name="かば")
+        user = SimpleNamespace(id=7, name="人A")
         sink.audio_buffers[7] = {
             "user": user, "chunk_count": 2,
             "pcm_chunks": deque([b"\xaa\xbb" * 480, b"\xcc\xdd" * 480]),
@@ -115,12 +115,12 @@ class SinkDrainTest(unittest.TestCase):
             # バッファは解放され、ディスクには追記済み
             self.assertEqual(len(sink.audio_buffers[7]["pcm_chunks"]), 0)
             self.assertEqual(len(sink.audio_buffers[7]["pcm_timestamps"]), 0)
-            self.assertTrue(os.path.exists(f"{d}/かば_7.pcm"))
+            self.assertTrue(os.path.exists(f"{d}/人A_7.pcm"))
             # 追記後にさらに書いてfinalize → 全チャンクが残っている
             sink.audio_buffers[7]["pcm_chunks"].append(b"\xee\xff" * 480)
             sink.audio_buffers[7]["pcm_timestamps"].append(500.04)
             sink.finalize(d)
-            with wave.open(f"{d}/かば_7.wav", "rb") as wf:
+            with wave.open(f"{d}/人A_7.wav", "rb") as wf:
                 self.assertEqual(len(wf.readframes(wf.getnframes())),
                                  480 * 2 * 3)
 

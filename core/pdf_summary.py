@@ -17,7 +17,7 @@ from core import search
 # 自動発動1回で読む上限。メンション経由（MAX_FILES=5）より控えめにして
 # 頼まれていない長文投稿になりすぎないようにする
 MAX_PDFS = 3
-OVERFLOW_NOTE = f"-# 自動要約は一度に{MAX_PDFS}本までじゃけぇ、残りは省略したっス"
+OVERFLOW_NOTE = f"-# 自動要約は一度に{MAX_PDFS}本までなので、残りは省略したっス"
 
 
 def pick_pdfs(atts):

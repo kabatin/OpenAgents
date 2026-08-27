@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """事実台帳＋訂正検知の緩和＋できたフリ拡張（2026-08-18）のテスト。
 
-背景の実事故: グッズ納期の訂正で戦子が「認識更新するっス」と答えたが、
-DBには何も残らなかった（受け皿が無い・訂正検知が発火しない・
+背景（実運用で踏んだ穴）: 人間の訂正にエージェントが「認識を更新します」と
+答えたのに、DBには何も残らなかった（受け皿が無い・訂正検知が発火しない・
 できたフリ検出の網外、の三重の穴）。
 """
 
@@ -63,7 +63,7 @@ class LedgerTest(unittest.TestCase):
     def _add(self, topic, fact, mid=None):
         with db.connect(self.db_path) as conn:
             return db.add_fact(
-                conn, agent_id="senko", topic=topic, fact=fact,
+                conn, agent_id="agent1", topic=topic, fact=fact,
                 source_kind="conversation", source_message_id=mid,
                 channel_id=7 if mid else None, stated_by="樺山",
                 created_at="2026-08-18T05:52")

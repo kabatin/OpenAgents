@@ -22,9 +22,9 @@ class QualityGateTest(unittest.TestCase):
         db.init_db(self.db_path)
         with db.connect(self.db_path) as conn:
             db.upsert_channel(conn, id=7, name="g", type="text")
-            db.upsert_user(conn, id=1, name="h", display_name="常谷",
+            db.upsert_user(conn, id=1, name="h", display_name="人B",
                            is_bot=False)
-            db.upsert_user(conn, id=99, name="senko", display_name="AI戦子",
+            db.upsert_user(conn, id=99, name="agent1", display_name="エージェント1",
                            is_bot=True)
 
     def tearDown(self):
@@ -38,7 +38,7 @@ class QualityGateTest(unittest.TestCase):
                               content=answer, created_at="t")
             if unsolicited:
                 db.add_proactive_log(
-                    conn, agent_id="senko", kind="weekly", action="posted",
+                    conn, agent_id="agent1", kind="weekly", action="posted",
                     channel_id=7, posted_message_id=a_id, created_at="t")
 
     def test_praise_only_detection(self):
@@ -52,18 +52,18 @@ class QualityGateTest(unittest.TestCase):
         """週次レポートへの👍は質問が存在しないので入れない。"""
         self._pair(10, 11, "このスプシにシート追加が良さそうですね",
                    "📊 今週の自発活動レポート", unsolicited=True)
-        self.assertFalse(golden.capture(self.db_path, "senko", 11))
+        self.assertFalse(golden.capture(self.db_path, "agent1", 11))
         with db.connect(self.db_path) as conn:
             self.assertEqual(db.count_golden(conn), 0)
 
     def test_praise_question_not_captured(self):
         self._pair(20, 21, "加点！", "リマインダーの複数宛先対応が入ったっス")
-        self.assertFalse(golden.capture(self.db_path, "senko", 21))
+        self.assertFalse(golden.capture(self.db_path, "agent1", 21))
 
     def test_real_qa_still_captured(self):
         self._pair(30, 31, "リマインドリストを見せて",
                    "現在のリマインダーはこれっス📋 id=42…")
-        self.assertTrue(golden.capture(self.db_path, "senko", 31))
+        self.assertTrue(golden.capture(self.db_path, "agent1", 31))
         with db.connect(self.db_path) as conn:
             self.assertEqual(db.count_golden(conn, active_only=True), 1)
 
@@ -75,12 +75,12 @@ class QualityGateTest(unittest.TestCase):
                    "📰 今週の業界ニュース", unsolicited=True)
         with db.connect(self.db_path) as conn:   # ゲート前の状態を再現
             for q, a in ((40, 41), (50, 51)):
-                db.add_golden(conn, agent_id="senko",
+                db.add_golden(conn, agent_id="agent1",
                               question=db.get_message(conn, q)["content"],
                               answer=db.get_message(conn, a)["content"],
                               source_answer_id=a, channel_id=7,
                               created_at="t")
-            db.add_golden(conn, agent_id="senko", question="加点！",
+            db.add_golden(conn, agent_id="agent1", question="加点！",
                           answer="どうもっス", source_answer_id=999,
                           channel_id=7, created_at="t")
             self.assertEqual(db.count_golden(conn), 3)

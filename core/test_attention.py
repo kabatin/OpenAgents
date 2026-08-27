@@ -49,62 +49,62 @@ class CollectTest(AttentionTestBase):
         with db.connect(self.db_path) as conn:
             self._msg(conn, 1, "過去の発言")
         self.assertIsNone(attention.collect_channel(
-            self.db_path, "senko", CH, now=NOW))
+            self.db_path, "agent1", CH, now=NOW))
         with db.connect(self.db_path) as conn:
             self._msg(conn, 2, "新しい発言A", at=(11, 10))
             self._msg(conn, 3, "新しい発言B", at=(11, 20))
             self._msg(conn, 4, "新しい発言C", at=(11, 30))
-        msgs = attention.collect_channel(self.db_path, "senko", CH, now=NOW)
+        msgs = attention.collect_channel(self.db_path, "agent1", CH, now=NOW)
         self.assertEqual([m["id"] for m in msgs], [2, 3, 4])
         # checkpoint前進済み → 次回は新着なし
         self.assertIsNone(attention.collect_channel(
-            self.db_path, "senko", CH, now=NOW))
+            self.db_path, "agent1", CH, now=NOW))
 
     def test_hot_conversation_deferred(self):
         with db.connect(self.db_path) as conn:
             self._msg(conn, 1, "seed")
-        attention.collect_channel(self.db_path, "senko", CH, now=NOW)
+        attention.collect_channel(self.db_path, "agent1", CH, now=NOW)
         with db.connect(self.db_path) as conn:
             self._msg(conn, 2, "会話中A", at=(11, 50))
             self._msg(conn, 3, "会話中B", at=(11, 55))
             self._msg(conn, 4, "会話中C", at=(11, 58))  # 2分前=まだ熱い
         self.assertIsNone(attention.collect_channel(
-            self.db_path, "senko", CH, now=NOW))
+            self.db_path, "agent1", CH, now=NOW))
         # lullが来たら同じ差分が取れる（checkpointは動いていない）
         later = datetime(2026, 8, 23, 12, 30)
-        msgs = attention.collect_channel(self.db_path, "senko", CH, now=later)
+        msgs = attention.collect_channel(self.db_path, "agent1", CH, now=later)
         self.assertEqual([m["id"] for m in msgs], [2, 3, 4])
 
     def test_tiny_diff_consumed_silently(self):
         with db.connect(self.db_path) as conn:
             self._msg(conn, 1, "seed")
-        attention.collect_channel(self.db_path, "senko", CH, now=NOW)
+        attention.collect_channel(self.db_path, "agent1", CH, now=NOW)
         with db.connect(self.db_path) as conn:
             self._msg(conn, 2, "相槌", at=(11, 0))
         self.assertIsNone(attention.collect_channel(
-            self.db_path, "senko", CH, now=NOW))
+            self.db_path, "agent1", CH, now=NOW))
         # 消化済み（次周期にも出てこない）
         with db.connect(self.db_path) as conn:
             self._msg(conn, 3, "追加A", at=(11, 10))
             self._msg(conn, 4, "追加B", at=(11, 15))
             self._msg(conn, 5, "追加C", at=(11, 20))
-        msgs = attention.collect_channel(self.db_path, "senko", CH, now=NOW)
+        msgs = attention.collect_channel(self.db_path, "agent1", CH, now=NOW)
         self.assertEqual([m["id"] for m in msgs], [3, 4, 5])
 
     def test_reactions_included(self):
         with db.connect(self.db_path) as conn:
             self._msg(conn, 1, "seed")
-        attention.collect_channel(self.db_path, "senko", CH, now=NOW)
+        attention.collect_channel(self.db_path, "agent1", CH, now=NOW)
         with db.connect(self.db_path) as conn:
             self._msg(conn, 2, "質問です", at=(11, 0))
             self._msg(conn, 3, "補足", at=(11, 1))
             self._msg(conn, 4, "さらに補足", at=(11, 2))
             db.upsert_user(conn, id=333, name="u333",
-                           display_name="瓜生", is_bot=False)
+                           display_name="人D", is_bot=False)
             db.add_reaction(conn, message_id=2, emoji="👍", user_id=333,
                             created_at="2026-08-23T11:05")
-        msgs = attention.collect_channel(self.db_path, "senko", CH, now=NOW)
-        self.assertEqual(msgs[0]["reactions"], [("👍", "瓜生")])
+        msgs = attention.collect_channel(self.db_path, "agent1", CH, now=NOW)
+        self.assertEqual(msgs[0]["reactions"], [("👍", "人D")])
 
 
 class ScoreParseTest(unittest.TestCase):
@@ -130,10 +130,10 @@ class ScoreParseTest(unittest.TestCase):
     def test_prompt_mentions_reactions(self):
         msgs = [{"id": 1, "author": "A", "content": "質問",
                  "created_at": utc_iso(2026, 8, 23, 11, 0),
-                 "reactions": [("👍", "瓜生")]}]
-        p = attention.build_score_prompt(msgs, "AI戦子")
-        self.assertIn("👍(瓜生)", p)
-        self.assertIn("AI戦子", p)
+                 "reactions": [("👍", "人D")]}]
+        p = attention.build_score_prompt(msgs, "エージェント1")
+        self.assertIn("👍(人D)", p)
+        self.assertIn("エージェント1", p)
 
 
 class CandidateFlowTest(AttentionTestBase):
@@ -141,12 +141,12 @@ class CandidateFlowTest(AttentionTestBase):
               "say": "どうします?", "reason": "宙ぶらりん"}
 
     def test_save_and_single_pending_per_channel(self):
-        attention.save_candidate(self.db_path, "senko", CH, self.JUDGED,
+        attention.save_candidate(self.db_path, "agent1", CH, self.JUDGED,
                                  grace_hours=4, now=NOW)
         with db.connect(self.db_path) as conn:
-            self.assertTrue(db.pending_attention_exists(conn, "senko", CH))
-            self.assertFalse(db.pending_attention_exists(conn, "senko", 999))
-            items = db.pending_attention_items(conn, "senko")
+            self.assertTrue(db.pending_attention_exists(conn, "agent1", CH))
+            self.assertFalse(db.pending_attention_exists(conn, "agent1", 999))
+            items = db.pending_attention_items(conn, "agent1")
         self.assertEqual(items[0]["due_at"], "2026-08-23T16:00")
 
     def test_speak_action_wait_speak_expire(self):
@@ -159,12 +159,12 @@ class CandidateFlowTest(AttentionTestBase):
             item, datetime(2026, 8, 26, 17, 0)), "expire")
 
     def test_status_terminal(self):
-        attention.save_candidate(self.db_path, "senko", CH, self.JUDGED,
+        attention.save_candidate(self.db_path, "agent1", CH, self.JUDGED,
                                  now=NOW)
         with db.connect(self.db_path) as conn:
-            items = db.pending_attention_items(conn, "senko")
+            items = db.pending_attention_items(conn, "agent1")
             db.set_attention_status(conn, items[0]["id"], "resolved")
-            self.assertEqual(db.pending_attention_items(conn, "senko"), [])
+            self.assertEqual(db.pending_attention_items(conn, "agent1"), [])
 
 
 class RecheckTest(AttentionTestBase):
@@ -181,7 +181,7 @@ class RecheckTest(AttentionTestBase):
             seen["prompt"] = prompt
             return '{"resolved": true}'
         resolved, _say = attention.recheck(
-            self.db_path, self.ITEM, agent_name="AI戦子", invoke_fn=fake)
+            self.db_path, self.ITEM, agent_name="エージェント1", invoke_fn=fake)
         self.assertTrue(resolved)
         self.assertIn("俺がやります", seen["prompt"])
         self.assertIn("担当が決まってない", seen["prompt"])
@@ -191,7 +191,7 @@ class RecheckTest(AttentionTestBase):
             self._msg(conn, 2, "誰かやっといて", at=(10, 0))
             self._msg(conn, 3, "うーん", at=(10, 30))
         resolved, say = attention.recheck(
-            self.db_path, self.ITEM, agent_name="AI戦子",
+            self.db_path, self.ITEM, agent_name="エージェント1",
             invoke_fn=lambda p: '{"resolved": false, "say": "更新後の文面"}')
         self.assertEqual((resolved, say), (False, "更新後の文面"))
 
@@ -202,7 +202,7 @@ class RecheckTest(AttentionTestBase):
         def broken(_p):
             raise RuntimeError("claude down")
         resolved, say = attention.recheck(
-            self.db_path, self.ITEM, agent_name="AI戦子", invoke_fn=broken)
+            self.db_path, self.ITEM, agent_name="エージェント1", invoke_fn=broken)
         self.assertEqual((resolved, say), (False, "どうします?"))
 
     def test_build_message_has_soft_landing(self):

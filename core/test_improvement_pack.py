@@ -38,7 +38,7 @@ class GoldenTest(TestBase):
 
     def _seed(self, conn):
         db.upsert_channel(conn, id=1, name="general", type="text")
-        db.upsert_user(conn, id=1, name="u1", display_name="かば",
+        db.upsert_user(conn, id=1, name="u1", display_name="人A",
                        is_bot=False)
         db.upsert_user(conn, id=99, name="agent1", display_name="エージェント1",
                        is_bot=True)
@@ -90,7 +90,7 @@ class SilenceAuditTest(TestBase):
     def test_audit_counts_missed(self):
         with db.connect(self.db_path) as conn:
             db.upsert_channel(conn, id=7, name="g", type="text")
-            db.upsert_user(conn, id=1, name="u", display_name="かば",
+            db.upsert_user(conn, id=1, name="u", display_name="人A",
                            is_bot=False)
             db.insert_message(conn, id=10, channel_id=7, author_id=1,
                               content="これ誰か分かります？", created_at="t")

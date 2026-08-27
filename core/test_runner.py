@@ -108,7 +108,7 @@ class RunnerAnswerBranchTest(unittest.TestCase):
 
     def test_hits_answer_route(self):
         rows = [{"id": 1, "channel_id": 2, "channel": "general",
-                 "author": "かば", "content": "こんにちは",
+                 "author": "人A", "content": "こんにちは",
                  "created_at": "2026-07-16T00:00:00",
                  "imgs": 0, "vids": 0, "atts": 0}]
         with patch.object(search, "extract_keywords", return_value=["kw"]), \
@@ -153,10 +153,10 @@ class RunnerAnswerBranchTest(unittest.TestCase):
 class RunnerAnswerBuildPromptTest(unittest.TestCase):
     def test_all_blocks(self):
         p = runner_answer.build_prompt(
-            "質問です", "かば: こんにちは", "・要約1本",
-            "[1] (#general, かば, 2026-07-16)", "【添付】note.txt")
+            "質問です", "人A: こんにちは", "・要約1本",
+            "[1] (#general, 人A, 2026-07-16)", "【添付】note.txt")
         self.assertIn("【このチャンネルの文脈要約】\n・要約1本", p)
-        self.assertIn("【直近の会話】\nかば: こんにちは", p)
+        self.assertIn("【直近の会話】\n人A: こんにちは", p)
         self.assertIn("【質問】\n質問です", p)
         self.assertIn("【関連メッセージ】", p)
         self.assertTrue(p.endswith("【添付】note.txt"))

@@ -85,7 +85,7 @@ class SummariesTest(unittest.TestCase):
 
     def test_build_update_prompt(self):
         p = summaries.build_update_prompt("以前の要約",
-                                          ["[2026-07-16] かば: こんにちは"])
+                                          ["[2026-07-16] 人A: こんにちは"])
         self.assertIn("以前の要約", p)
         self.assertIn("こんにちは", p)
         self.assertIn(str(summaries.SUMMARY_MAX_CHARS), p)

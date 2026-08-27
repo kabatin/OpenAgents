@@ -264,7 +264,7 @@ class ThumbsDownDistillTest(unittest.TestCase):
         self.now = reminders.fmt(reminders.now_jst())
         with db.connect(self.tmp.name) as conn:
             db.upsert_channel(conn, id=7, name="g", type="text")
-            db.upsert_user(conn, id=99, name="senko", display_name="AI戦子",
+            db.upsert_user(conn, id=99, name="agent1", display_name="エージェント1",
                            is_bot=True)
 
     def tearDown(self):
@@ -274,20 +274,20 @@ class ThumbsDownDistillTest(unittest.TestCase):
         with db.connect(self.tmp.name) as conn:
             db.insert_message(conn, id=mid, channel_id=7, author_id=99,
                               content=content, created_at=self.now)
-            db.add_feedback(conn, message_id=mid, agent_id="senko",
+            db.add_feedback(conn, message_id=mid, agent_id="agent1",
                             kind="reaction", value=value, user_id="1",
                             created_at=self.now)
             if proactive_post:
                 db.add_proactive_log(
-                    conn, agent_id="senko", kind="recall", action="spoke",
+                    conn, agent_id="agent1", kind="recall", action="spoke",
                     channel_id=7, posted_message_id=mid,
                     created_at=self.now)
 
     def test_disliked_normal_answers_become_input(self):
-        self._answer(1, "瓜生さんに直接聞くのが確実っス", "down")
+        self._answer(1, "人Dさんに直接聞くのが確実っス", "down")
         self._answer(2, "登録するっス（権限で失敗）", "down")
         self._answer(3, "褒められた回答", "up")            # 👍は入力にしない
-        issues = svd.collect_low_issues(self.tmp.name, "senko")
+        issues = svd.collect_low_issues(self.tmp.name, "agent1")
         cats = [c for c, _ in issues]
         self.assertEqual(cats, ["thumbs_down", "thumbs_down"])
         texts = [t for _, t in issues]
@@ -296,7 +296,7 @@ class ThumbsDownDistillTest(unittest.TestCase):
     def test_proactive_posts_excluded(self):
         """自発発言への👎は既存の抑制学習の担当なので二重に使わない。"""
         self._answer(4, "自発発言だったもの", "down", proactive_post=True)
-        self.assertEqual(svd.collect_low_issues(self.tmp.name, "senko"), [])
+        self.assertEqual(svd.collect_low_issues(self.tmp.name, "agent1"), [])
 
     def test_thumbs_down_block_comes_first(self):
         prompt = svd.build_prompt([("selfreview", "曖昧"),
@@ -331,12 +331,12 @@ class AbTestWiringTest(unittest.TestCase):
 
     def test_variant_note_reaches_screen_prompt(self):
         import proactive
-        msgs = [{"id": 1, "channel": "g", "author": "常谷",
+        msgs = [{"id": 1, "channel": "g", "author": "人B",
                  "content": "納期どうなってる"}]
         prompt = proactive.build_screen_prompt(
-            msgs, "AI戦子", variant_note="- 一言添えるなら短くする")
+            msgs, "エージェント1", variant_note="- 一言添えるなら短くする")
         self.assertIn("一言添えるなら短くする", prompt)
-        plain = proactive.build_screen_prompt(msgs, "AI戦子")
+        plain = proactive.build_screen_prompt(msgs, "エージェント1")
         self.assertNotIn("一言添えるなら短くする", plain)
 
     def test_attribution_roundtrip(self):
@@ -347,7 +347,7 @@ class AbTestWiringTest(unittest.TestCase):
         self.assertIsNone(ab_test.variant_from_detail("タグなし"))
         now = reminders.fmt(reminders.now_jst())
         with db.connect(self.tmp.name) as conn:
-            db.add_proactive_log(conn, agent_id="senko", kind="recall",
+            db.add_proactive_log(conn, agent_id="agent1", kind="recall",
                                  action="spoke", posted_message_id=555,
                                  detail=detail, created_at=now)
         got = ab_test.record_feedback_for_message(self.tmp.name, 555, "up")
@@ -361,7 +361,7 @@ class AbTestWiringTest(unittest.TestCase):
         import ab_test
         now = reminders.fmt(reminders.now_jst())
         with db.connect(self.tmp.name) as conn:
-            db.add_proactive_log(conn, agent_id="senko", kind="recall",
+            db.add_proactive_log(conn, agent_id="agent1", kind="recall",
                                  action="spoke", posted_message_id=556,
                                  detail="タグなし", created_at=now)
         self.assertIsNone(
@@ -382,7 +382,7 @@ class AdviceGraduationTest(unittest.TestCase):
 
     def _merge(self, texts):
         with db.connect(self.tmp.name) as conn:
-            return db.replace_advice_lessons(conn, "senko", texts, self.now)
+            return db.replace_advice_lessons(conn, "agent1", texts, self.now)
 
     def test_same_text_increments_streak(self):
         self._merge(["断定しない"])
@@ -391,7 +391,7 @@ class AdviceGraduationTest(unittest.TestCase):
         merged = self._merge(["断定しない"])
         self.assertEqual(merged[0]["streak"], 3)
         with db.connect(self.tmp.name) as conn:
-            rows = db.advice_lessons(conn, "senko")
+            rows = db.advice_lessons(conn, "agent1")
         self.assertEqual(len(rows), 1)          # 重複行を作らない
         self.assertEqual(rows[0]["streak"], 3)
 
@@ -399,7 +399,7 @@ class AdviceGraduationTest(unittest.TestCase):
         self._merge(["A", "B"])
         self._merge(["A"])                       # Bは今回出なかった
         with db.connect(self.tmp.name) as conn:
-            texts = [r["text"] for r in db.advice_lessons(conn, "senko")]
+            texts = [r["text"] for r in db.advice_lessons(conn, "agent1")]
         self.assertEqual(texts, ["A"])
 
     def test_cap_is_five(self):
@@ -424,11 +424,11 @@ class AdviceGraduationTest(unittest.TestCase):
                 conn.execute(
                     """INSERT INTO proactive_log(agent_id, kind, action,
                            detail, created_at)
-                       VALUES('senko','selfreview','score',?,?)""",
+                       VALUES('agent1','selfreview','score',?,?)""",
                     (d, self.now))
         got = None
         for _ in range(svd.GRADUATE_STREAK):
-            got = svd.distill_full(self.tmp.name, "senko", model="m",
+            got = svd.distill_full(self.tmp.name, "agent1", model="m",
                                    invoke_fn=fake)
         self.assertEqual(got["advice"][0]["streak"], svd.GRADUATE_STREAK)
         self.assertEqual(len(got["graduates"]), 1)
@@ -440,12 +440,12 @@ class AdviceGraduationTest(unittest.TestCase):
         merged = self._merge(["断定しない"])
         with db.connect(self.tmp.name) as conn:
             pid = db.add_advice_promotion(
-                conn, agent_id="senko", lesson_id=merged[0]["id"],
+                conn, agent_id="agent1", lesson_id=merged[0]["id"],
                 text="断定しない", streak=3, created_at=self.now)
             db.set_advice_promotion_message(conn, pid, 700)
             # 同じ助言の二重提案はしない
             self.assertIsNone(db.add_advice_promotion(
-                conn, agent_id="senko", lesson_id=merged[0]["id"],
+                conn, agent_id="agent1", lesson_id=merged[0]["id"],
                 text="断定しない", streak=3, created_at=self.now))
         text = svd.promote(self.tmp.name, 700, admin_id=1)
         self.assertEqual(text, "断定しない")
@@ -454,20 +454,20 @@ class AdviceGraduationTest(unittest.TestCase):
             self.assertTrue(any(r["scope"] == "global"
                                 and "断定しない" in r["rule_text"]
                                 for r in rules_all))
-            self.assertEqual(db.advice_lessons(conn, "senko"), [])  # 枠が空く
+            self.assertEqual(db.advice_lessons(conn, "agent1"), [])  # 枠が空く
         self.assertIsNone(svd.promote(self.tmp.name, 700, admin_id=1))  # CAS
 
     def test_dismiss_keeps_advice(self):
         merged = self._merge(["断定しない"])
         with db.connect(self.tmp.name) as conn:
             pid = db.add_advice_promotion(
-                conn, agent_id="senko", lesson_id=merged[0]["id"],
+                conn, agent_id="agent1", lesson_id=merged[0]["id"],
                 text="断定しない", streak=3, created_at=self.now)
             db.set_advice_promotion_message(conn, pid, 701)
         self.assertTrue(svd.dismiss_promotion(self.tmp.name, 701))
         self.assertFalse(svd.dismiss_promotion(self.tmp.name, 701))
         with db.connect(self.tmp.name) as conn:
-            self.assertEqual(len(db.advice_lessons(conn, "senko")), 1)
+            self.assertEqual(len(db.advice_lessons(conn, "agent1")), 1)
 
     def test_advice_block_shows_streak(self):
         block = svd.build_advice_block([{"text": "断定しない", "streak": 3},

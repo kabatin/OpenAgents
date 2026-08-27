@@ -80,7 +80,7 @@ class CandidateTest(RescueTestBase):
 
 class JudgeTest(RescueTestBase):
     CAND = {"id": 10, "channel_id": 1, "channel": "general",
-            "author": "かば", "author_id": 1,
+            "author": "人A", "author_id": 1,
             "content": "スカジャンの納期っていつでしたっけ？",
             "created_at": "2026-07-30T06:00:00+00:00"}
 

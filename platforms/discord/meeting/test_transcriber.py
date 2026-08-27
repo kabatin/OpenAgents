@@ -16,10 +16,10 @@ class BuildTranscriptTest(unittest.TestCase):
         self.assertEqual(build_transcript([], has_real_timestamps=False), "")
 
     def test_relative_time_fallback(self):
-        segs = [(5.0, "アーカイブ担当", "こんにちは"), (65.0, "かば", "どうも")]
+        segs = [(5.0, "アーカイブ担当", "こんにちは"), (65.0, "人A", "どうも")]
         out = build_transcript(segs, has_real_timestamps=False)
         self.assertEqual(
-            out, "[00:05] アーカイブ担当: こんにちは\n[01:05] かば: どうも")
+            out, "[00:05] アーカイブ担当: こんにちは\n[01:05] 人A: どうも")
 
     def test_real_time_uses_first_as_base(self):
         # 実時間: 最初の発話を 00:00 として経過時間を出す

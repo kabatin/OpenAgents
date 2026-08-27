@@ -113,7 +113,7 @@ class CollectCycleTest(ProactiveTestBase):
 
 class ScreenTest(ProactiveTestBase):
     MSGS = [{"id": 10, "channel_id": 1, "channel": "general",
-             "author_id": 1, "author": "かば", "content": "そういえば納期いつだっけ",
+             "author_id": 1, "author": "人A", "content": "そういえば納期いつだっけ",
              "created_at": "2026-07-31T11:00:00"}]
 
     def test_prompt_contains_messages_and_types(self):
@@ -210,12 +210,12 @@ class GateReplyTest(unittest.TestCase):
 
 class DecideReplyTest(ProactiveTestBase):
     TRIGGER = {"id": 10, "channel_id": 1, "channel": "general",
-               "author_id": 1, "author": "かば",
+               "author_id": 1, "author": "人A",
                "content": "そういえば納期いつだっけ",
                "created_at": "2026-07-31T11:00:00"}
     CAND = {"message_id": 10, "kind": "recall",
             "search_terms": ["納期"], "reason": "疑問"}
-    HIT = {"id": 5, "channel_id": 2, "channel": "定例", "author": "かば",
+    HIT = {"id": 5, "channel_id": 2, "channel": "定例", "author": "人A",
            "content": "納期は8/8で確定", "created_at": "2026-07-20T10:00:00",
            "imgs": 0, "vids": 0, "atts": 0}
 
@@ -584,18 +584,18 @@ if __name__ == "__main__":
 class OthersShadowTest(unittest.TestCase):
     """「その他」枠のシャドー実験（2026-08-18）。4類型の外を投稿せず記録する。"""
 
-    MSGS = [{"id": 1, "channel": "g", "author": "常谷",
+    MSGS = [{"id": 1, "channel": "g", "author": "人B",
              "content": "この配色どう思う"},
-            {"id": 2, "channel": "g", "author": "板垣",
+            {"id": 2, "channel": "g", "author": "人C",
              "content": "納期は9月です"}]
 
     def test_prompt_opt_in_only(self):
         with_others = proactive.build_screen_prompt(
-            self.MSGS, "AI戦子", allow_others=True)
+            self.MSGS, "エージェント1", allow_others=True)
         self.assertIn("others", with_others)
         self.assertIn("投稿されない", with_others)
         self.assertIn("黙るのも立派な選択", with_others)
-        plain = proactive.build_screen_prompt(self.MSGS, "AI戦子")
+        plain = proactive.build_screen_prompt(self.MSGS, "エージェント1")
         self.assertNotIn("others", plain)
 
     def test_parse_others(self):
@@ -623,10 +623,10 @@ class OthersShadowTest(unittest.TestCase):
     def test_screen_returns_others_only_when_enabled(self):
         raw = ('{"candidates": [], "decisions": [], "handoff": [], '
                '"others": [{"message_id": 1, "would_say": "一言"}]}')
-        off = proactive.screen(self.MSGS, agent_name="AI戦子",
+        off = proactive.screen(self.MSGS, agent_name="エージェント1",
                                invoke_fn=lambda p: raw)
         self.assertEqual(off["others"], [])
-        on = proactive.screen(self.MSGS, agent_name="AI戦子",
+        on = proactive.screen(self.MSGS, agent_name="エージェント1",
                               invoke_fn=lambda p: raw, allow_others=True)
         self.assertEqual(len(on["others"]), 1)
         # 4類型の判定は others の有無に影響されない
