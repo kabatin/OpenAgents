@@ -115,11 +115,11 @@ def evaluate(db_path, slot=SLOT_SCREEN):
 
 def build_report(result, slot=SLOT_SCREEN):
     b, w = result["best"], result["worst"]
-    return (f"🧪 プロンプトA/B（{slot}）で差が出たっス:\n"
+    return (f"🧪 プロンプトA/B（{slot}）で差が出ました:\n"
             f"- 変種{b['variant']}: 👍率{round(b['rate'] * 100)}%"
             f"（{b['up']}/{b['judged']}件・使用{b['used']}回）\n"
             f"- 変種{w['variant']}: 👍率{round(w['rate'] * 100)}%"
             f"（{w['up']}/{w['judged']}件・使用{w['used']}回）\n"
-            f"-# 変種{b['variant']}に寄せた方が良さそうっス。"
-            "採用するかは管理者判断でお願いするっス"
-            "（自動では切り替えないっス）")
+            f"-# 変種{b['variant']}に寄せた方が良さそうです。"
+            "採用するかは管理者判断でお願いします"
+            "（自動では切り替えません）")

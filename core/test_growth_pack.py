@@ -17,7 +17,7 @@ from core import selfreview_distill as svd
 
 
 def _seed_spoke(conn, *, agent_id="agent1", message_id=100, kind="info",
-                channel_id=5, content="良い感じの自発発言テキストっス"):
+                channel_id=5, content="良い感じの自発発言テキストです"):
     """自発発言(spoke)＋投稿本文をDBへ植える。"""
     conn.execute(
         """INSERT INTO proactive_log(agent_id, kind, action, channel_id,
@@ -284,8 +284,8 @@ class ThumbsDownDistillTest(unittest.TestCase):
                     created_at=self.now)
 
     def test_disliked_normal_answers_become_input(self):
-        self._answer(1, "人Dさんに直接聞くのが確実っス", "down")
-        self._answer(2, "登録するっス（権限で失敗）", "down")
+        self._answer(1, "人Dさんに直接聞くのが確実です", "down")
+        self._answer(2, "登録します（権限で失敗）", "down")
         self._answer(3, "褒められた回答", "up")            # 👍は入力にしない
         issues = svd.collect_low_issues(self.tmp.name, "agent1")
         cats = [c for c, _ in issues]

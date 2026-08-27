@@ -250,7 +250,7 @@ def build_briefing(*, date_label, deadlines, schedules, highlights, guild_id):
     if not (overdue or today_items or soon or schedules or highlights):
         return None
 
-    lines = [f"☀️ おはようございますっス。{date_label} の朝のブリーフィングっス"]
+    lines = [f"☀️ おはようございます。{date_label} の朝のブリーフィングです"]
 
     if overdue or today_items or soon:
         lines.append("")
@@ -274,7 +274,7 @@ def build_briefing(*, date_label, deadlines, schedules, highlights, guild_id):
             shown += 1
         rest = (len(overdue) + len(today_items) + len(soon)) - shown
         if rest > 0:
-            lines.append(f"-# ほか {rest} 件（納期の声かけで個別にお知らせするっス）")
+            lines.append(f"-# ほか {rest} 件（納期の声かけで個別にお知らせします）")
 
     if schedules:
         lines.append("")
@@ -291,7 +291,7 @@ def build_briefing(*, date_label, deadlines, schedules, highlights, guild_id):
             lines.append(f"- {h}")
 
     lines.append("")
-    lines.append("-# 今日もいってらっしゃいっス。漏れがあれば気軽に教えてほしいっス")
+    lines.append("-# 今日もいってらっしゃい。漏れがあれば気軽に教えてください")
     text = "\n".join(lines)
     if len(text) > MAX_BRIEFING_CHARS:
         text = text[:MAX_BRIEFING_CHARS] + "…"

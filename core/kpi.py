@@ -100,8 +100,8 @@ def build_post(name, declaration, stats, quarter_label):
     hit = stats["hit"]
     rate = (f"{round(100 * hit['up'] / hit['spoke'])}%"
             if hit["spoke"] else "—")
-    lines = [f"🎯 {name}の{quarter_label}目標宣言っス",
-             declaration or "（今期も、正直に・役に立つことを積み重ねるっス）",
+    lines = [f"🎯 {name}の{quarter_label}目標宣言です",
+             declaration or "（今期も、正直に・役に立つことを積み重ねます）",
              f"-# 前期実績: 自発発言{hit['spoke']}件（👍率{rate}）"
              f"・起票{stats['capability_requests']}件"
              + (f"・誠実失敗率{stats['honesty_rate']}%"

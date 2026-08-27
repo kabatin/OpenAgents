@@ -98,11 +98,11 @@ def find_shareable(db_path, *, model, invoke_fn=None):
 
 
 def build_post(picks):
-    lines = ["📚 勉強会っス！この学びは全員で共有した方が良さそうっス:"]
+    lines = ["📚 勉強会です！この学びは全員で共有した方が良さそうです:"]
     for p in picks:
         lines.append(f"- id={p['rule_id'] if 'rule_id' in p else p['id']}"
                      f"「{p['rule_text'][:60]}」（{p['reason']}）")
-    lines.append("-# ✅で全体ルール（global）に昇格するっス／❌で見送りっス")
+    lines.append("-# ✅で全体ルール（global）に昇格します／❌で見送ります")
     return "\n".join(lines)
 
 

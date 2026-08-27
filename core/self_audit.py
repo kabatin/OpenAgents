@@ -87,15 +87,15 @@ def build_audit_post(items):
     """夜の自己監査（純粋関数）。何も無ければ None＝投稿しない。"""
     if not items:
         return None
-    lines = ["🌙 今日の自己監査っス（あやしかった判断の振り返り）"]
+    lines = ["🌙 今日の自己監査です（あやしかった判断の振り返り）"]
     for r in items[:8]:
         label = LABELS.get(r["action"], r["action"])
         detail = (r["detail"] or "").replace("\n", " ")[:70]
         lines.append(f"- [{label}] {detail}")
     if len(items) > 8:
         lines.append(f"-# 他{len(items) - 8}件")
-    lines.append("-# 明日はここを気をつけるっス。"
-                 "見当違いだったら教えてほしいっス🙏")
+    lines.append("-# 明日はここに気をつけます。"
+                 "見当違いだったら教えてください🙏")
     return "\n".join(lines)
 
 
@@ -178,7 +178,7 @@ def build_bias_post(agent_name, result):
         lines.append(f"- 拾い上げた未回答質問: {rescues['total']}件（{who}）")
     if result["findings"]:
         lines.append("⚠️ " + "／".join(result["findings"])
-                     + "。他の人・他のchも見るようにするっス")
+                     + "。他の人・他のchも見るようにします")
     else:
-        lines.append("-# 大きな偏りは無さそうっス")
+        lines.append("-# 大きな偏りは無さそうです")
     return "\n".join(lines)

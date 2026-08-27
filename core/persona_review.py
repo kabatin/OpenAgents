@@ -107,11 +107,11 @@ def review(db_path, agent_ids, names, *, model, invoke_fn=None, now=None):
 
 
 def build_post(proposals, unused_tools):
-    lines = ["🪞 月次の自己点検レポートっス（人格チューニングの提案。"
-             "**適用するかは管理者判断**っス）"]
-    lines.append(proposals or "今月は提案なしっス（大きな問題は見えなかったっス）")
+    lines = ["🪞 月次の自己点検レポートです（人格チューニングの提案。"
+             "**適用するかは管理者判断**です）"]
+    lines.append(proposals or "今月は提案なしです（大きな問題は見つかりませんでした）")
     if unused_tools:
         lines.append("-# 🧰 60日間使われていないプラグイン: "
                      + "、".join(unused_tools[:10])
-                     + "（要らなければretireを検討っス）")
+                     + "（要らなければretireを検討してください）")
     return "\n".join(lines)

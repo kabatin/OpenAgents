@@ -57,8 +57,8 @@ class MarkerActionsMixin:
                     notes.append(f"-# 🗑 事実を取り消し(id={fid})")
                 else:
                     notes.append(f"-# ⚠️ 事実id={fid} は見つからないか"
-                                 "既に取り消し済みっス")
-        notes += [f"-# ⚠️ 事実を記録できなかったっス: {e}" for e in errors]
+                                 "既に取り消し済みです")
+        notes += [f"-# ⚠️ 事実を記録できませんでした: {e}" for e in errors]
         return (text + "\n" if text else "") + "\n".join(notes)
 
     def _apply_rule_markers(self, message, answer, agent_id=None):
@@ -78,7 +78,7 @@ class MarkerActionsMixin:
                 # global（全ch共通）は影響範囲が広いため管理者のみ
                 if req["scope"] == "global" and not is_admin:
                     notes.append("-# ⚠️ 全体共通ルールは管理者だけが設定できる"
-                                 "っス（このチャンネル/あなた向けなら設定可）")
+                                 "（このチャンネル/あなた向けなら設定可）")
                     continue
                 scope = rules.scope_key(
                     req["scope"], channel_id=message.channel.id,
@@ -96,11 +96,11 @@ class MarkerActionsMixin:
             for rid in cancel_ids:
                 r = db.get_rule(conn, rid, aid)
                 if r is None:
-                    notes.append(f"-# ⚠️ id={rid} のルールは見つからないっス")
+                    notes.append(f"-# ⚠️ id={rid} のルールは見つかりません")
                 elif not is_admin and r["created_by"] != author_id:
                     # 自分が作ったルール以外は管理者しか消せない
                     notes.append(f"-# ⚠️ id={rid} は他の人/共有のルールなので"
-                                 "削除できないっス（管理者に相談を）")
+                                 "削除できません（管理者に相談を）")
                 else:
                     db.deactivate_rule(conn, rid, aid)
                     notes.append(f"-# 🗑 ルール削除(id={rid}): "
@@ -129,13 +129,13 @@ class MarkerActionsMixin:
         for agent_id, quota in reqs:
             target = AGENTS_BY_ID.get(agent_id)
             if not is_admin:
-                notes.append("-# ⚠️ 自発発言の枠は管理者だけが変更できるっス")
+                notes.append("-# ⚠️ 自発発言の枠は管理者だけが変更できます")
             elif target is None or quota > proactive.QUOTA_MAX:
-                notes.append(f"-# ⚠️ 枠の指定が不正っス（{agent_id} {quota}）")
+                notes.append(f"-# ⚠️ 枠の指定が不正です（{agent_id} {quota}）")
             else:
                 proactive.apply_quota(DB_PATH, agent_id, quota)
                 notes.append(f"-# ⚙️ {target['name']}の自発発言枠を"
-                             f"{quota}回/日に変更したっス（次の観察周期から）")
+                             f"{quota}回/日に変更しました（次の観察周期から）")
         if not notes:
             return text
         return (text + "\n" if text else "") + "\n".join(notes)
@@ -161,17 +161,17 @@ class MarkerActionsMixin:
                     if target is None:
                         notes.append(f"-# ⚠️ チャンネル「{chan_tokens[0]}」が"
                                      "見つからないため、このチャンネルに"
-                                     "通知するっス")
+                                     "通知します")
                     elif not can_target_channel(target, message.author):
                         notes.append("-# ⚠️ あなたが書き込めないチャンネル"
-                                     "には設定できないっス。このチャンネルに"
-                                     "通知するっス")
+                                     "には設定できません。このチャンネルに"
+                                     "通知します")
                     else:
                         deliver_channel_id = target.id
                         channel_label = f"#{target.name}"
                     if len(chan_tokens) > 1:
                         notes.append("-# ⚠️ チャンネル指定は最初の1つ"
-                                     f"（{chan_tokens[0]}）だけ使ったっス")
+                                     f"（{chan_tokens[0]}）だけ使いました")
             if to_people:
                 if terms_rows is None:
                     with db.connect(DB_PATH) as conn:
@@ -180,18 +180,18 @@ class MarkerActionsMixin:
                     message.guild, to_people, terms_rows)
                 if mention is None:
                     notes.append(f"-# ⚠️ 宛先「{to_people}」が見つからないか"
-                                 "同名が複数いるため依頼者宛にしたっス")
+                                 "同名が複数いるため依頼者宛にしました")
                 elif unresolved:
                     # 一部だけ解決できた: 解決分で登録し、残りを明示する
                     notes.append("-# ⚠️ 宛先のうち「"
                                  + "、".join(unresolved)
-                                 + "」は見つからなかったっス"
-                                 f"（{label} には届くっス）")
+                                 + "」は見つかりませんでした"
+                                 f"（{label} には届きます）")
                 if mention is not None and (_is_broadcast(mention)
                         and not _can_broadcast(message.author)):
                     # LLMの裁量に任せず、発言者のDiscord権限で強制ゲート
                     notes.append("-# ⚠️ 全員/ロール宛はメンション権限を持つ人"
-                                 "だけ設定できるっス。依頼者宛にしたっス")
+                                 "だけ設定できます。依頼者宛にしました")
                     mention = label = None
             entry, err = reminders.add_reminder(
                 channel_id=deliver_channel_id,
@@ -208,7 +208,7 @@ class MarkerActionsMixin:
             if entry:
                 notes.append("-# 登録: " + reminders.format_entry_line(entry))
             else:
-                notes.append(f"-# ⚠️ 登録できなかったっス: {err}")
+                notes.append(f"-# ⚠️ 登録できませんでした: {err}")
         is_admin = str(message.author.id) in ADMIN_IDS
         for rid in cancel_ids:
             entry, reason = reminders.cancel_reminder(
@@ -221,19 +221,19 @@ class MarkerActionsMixin:
                 notes.append(f"-# キャンセル: id={rid} "
                              f"{entry['content'][:40]}{owner_note}")
             elif reason == "not_found":
-                notes.append(f"-# ⚠️ id={rid} は存在しないっス")
+                notes.append(f"-# ⚠️ id={rid} は存在しません")
             elif reason == "ended":
                 old = reminders.find_entry(rid)
                 label = {"done": "配信済み", "cancelled": "取消済み"}.get(
                     (old or {}).get("status"), "終了済み")
-                notes.append(f"-# ⚠️ id={rid} は既に{label}っス")
+                notes.append(f"-# ⚠️ id={rid} は既に{label}です")
             elif reason == "not_owner":
                 old = reminders.find_entry(rid)
                 owner = (old or {}).get("user_name") or "他の人"
                 notes.append(f"-# ⚠️ id={rid} は{owner}さんのリマインダー"
-                             "なので、本人か管理者しか取り消せないっス")
+                             "なので、本人か管理者しか取り消せません")
         for e in errors:
-            notes.append(f"-# ⚠️ 登録できなかったっス: {e}")
+            notes.append(f"-# ⚠️ 登録できませんでした: {e}")
         if not notes:
             return text
         return (text + "\n" if text else "") + "\n".join(notes)
@@ -267,7 +267,7 @@ class MarkerActionsMixin:
         """「できたフリ」検出（RM#20）。①完了主張×マーカー不発→正直化の-#行を
         付記＋記録 ②根拠なし断定→シャドー記録のみ（本文は触らない）。"""
         # そのスキルを持たないエージェントでは検査自体をしない（誤検出防止）。
-        # 例: 納期追跡を持たないエージェントの「追跡はキャンセルするっス」は
+        # 例: 納期追跡を持たないエージェントの「追跡はキャンセルします」は
         # ただの日常会話であって、できたフリではない。
         # 外部連携が honesty.register() した kind も、その連携が有効な
         # エージェントでだけ検査する
@@ -338,14 +338,14 @@ class MarkerActionsMixin:
                                str(message.author.id))
             desc = f"（{t['description']}）" if t["description"] else ""
             notes.append(f"-# 📛 固有名詞を登録: 「{t['term']}」{desc}"
-                         "（議事録・回答で正式表記として扱うっス）")
+                         "（議事録・回答で正式表記として扱います）")
         for term in term_cancels:
             if not is_admin:
-                notes.append("-# ⚠️ 固有名詞の削除は管理者だけっス")
+                notes.append("-# ⚠️ 固有名詞の削除は管理者だけです")
             elif glossary.remove_term(DB_PATH, term):
                 notes.append(f"-# 🗑 固有名詞辞書から削除: 「{term}」")
             else:
-                notes.append(f"-# ⚠️ 「{term}」は辞書に無いっス")
+                notes.append(f"-# ⚠️ 「{term}」は辞書にありません")
         for wrong, correct in adds:
             fixed = glossary.save(DB_PATH, wrong, correct,
                                   str(message.author.id))
@@ -357,11 +357,11 @@ class MarkerActionsMixin:
             notes.append(note)
         for wrong in cancels:
             if not is_admin:
-                notes.append("-# ⚠️ 単語帳の削除は管理者だけっス")
+                notes.append("-# ⚠️ 単語帳の削除は管理者だけです")
             elif glossary.remove(DB_PATH, wrong):
                 notes.append(f"-# 🗑 単語帳から削除: 「{wrong}」")
             else:
-                notes.append(f"-# ⚠️ 「{wrong}」は単語帳に無いっス")
+                notes.append(f"-# ⚠️ 「{wrong}」は単語帳にありません")
         for e in errors:
             notes.append(f"-# ⚠️ {e}")
         if not notes:

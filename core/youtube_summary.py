@@ -33,7 +33,7 @@ LANGS = ("ja", "en")
 OEMBED_URL = "https://www.youtube.com/oembed"
 OEMBED_TIMEOUT_SEC = 10
 
-MULTI_URL_NOTE = "-# 複数URLがあったので最初の1本だけ要約したっス"
+MULTI_URL_NOTE = "-# 複数URLがあったので最初の1本だけ要約しました"
 
 
 class TranscriptError(Exception):
@@ -104,20 +104,20 @@ def fetch_transcript(video_id):
             fetched = _fetch_any_language(ytt, video_id)
     except TranscriptsDisabled:
         raise TranscriptError(
-            "⚠️ この動画、字幕が無効になっていて要約できなかったっス"
-            "（配信中の動画はまだ字幕が無いかもっス）")
+            "⚠️ この動画、字幕が無効になっていて要約できませんでした"
+            "（配信中の動画にはまだ字幕が無いかもしれません）")
     except VideoUnavailable:
-        raise TranscriptError("⚠️ この動画、非公開か削除されているみたいっス")
+        raise TranscriptError("⚠️ この動画、非公開か削除されているようです")
     except RequestBlocked:
         raise TranscriptError(
-            "⚠️ YouTube側に弾かれたっス。しばらくしてから"
-            "もう一回頼んでほしいっス")
+            "⚠️ YouTube側に弾かれました。しばらくしてから"
+            "もう一度お試しください")
     except CouldNotRetrieveTranscript as e:
         reason = str(e).strip().replace("\n", " ")[:100]
-        raise TranscriptError(f"⚠️ 字幕を取得できなかったっス\n-# {reason}")
+        raise TranscriptError(f"⚠️ 字幕を取得できませんでした\n-# {reason}")
     snippets = list(fetched)
     if not snippets:
-        raise TranscriptError("⚠️ 字幕が空っぽで要約できなかったっス")
+        raise TranscriptError("⚠️ 字幕が空で要約できませんでした")
     text = "\n".join(s.text for s in snippets)
     last = snippets[-1]
     minutes = max(1, round((last.start + last.duration) / 60))
@@ -131,7 +131,7 @@ def _fetch_any_language(ytt, video_id):
             return t.fetch()
         except Exception:
             continue
-    raise TranscriptError("⚠️ この動画の字幕が見つからなかったっス")
+    raise TranscriptError("⚠️ この動画の字幕が見つかりませんでした")
 
 
 def fetch_title(video_id):

@@ -100,14 +100,20 @@ def _fmt_lines(messages, with_ids=True):
     return "\n".join(lines)
 
 
-def build_score_prompt(messages, agent_name):
-    """採点プロンプト（純粋関数・テスト対象。バックテストで実証済みの文面）。"""
+def build_score_prompt(messages, agent_name, persona=None):
+    """採点プロンプト（純粋関数・テスト対象。バックテストで実証済みの文面）。
+
+    口調はここに書かない。`persona` を渡してエージェント自身の人格定義から
+    取る（書き込むと、どんな人格を設定しても同じ喋り方になる）。
+    """
     return (
-        f"あなたは社内Discord常駐AI「{agent_name}」の判断係。"
+        f"あなたはチームのチャットに常駐するAI「{agent_name}」の判断係。"
         f"{agent_name}は全会話ログの検索・事実台帳・納期追跡を持つ見守り役で、"
-        "口調は「〜っス」。普段は黙っていて、本当に価値がある時だけ会話に"
+        "普段は黙っていて、本当に価値がある時だけ会話に"
         "自然に入るのが理想。\n\n"
-        "以下は実際の会話ログ。この流れの中で、誰にも呼ばれていないのに"
+        + (f"【{agent_name}の人格（say の口調はこれに合わせる）】\n"
+           f"{persona.strip()}\n\n" if persona else "")
+        + "以下は実際の会話ログ。この流れの中で、誰にも呼ばれていないのに"
         "自分から口を挟む価値のある瞬間があったかを判定して。\n\n"
         "口を挟む価値がある例:\n"
         "- 質問が出たのに誰も答えず流れた（過去ログや記録から答えられそうな場合）\n"
@@ -159,9 +165,9 @@ def parse_score_response(raw, valid_ids):
 
 
 def score(messages, *, agent_name, model=SCREEN_MODEL_DEFAULT,
-          invoke_fn=None):
+          invoke_fn=None, persona=None):
     """採点: 判定dict or None（静観）。invoke_fnはテスト差し替え口。"""
-    prompt = build_score_prompt(messages, agent_name)
+    prompt = build_score_prompt(messages, agent_name, persona)
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
         p, model=model, timeout=JUDGE_TIMEOUT_SEC).text)
     try:
@@ -189,11 +195,12 @@ def save_candidate(db_path, agent_id, channel_id, judged, *,
 
 # ---------------------------------------------------------------- 4) 再確認
 
-def build_recheck_prompt(item, later_messages, agent_name):
+def build_recheck_prompt(item, later_messages, agent_name, persona=None):
     """発言直前の再確認プロンプト（純粋関数・テスト対象）。
-    解決済みなら取り下げ、未解決なら現状に合わせた発言文に更新する。"""
+    解決済みなら取り下げ、未解決なら現状に合わせた発言文に更新する。
+    発言文を書き直させるので、採点時と同じく人格を渡す。"""
     return (
-        f"あなたは社内Discord常駐AI「{agent_name}」の判断係。以前の会話で"
+        f"あなたはチームのチャットに常駐するAI「{agent_name}」の判断係。以前の会話で"
         "「口を挟む価値がある」と判定した懸念がある。その後の実際のやりとりを"
         "読んで、いま発言する価値がまだあるかを最終判定して。\n\n"
         f"【当時の懸念】{item['reason']}\n"
@@ -206,6 +213,8 @@ def build_recheck_prompt(item, later_messages, agent_name):
         "- 確認していない事実は断定しない（知らないなら問いかけにする）\n\n"
         "出力はJSONのみ:\n"
         '{"resolved": true} または {"resolved": false, "say": "更新した発言文"}'
+        + (f"\n\n【{agent_name}の人格（say の口調はこれに合わせる）】\n"
+           f"{persona.strip()}" if persona else "")
     )
 
 
@@ -226,7 +235,7 @@ def parse_recheck_response(raw, fallback_say):
 
 
 def recheck(db_path, item, *, agent_name, model=SCREEN_MODEL_DEFAULT,
-            invoke_fn=None):
+            invoke_fn=None, persona=None):
     """発言直前の再確認。(resolved, 発言文) を返す。確認に失敗したら
     従来案のまま発言側に倒す（機能を黙って殺さない）。"""
     with db.connect(db_path) as conn:
@@ -236,7 +245,7 @@ def recheck(db_path, item, *, agent_name, model=SCREEN_MODEL_DEFAULT,
         rx = db.reactions_for_messages(
             conn, [item["anchor_message_id"]] + [m["id"] for m in later])
     later = [{**m, "reactions": rx.get(m["id"]) or ()} for m in later]
-    prompt = build_recheck_prompt(item, later, agent_name)
+    prompt = build_recheck_prompt(item, later, agent_name, persona)
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
         p, model=model, timeout=JUDGE_TIMEOUT_SEC).text)
     try:
@@ -249,8 +258,12 @@ def recheck(db_path, item, *, agent_name, model=SCREEN_MODEL_DEFAULT,
 # ---------------------------------------------------------------- 5) 発言
 
 def build_message(say):
-    """投稿文面（純粋関数）。押し付けない着地を必ず添える。"""
-    return f"{say}\n-# 気になったので口挟んだっス。外してたらスルーで大丈夫っス"
+    """投稿文面（純粋関数）。押し付けない着地を必ず添える。
+
+    末尾はコードが必ず付ける定型なので、人格に依存しない書き方にする
+    （本文 `say` の方は人格に合わせてLLMが書く）。
+    """
+    return f"{say}\n-# 気になったので口を挟みました。的外れでしたらご放念ください"
 
 
 def speak_action(item, now, *, expire_hours=EXPIRE_HOURS_DEFAULT):

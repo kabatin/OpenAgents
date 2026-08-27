@@ -103,7 +103,7 @@ def judge(candidate, follow_rows, *, model, invoke_fn=None):
 
 
 RESCUE_PREFIX = ("24時間くらい誰も答えてないみたいなので、"
-                 "あたしなりに調べてみたっス🙋\n")
+                 "こちらで調べてみました🙋\n")
 
 
 def record(db_path, message_id, agent_id, status, posted_message_id=None):

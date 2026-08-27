@@ -130,7 +130,7 @@ class FakeDoneTest(unittest.TestCase):
 
     def test_note_names_the_missing_action(self):
         note = honesty.build_fake_done_note(["remind"])
-        self.assertIn("失敗したっス", note)
+        self.assertIn("失敗しました", note)
         self.assertIn("リマインダー", note)
 
     def test_notes_are_prominent_not_subtext(self):
@@ -139,7 +139,7 @@ class FakeDoneTest(unittest.TestCase):
         for note in (honesty.build_fake_done_note(["remind"]),
                      honesty.build_failed_claim_note(["sheet"])):
             self.assertFalse(note.startswith("-#"), note)
-            self.assertTrue(note.startswith("⚠️ 失敗したっス"), note)
+            self.assertTrue(note.startswith("⚠️ 失敗しました"), note)
 
     def test_deeds_derived_from_success_and_fail(self):
         # DEEDS は成功/失敗の定義から導出＝三者がズレない

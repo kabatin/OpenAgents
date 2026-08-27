@@ -113,11 +113,11 @@ def build_digest(db_path, user_id, away_since):
 
 
 def build_post(days, lines):
-    return (f"おかえりなさいっス！{days}日ぶりっスね🙌 "
-            "留守の間にあったことをまとめておいたっス:\n"
+    return (f"おかえりなさい！{days}日ぶりですね🙌 "
+            "留守の間にあったことをまとめておきました:\n"
             + "\n".join(lines)
-            + "\n-# 詳しく知りたいものがあれば聞いてほしいっス"
-              "（この案内は復帰時に1回だけっス）")
+            + "\n-# 詳しく知りたいものがあれば聞いてください"
+              "（この案内は復帰時に1回だけです）")
 
 
 def mark_welcomed(db_path, user_id):

@@ -125,14 +125,14 @@ def check(db_path, new_decision, *, model, invoke_fn=None):
 
 def build_proposal(new_decision, impacts):
     lines = [f"🌊 新しい決定「{new_decision['decision'][:60]}」で"
-             "影響が出そうな記録があるっス:"]
+             "影響が出そうな記録があります:"]
     for it in impacts:
         lines.append(f"- [{KINDS[it['kind']]} id={it['id']}] {it['why']}")
     has_dec = any(it["kind"] == "decision" for it in impacts)
-    tail = ("✅で矛盾する旧決定を上書き済みにするっス"
-            if has_dec else "✅で確認済みにするっス")
+    tail = ("✅で矛盾する旧決定を上書き済みにします"
+            if has_dec else "✅で確認済みにします")
     lines.append(f"-# 管理者の{tail}／タスク・リマインダーの付け替えは"
-                 "内容を教えてもらえれば直すっス／❌で誤検知として見送りっス")
+                 "内容を教えてもらえれば直します／❌で誤検知として見送ります")
     return "\n".join(lines)
 
 

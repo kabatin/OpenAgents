@@ -126,7 +126,7 @@ class ReactionHandlersMixin:
                 channel = (self.get_channel(payload.channel_id)
                            or await self.fetch_channel(payload.channel_id))
                 await channel.send(
-                    f"-# 📗 タスク完了として記録したっス: {item['task'][:60]}",
+                    f"-# 📗 タスク完了として記録しました: {item['task'][:60]}",
                     allowed_mentions=ALLOWED_MENTIONS)
         elif emoji == "❌" and str(payload.user_id) in ADMIN_IDS:
             n = await asyncio.to_thread(
@@ -136,7 +136,7 @@ class ReactionHandlersMixin:
                 channel = (self.get_channel(payload.channel_id)
                            or await self.fetch_channel(payload.channel_id))
                 await channel.send(
-                    f"-# 🗑 この議事録のタスク追跡{n}件を取り消したっス",
+                    f"-# 🗑 この議事録のタスク追跡{n}件を取り消しました",
                     allowed_mentions=ALLOWED_MENTIONS)
 
     async def _maybe_event_reaction(self, payload):
@@ -154,15 +154,15 @@ class ReactionHandlersMixin:
                 channel = (self.get_channel(payload.channel_id)
                            or await self.fetch_channel(payload.channel_id))
                 await channel.send(
-                    f"-# 🗓️ 逆算スケジュール{n}件を納期追跡に載せたっス"
-                    "（期日2日前と当日に声かけするっスね）",
+                    f"-# 🗓️ 逆算スケジュール{n}件を納期追跡に載せました"
+                    "（期日2日前と当日に声かけします）",
                     allowed_mentions=ALLOWED_MENTIONS)
         elif emoji == "❌":
             if await asyncio.to_thread(
                     event_planner.dismiss, DB_PATH, payload.message_id):
                 channel = (self.get_channel(payload.channel_id)
                            or await self.fetch_channel(payload.channel_id))
-                await channel.send("-# 🗓️ 逆算案は見送りにしたっス",
+                await channel.send("-# 🗓️ 逆算案は見送りにしました",
                                    allowed_mentions=ALLOWED_MENTIONS)
 
     async def _maybe_rule_review_reaction(self, payload):
@@ -177,14 +177,14 @@ class ReactionHandlersMixin:
             if n is not None:
                 channel = (self.get_channel(payload.channel_id)
                            or await self.fetch_channel(payload.channel_id))
-                await channel.send(f"-# 🧹 ルール{n}件を無効化したっス",
+                await channel.send(f"-# 🧹 ルール{n}件を無効化しました",
                                    allowed_mentions=ALLOWED_MENTIONS)
         elif emoji == "❌":
             if await asyncio.to_thread(
                     rule_distill.dismiss, DB_PATH, payload.message_id):
                 channel = (self.get_channel(payload.channel_id)
                            or await self.fetch_channel(payload.channel_id))
-                await channel.send("-# 🧹 棚卸しは今回見送りっス",
+                await channel.send("-# 🧹 棚卸しは今回見送ります",
                                    allowed_mentions=ALLOWED_MENTIONS)
 
     async def _maybe_auto_proposal_reaction(self, payload):
@@ -202,14 +202,14 @@ class ReactionHandlersMixin:
                            or await self.fetch_channel(payload.channel_id))
                 nums = "、".join(f"#{i}" for i in ids)
                 await channel.send(
-                    f"-# 🧩 起票{nums}を作ったっス（開発BOTが拾って提案するっスよ）",
+                    f"-# 🧩 起票{nums}を作りました（開発BOTが拾って提案します）",
                     allowed_mentions=ALLOWED_MENTIONS)
         elif emoji == "❌":
             if await asyncio.to_thread(
                     auto_discover.dismiss, DB_PATH, payload.message_id):
                 channel = (self.get_channel(payload.channel_id)
                            or await self.fetch_channel(payload.channel_id))
-                await channel.send("-# 🤖 自動化案は見送りっス",
+                await channel.send("-# 🤖 自動化案は見送ります",
                                    allowed_mentions=ALLOWED_MENTIONS)
 
     async def _maybe_graduation_reaction(self, payload):
@@ -226,7 +226,7 @@ class ReactionHandlersMixin:
                 channel = (self.get_channel(payload.channel_id)
                            or await self.fetch_channel(payload.channel_id))
                 await channel.send(
-                    "-# 🎓 全体ルールに格上げしたっス（助言枠が1つ空いたっス）",
+                    "-# 🎓 全体ルールに格上げしました（助言枠が1つ空きました）",
                     allowed_mentions=ALLOWED_MENTIONS)
         elif emoji == "❌":
             if await asyncio.to_thread(
@@ -234,7 +234,7 @@ class ReactionHandlersMixin:
                     payload.message_id):
                 channel = (self.get_channel(payload.channel_id)
                            or await self.fetch_channel(payload.channel_id))
-                await channel.send("-# 🎓 格上げは見送りっス（助言のまま続けるっス）",
+                await channel.send("-# 🎓 格上げは見送ります（助言のまま続けます）",
                                    allowed_mentions=ALLOWED_MENTIONS)
 
     async def _maybe_ripple_reaction(self, payload):
@@ -249,8 +249,8 @@ class ReactionHandlersMixin:
             if n is not None:
                 channel = (self.get_channel(payload.channel_id)
                            or await self.fetch_channel(payload.channel_id))
-                note = (f"旧決定{n}件を上書き済みにしたっス" if n
-                        else "確認済みにしたっス")
+                note = (f"旧決定{n}件を上書き済みにしました" if n
+                        else "確認済みにしました")
                 await channel.send(f"-# 🌊 {note}",
                                    allowed_mentions=ALLOWED_MENTIONS)
         elif emoji == "❌":
@@ -258,8 +258,8 @@ class ReactionHandlersMixin:
                     ripple.dismiss, DB_PATH, payload.message_id):
                 channel = (self.get_channel(payload.channel_id)
                            or await self.fetch_channel(payload.channel_id))
-                await channel.send("-# 🌊 誤検知として見送りっス"
-                                   "（教訓として覚えるっス）",
+                await channel.send("-# 🌊 誤検知として見送ります"
+                                   "（教訓として覚えておきます）",
                                    allowed_mentions=ALLOWED_MENTIONS)
 
     async def _maybe_share_reaction(self, payload):
@@ -275,15 +275,15 @@ class ReactionHandlersMixin:
                 channel = (self.get_channel(payload.channel_id)
                            or await self.fetch_channel(payload.channel_id))
                 await channel.send(
-                    f"-# 📚 ルール{n}件を全体ルールに昇格したっス"
-                    "（みんなに共有されるっス）",
+                    f"-# 📚 ルール{n}件を全体ルールに昇格しました"
+                    "（みんなに共有されます）",
                     allowed_mentions=ALLOWED_MENTIONS)
         elif emoji == "❌":
             if await asyncio.to_thread(
                     study_group.dismiss, DB_PATH, payload.message_id):
                 channel = (self.get_channel(payload.channel_id)
                            or await self.fetch_channel(payload.channel_id))
-                await channel.send("-# 📚 共有は見送りっス",
+                await channel.send("-# 📚 共有は見送ります",
                                    allowed_mentions=ALLOWED_MENTIONS)
 
     async def _record_reaction(self, payload, added):

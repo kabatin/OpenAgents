@@ -65,7 +65,7 @@ def build_pack(data, *, guild_id, minutes_channel_id, today, hour):
     decisions_ = data.get("decisions") or []
     if not open_items and not decisions_:
         return None
-    lines = [f"📚 今日{hour}時の定例向け・予習パックっス"]
+    lines = [f"📚 今日{hour}時の定例向け・予習パックです"]
     if open_items:
         lines.append(f"**前回からの未完了タスク（{len(open_items)}件）**")
         for it in open_items[:MAX_ITEMS]:
@@ -74,7 +74,7 @@ def build_pack(data, *, guild_id, minutes_channel_id, today, hour):
             lines.append(f"- {it['task'][:60]}（{it['owners']} ／ {mark}）")
         if len(open_items) > MAX_ITEMS:
             lines.append(f"-# 他{len(open_items) - MAX_ITEMS}件は `✅` 済みか"
-                         "確認してほしいっス")
+                         "確認してください")
     if decisions_:
         lines.append("**最近の決定事項**")
         for d in decisions_:

@@ -99,8 +99,8 @@ def fetch(keywords, *, model, invoke_fn=None, now=None):
 def build_post(items):
     if not items:
         return None
-    lines = ["📰 今週の業界ニュースっス（うちに関係ありそうなのだけ）:"]
+    lines = ["📰 今週の業界ニュースです（関係ありそうなものだけ）:"]
     for it in items:
         lines.append(f"- **{it['title']}** — {it['why']}\n  {it['url']}")
-    lines.append("-# 週1でお届けするっス。要らなければ言ってほしいっス")
+    lines.append("-# 週1でお届けします。要らなければ言ってください")
     return "\n".join(lines)

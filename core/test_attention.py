@@ -208,7 +208,7 @@ class RecheckTest(AttentionTestBase):
     def test_build_message_has_soft_landing(self):
         text = attention.build_message("どうします?")
         self.assertIn("どうします?", text)
-        self.assertIn("スルーで大丈夫", text)
+        self.assertIn("ご放念", text)
 
 
 if __name__ == "__main__":

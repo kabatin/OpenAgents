@@ -138,7 +138,7 @@ class ProphecyTest(TestBase):
              "verdicts": [{"index": 1, "hit": False, "note": "未完"}]},
             {"hit": 3, "total": 5})
         self.assertIn("❌ 発注完了", post)
-        self.assertIn("封印したっス", post)
+        self.assertIn("封印しました", post)
         self.assertIn("通算的中率 60%", post)
 
 

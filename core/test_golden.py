@@ -57,12 +57,12 @@ class QualityGateTest(unittest.TestCase):
             self.assertEqual(db.count_golden(conn), 0)
 
     def test_praise_question_not_captured(self):
-        self._pair(20, 21, "加点！", "リマインダーの複数宛先対応が入ったっス")
+        self._pair(20, 21, "加点！", "リマインダーの複数宛先対応が入りました")
         self.assertFalse(golden.capture(self.db_path, "agent1", 21))
 
     def test_real_qa_still_captured(self):
         self._pair(30, 31, "リマインドリストを見せて",
-                   "現在のリマインダーはこれっス📋 id=42…")
+                   "現在のリマインダーはこれです📋 id=42…")
         self.assertTrue(golden.capture(self.db_path, "agent1", 31))
         with db.connect(self.db_path) as conn:
             self.assertEqual(db.count_golden(conn, active_only=True), 1)
@@ -70,7 +70,7 @@ class QualityGateTest(unittest.TestCase):
     def test_audit_disables_dirty_rows(self):
         """既存の汚れた行を仕分ける（第2段）。"""
         self._pair(40, 41, "正しい質問ですこれは長さも十分",
-                   "正しい回答っス")
+                   "正しい回答です")
         self._pair(50, 51, "こちらも十分な長さの質問です",
                    "📰 今週の業界ニュース", unsolicited=True)
         with db.connect(self.db_path) as conn:   # ゲート前の状態を再現
@@ -81,7 +81,7 @@ class QualityGateTest(unittest.TestCase):
                               source_answer_id=a, channel_id=7,
                               created_at="t")
             db.add_golden(conn, agent_id="agent1", question="加点！",
-                          answer="どうもっス", source_answer_id=999,
+                          answer="どうもです", source_answer_id=999,
                           channel_id=7, created_at="t")
             self.assertEqual(db.count_golden(conn), 3)
         result = golden.audit_existing(self.db_path)
@@ -101,14 +101,14 @@ class AutoPostGateTest(unittest.TestCase):
 
     def test_auto_post_prefixes(self):
         for a in ["📊 今週の自発活動レポート（07/31〜）",
-                  "⏰ <@1> リマインドっスよ: 告知画像作成",
-                  "🌙 今日の自己監査っス",
+                  "⏰ <@1> リマインドです: 告知画像作成",
+                  "🌙 今日の自己監査です",
                   "🗞 **ヤルキマン新聞**",
-                  "🌊 新しい決定「…」で影響が出そうな記録があるっス"]:
+                  "🌊 新しい決定「…」で影響が出そうな記録があります"]:
             self.assertTrue(golden.is_auto_post(a), a)
 
     def test_normal_answers_pass(self):
-        for a in ["了解っス、8/6朝にリマインドセットするっス📝",
-                  "今わかる分だとこれっス📋\n| id | 頻度 |",
-                  "ID:105のurlに追加するっスね。"]:
+        for a in ["了解です、8/6朝にリマインドをセットします📝",
+                  "今わかる分だとこれです📋\n| id | 頻度 |",
+                  "ID:105のurlに追加しますね。"]:
             self.assertFalse(golden.is_auto_post(a), a)

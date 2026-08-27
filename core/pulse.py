@@ -62,10 +62,10 @@ def tally(counts):
 
 
 def build_post(prev_avg, prev_votes, month_label):
-    lines = [f"📮 {month_label}の満足度パルスっス！"
+    lines = [f"📮 {month_label}の満足度パルスです！"
              "今月のAIエージェントたちの働き、5段階でどうでしたか？",
-             "-# このメッセージに 1️⃣〜5️⃣ のリアクションで投票してほしいっス"
-             "（1タップ・匿名じゃないっスけど気軽に）"]
+             "-# このメッセージに 1️⃣〜5️⃣ のリアクションで投票してください"
+             "（1タップ・匿名ではありませんが気軽に）"]
     if prev_votes:
         lines.append(f"-# 先月は 平均⭐{prev_avg:.1f}（{prev_votes}票）でした。"
                      "ありがとうございました！")

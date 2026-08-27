@@ -104,8 +104,8 @@ def build_chart(org, updated_at):
             role = f": {h['role']}" if h["role"] else ""
             lines.append(f"- {h['name']}{role}")
     lines.append("")
-    lines.append(f"-# {updated_at} 時点の自動生成っス。"
-                 "違ってたら教えてもらえれば直すっス（次回から反映されるっス）")
+    lines.append(f"-# {updated_at} 時点の自動生成です。"
+                 "違っていたら教えてもらえれば直します（次回から反映されます）")
     return "\n".join(lines)
 
 
@@ -165,10 +165,10 @@ def checkup(name, persona_text, utterances, *, model, invoke_fn=None):
 
 def build_checkup_post(results):
     """全エージェント分の健診結果（純粋関数）。"""
-    lines = ["🩺 人格の定期健診っス（宣言してる人格と実際の発言のズレ確認）"]
+    lines = ["🩺 人格の定期健診です（宣言している人格と実際の発言のズレ確認）"]
     for name, finding in results:
         lines.append(f"**{name}**")
-        lines.append(finding or "（発言サンプルが足りず判定できなかったっス）")
-    lines.append("-# 人格ファイルを直すかは管理者判断っス"
-                 "（あたしたちは提案までっス）")
+        lines.append(finding or "（発言サンプルが足りず判定できませんでした）")
+    lines.append("-# 人格ファイルを直すかは管理者判断です"
+                 "（エージェント側は提案までです）")
     return "\n".join(lines)

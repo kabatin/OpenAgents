@@ -115,11 +115,11 @@ def discover(db_path, *, model, invoke_fn=None, now=None):
 
 
 def build_post(ideas):
-    lines = ["🤖 定型作業の自動化アイデアっス（記録から見つけたっス）:"]
+    lines = ["🤖 定型作業の自動化アイデアです（記録から見つけました）:"]
     for i, idea in enumerate(ideas, 1):
         lines.append(f"{i}. **{idea['title']}** — {idea['desc']}")
-    lines.append("-# 管理者の👍で起票するっス（開発BOTちゃんが拾って"
-                 "「着手しますか？」って聞いてくれるっスよ）／❌で見送りっス")
+    lines.append("-# 管理者の👍で起票します（開発BOTが拾って"
+                 "「着手しますか？」と聞いてくれます）／❌で見送ります")
     return "\n".join(lines)
 
 

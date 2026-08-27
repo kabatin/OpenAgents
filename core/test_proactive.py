@@ -193,15 +193,15 @@ class GateReplyTest(unittest.TestCase):
 
     def test_citation_required_kinds_need_link(self):
         for kind in proactive.CITE_REQUIRED_KINDS:
-            text, note = proactive.gate_reply("納期は金曜っス", kind)
+            text, note = proactive.gate_reply("納期は金曜です", kind)
             self.assertIsNone(text, kind)
             self.assertIn("出典", note)
-            text, _ = proactive.gate_reply(f"納期は金曜っス {LINK}", kind)
+            text, _ = proactive.gate_reply(f"納期は金曜です {LINK}", kind)
             self.assertIsNotNone(text, kind)
 
     def test_assist_allows_no_link(self):
-        text, _ = proactive.gate_reply("こうすると直るっスよ", "assist")
-        self.assertEqual(text, "こうすると直るっスよ")
+        text, _ = proactive.gate_reply("こうすると直りますよ", "assist")
+        self.assertEqual(text, "こうすると直りますよ")
 
     def test_truncates_overlong_reply(self):
         text, _ = proactive.gate_reply("あ" * 3000 + LINK, "assist")
@@ -239,8 +239,8 @@ class DecideReplyTest(ProactiveTestBase):
         text, _ = proactive.decide_reply(
             self.db_path, "1", "agent1", cand, self.TRIGGER,
             persona="", agent_name="エージェント1",
-            invoke_fn=lambda p: "手伝えるっスよ", search_fn=lambda kws: [])
-        self.assertEqual(text, "手伝えるっスよ")
+            invoke_fn=lambda p: "手伝えますよ", search_fn=lambda kws: [])
+        self.assertEqual(text, "手伝えますよ")
 
     def test_model_silent_respected(self):
         text, note = self._decide(search_rows=[self.HIT], reply="[SILENT]")
@@ -249,11 +249,11 @@ class DecideReplyTest(ProactiveTestBase):
 
     def test_reply_with_citation_passes_gate(self):
         text, _ = self._decide(search_rows=[self.HIT],
-                               reply=f"納期は8/8っス {LINK}")
+                               reply=f"納期は8/8です {LINK}")
         self.assertIn("8/8", text)
 
     def test_reply_without_citation_is_silenced(self):
-        text, note = self._decide(search_rows=[self.HIT], reply="納期は8/8っス")
+        text, note = self._decide(search_rows=[self.HIT], reply="納期は8/8です")
         self.assertIsNone(text)
         self.assertIn("出典", note)
 
@@ -339,8 +339,8 @@ class QuotaOverrideTest(ProactiveTestBase):
 
     def test_quota_marker_extract(self):
         text, reqs = proactive.extract_quota_markers(
-            "了解っス！\n[PROACTIVE_QUOTA: agent2 2]")
-        self.assertEqual(text, "了解っス！")
+            "了解です！\n[PROACTIVE_QUOTA: agent2 2]")
+        self.assertEqual(text, "了解です！")
         self.assertEqual(reqs, [("agent2", 2)])
         text, reqs = proactive.extract_quota_markers("マーカーなし")
         self.assertEqual(reqs, [])
@@ -601,7 +601,7 @@ class OthersShadowTest(unittest.TestCase):
     def test_parse_others(self):
         raw = ('{"candidates": [], "decisions": [], "handoff": [], '
                '"others": [{"message_id": 1, "would_say": "前回は緑基調で'
-               '好評でしたっス", "why": "過去の配色評価が参考になる"}]}')
+               '好評でした", "why": "過去の配色評価が参考になる"}]}')
         got = proactive.parse_screen_others(raw, {1, 2})
         self.assertEqual(len(got), 1)
         self.assertEqual(got[0]["message_id"], 1)

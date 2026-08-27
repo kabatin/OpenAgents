@@ -131,7 +131,7 @@ class StaleWatchTest(TestBase):
                                created_at="t")
         ch = stale_watch.find_stale_channel(self.db_path)
         self.assertEqual(ch["channel_id"], 7)
-        self.assertIn("止まってる", stale_watch.build_text(ch))
+        self.assertIn("止まっている", stale_watch.build_text(ch))
 
     def test_no_project_signal_is_ignored(self):
         with db.connect(self.db_path) as conn:

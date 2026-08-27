@@ -36,12 +36,12 @@ class RulesParseTest(unittest.TestCase):
 
 class RulesExtractMarkersTest(unittest.TestCase):
     def test_extracts_and_strips_all(self):
-        ans = ("了解っス、以降そうするっスね。\n"
+        ans = ("了解です、以降そうしますね。\n"
                "[RULE: channel | 緊急と書かれたらメンション]\n"
                "[RULE_CANCEL: 5]\n"
                "[CAPABILITY: 動画の書き出し機能]")
         text, adds, cancels, caps, errs = rules.extract_markers(ans)
-        self.assertEqual(text, "了解っス、以降そうするっスね。")
+        self.assertEqual(text, "了解です、以降そうしますね。")
         self.assertEqual(len(adds), 1)
         self.assertEqual(adds[0]["scope"], "channel")
         self.assertEqual(cancels, [5])

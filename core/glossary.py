@@ -43,9 +43,9 @@ def extract_markers(answer):
     for m in GLOSSARY_MARKER_RE.finditer(text):
         wrong, correct = m.group(1).strip(), m.group(2).strip()
         if not wrong or not correct or wrong == correct:
-            errors.append(f"単語帳の指定が不正っス: {wrong!r}→{correct!r}")
+            errors.append(f"単語帳の指定が不正です: {wrong!r}→{correct!r}")
         elif len(wrong) > MAX_TERM_LEN or len(correct) > MAX_TERM_LEN:
-            errors.append(f"単語が長すぎるっス（{MAX_TERM_LEN}字以内）")
+            errors.append(f"単語が長すぎます（{MAX_TERM_LEN}字以内）")
         else:
             adds.append((wrong, correct))
     cancels = [c.strip() for c in GLOSSARY_CANCEL_RE.findall(text)
@@ -98,9 +98,9 @@ def extract_term_markers(answer):
         term = m.group(1).strip()
         desc = (m.group(2) or "").strip()
         if not term:
-            errors.append("固有名詞が空っス")
+            errors.append("固有名詞が空です")
         elif len(term) > MAX_TERM_LEN or len(desc) > MAX_DESC_LEN:
-            errors.append(f"固有名詞/説明が長すぎるっス"
+            errors.append(f"固有名詞/説明が長すぎます"
                           f"（{MAX_TERM_LEN}/{MAX_DESC_LEN}字以内）")
         else:
             adds.append({"term": term, "description": desc})

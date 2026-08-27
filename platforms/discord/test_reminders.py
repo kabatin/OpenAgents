@@ -24,8 +24,8 @@ class ExtractRemindMarkersTest(unittest.TestCase):
 
     def test_once(self):
         text, adds, _, errors = reminders.extract_markers(
-            "了解っス！\n[REMIND: 2026-07-04T09:00 | once | ゴミ出し]")
-        self.assertEqual(text, "了解っス！")
+            "了解です！\n[REMIND: 2026-07-04T09:00 | once | ゴミ出し]")
+        self.assertEqual(text, "了解です！")
         self.assertEqual(errors, [])
         self.assertEqual(adds[0]["due"], datetime(2026, 7, 4, 9, 0))
         self.assertEqual(adds[0]["repeat"], "once")
@@ -65,8 +65,8 @@ class ExtractRemindMarkersTest(unittest.TestCase):
 
     def test_invalid_datetime_becomes_error_and_marker_removed(self):
         text, adds, _, errors = reminders.extract_markers(
-            "登録したっス！\n[REMIND: あした9じ | once | ゴミ出し]")
-        self.assertEqual(text, "登録したっス！")  # 生マーカーは残らない
+            "登録しました！\n[REMIND: あした9じ | once | ゴミ出し]")
+        self.assertEqual(text, "登録しました！")  # 生マーカーは残らない
         self.assertEqual(adds, [])
         self.assertEqual(len(errors), 1)
 
@@ -78,8 +78,8 @@ class ExtractRemindMarkersTest(unittest.TestCase):
 
     def test_cancel_multiple(self):
         text, _, cancels, _ = reminders.extract_markers(
-            "全部止めるっスね\n[REMIND_CANCEL: 3]\n[REMIND_CANCEL: 7]")
-        self.assertEqual(text, "全部止めるっスね")
+            "全部止めますね\n[REMIND_CANCEL: 3]\n[REMIND_CANCEL: 7]")
+        self.assertEqual(text, "全部止めますね")
         self.assertEqual(cancels, [3, 7])
 
     def test_marker_only_empty_text(self):

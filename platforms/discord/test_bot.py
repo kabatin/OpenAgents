@@ -132,7 +132,7 @@ class ShouldWebhookRespondTest(unittest.TestCase):
         kw = dict(has_webhook_agents=True, home_agent_id="keiri",
                   webhook_id=None, author_is_bot=False, author_id=100,
                   self_user_id=999, mention_ids=[], registered_ids={999, 998},
-                  text="質問っス")
+                  text="質問です")
         kw.update(over)
         return agent_runtime.should_webhook_respond(**kw)
 

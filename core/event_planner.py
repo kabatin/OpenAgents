@@ -160,12 +160,12 @@ def plan(event, db_path, *, model=search.DEFAULT_MODEL, invoke_fn=None,
 def build_proposal(event, milestones):
     """提案メッセージ本文（純粋関数）。"""
     lines = [f"🗓️ 「{event['name']}」（{event['event_date']}開催）の"
-             "逆算スケジュール案っス:"]
+             "逆算スケジュール案です:"]
     for i, ms in enumerate(milestones, 1):
         lines.append(f"{i}. {ms['task']} → **{ms['due_date']}** "
                      f"（{ms['owners']}）")
     lines.append("-# 管理者の✅でこのまま納期追跡（2日前・当日の声かけ）に"
-                 "載せるっス／❌で見送りっス")
+                 "載せます／❌で見送ります")
     return "\n".join(lines)
 
 

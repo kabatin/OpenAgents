@@ -130,7 +130,7 @@ class RunnerPlumbingTest(unittest.TestCase):
 
         def fake(prompt, **kwargs):
             self.calls.append(kwargs)
-            return FakeInvokeResult("答えっス", "sess-9")
+            return FakeInvokeResult("答えです", "sess-9")
         runner_answer.invoke_claude.invoke = fake
 
     def tearDown(self):

@@ -217,11 +217,11 @@ def distill_full(db_path, agent_id, *, model, invoke_fn=None, now=None):
 
 def build_graduation_post(graduate):
     """卒業提案の本文（純粋関数）。定着した癖は恒久ルールへ。"""
-    return (f"🎓 この心がけ、{graduate['streak']}週連続で同じ反省が出てるっス:\n"
+    return (f"🎓 この心がけ、{graduate['streak']}週連続で同じ反省が出ています:\n"
             f"> {graduate['text']}\n"
             "-# 一時的な癖じゃなく**定着した課題**っぽいので、"
-            "✅で全体ルールに格上げして助言枠を空けるっス"
-            "（❌なら助言のまま続けるっス）")
+            "✅で全体ルールに格上げして助言枠を空けます"
+            "（❌なら助言のまま続けます）")
 
 
 def promote(db_path, message_id, admin_id):

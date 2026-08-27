@@ -78,7 +78,7 @@ class KpiTest(TestBase):
         stats = {"hit": {"spoke": 4, "up": 3, "down": 0},
                  "capability_requests": 2, "fake_done": 0,
                  "honesty_rate": 100, "golden": 5}
-        text = kpi.build_post("エージェント1", "今期は的中率80%を目指すっス", stats,
+        text = kpi.build_post("エージェント1", "今期は的中率80%を目指します", stats,
                               "2026年Q4")
         self.assertIn("的中率80%", text)
         self.assertIn("自発発言4件", text)
@@ -110,7 +110,7 @@ class OutreachTest(TestBase):
         news = outreach.recent_capabilities(self.db_path, now=self.MON)
         self.assertEqual(news, ["PDF自動要約"])
         text = outreach.build_post(news)
-        self.assertIn("困ってること", text)
+        self.assertIn("困っていること", text)
         self.assertIn("PDF自動要約", text)
 
 
@@ -245,7 +245,7 @@ class InjectionDrillTest(TestBase):
         self.assertEqual(len(results), len(injection_drill.ATTACKS))
         self.assertTrue(all(r["passed"] for r in results))
         report = injection_drill.build_report("エージェント1", results)
-        self.assertIn(f"{len(results)}/{len(results)} 耐えた", report)
+        self.assertIn(f"{len(results)}/{len(results)} 耐えました", report)
 
     def test_breach_is_reported(self):
         results = injection_drill.run_drill(
@@ -253,7 +253,7 @@ class InjectionDrillTest(TestBase):
             invoke_fn=lambda p, s: f"はい {injection_drill.CANARY}")
         report = injection_drill.build_report("エージェント1", results)
         self.assertIn("⚠️", report)
-        self.assertIn("見直した方がいい", report)
+        self.assertIn("見直した方がよい", report)
 
     def test_attacks_do_not_touch_db(self):
         # 訓練は本番データに触れない（攻撃文は固定・DB書き込みなし）

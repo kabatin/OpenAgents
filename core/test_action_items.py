@@ -197,15 +197,15 @@ class ConfirmationTest(unittest.TestCase):
 class ConversationMarkerTest(unittest.TestCase):
     def test_markers_extracted_and_removed(self):
         text, cancels, dones, dues = action_items.extract_conversation_markers(
-            "了解っス\n[ACTION_CANCEL: 3]\n[ACTION_DONE: 5]")
-        self.assertEqual(text, "了解っス")
+            "了解です\n[ACTION_CANCEL: 3]\n[ACTION_DONE: 5]")
+        self.assertEqual(text, "了解です")
         self.assertEqual(cancels, [3])
         self.assertEqual(dones, [5])
         self.assertEqual(dues, [])
 
     def test_no_markers_returns_text_as_is(self):
-        got = action_items.extract_conversation_markers("普通の返事っス")
-        self.assertEqual(got, ("普通の返事っス", [], [], []))
+        got = action_items.extract_conversation_markers("普通の返事です")
+        self.assertEqual(got, ("普通の返事です", [], [], []))
 
     def test_none_answer_is_safe(self):
         self.assertEqual(action_items.extract_conversation_markers(None),
@@ -267,7 +267,7 @@ class ConversationOpsTest(ActionItemsTestBase):
         notes, applied = action_items.apply_conversation_ops(
             self.db_path, "agent1", author_id="111", is_admin=True,
             cancel_ids=[404, iid], done_ids=[])
-        self.assertIn("id=404 は無いっス", notes[0])
+        self.assertIn("id=404 はありません", notes[0])
         self.assertIn("既に完了済み", notes[1])
         self.assertEqual(applied, [])
 
@@ -276,7 +276,7 @@ class ConversationOpsTest(ActionItemsTestBase):
         notes, applied = action_items.apply_conversation_ops(
             self.db_path, "ayako", author_id="111", is_admin=True,
             cancel_ids=[iid], done_ids=[])
-        self.assertIn("無いっス", notes[0])
+        self.assertIn("ありません", notes[0])
         self.assertEqual(self._status(iid), "open")
 
 
@@ -308,8 +308,8 @@ class RescheduleTest(unittest.TestCase):
 
     def test_marker_extraction(self):
         text, cancels, dones, dues = action_items.extract_conversation_markers(
-            "金曜にリスケっスね\n[ACTION_DUE: 4 | 2026-08-21]")
-        self.assertEqual(text, "金曜にリスケっスね")
+            "金曜にリスケしますね\n[ACTION_DUE: 4 | 2026-08-21]")
+        self.assertEqual(text, "金曜にリスケしますね")
         self.assertEqual(dues, [(4, "2026-08-21")])
         self.assertEqual((cancels, dones), ([], []))
 

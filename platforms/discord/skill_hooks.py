@@ -78,7 +78,7 @@ class SkillHooksMixin:
         except Exception as e:
             print(f"[{self.agent['id']}] youtube summary failed: {e}")
             await message.channel.send(
-                f"⚠️ 動画の要約に失敗したっス: {str(e)[:200]}")
+                f"⚠️ 動画の要約に失敗しました: {str(e)[:200]}")
         return True
 
     async def _maybe_pdf_summary(self, message):
@@ -115,7 +115,7 @@ class SkillHooksMixin:
         except Exception as e:
             print(f"[{self.agent['id']}] pdf summary failed: {e}")
             await message.channel.send(
-                f"⚠️ PDFの自動要約に失敗したっス: {str(e)[:200]}")
+                f"⚠️ PDFの自動要約に失敗しました: {str(e)[:200]}")
         finally:
             attachments.cleanup(tmpdir)
         return True

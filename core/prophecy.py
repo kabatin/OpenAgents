@@ -40,7 +40,7 @@ def build_seal_prompt(period, context_lines):
     listing = "\n".join(f"- {c}" for c in context_lines[:30]) or "（材料なし）"
     return (
         f"社内の記録をもとに、{period} に起きそうなことを予測して封印する"
-        "（当たっても外れても実害はない実験っス）。\n\n"
+        "（当たっても外れても実害はない実験です）。\n\n"
         f"【最近の記録】\n{listing}\n\n"
         "ルール:\n"
         f"- 予測は最大{MAX_ITEMS}件。翌月に「当たった/外れた」を判定できる"
@@ -164,7 +164,7 @@ def build_post(sealed, opened, accuracy):
     lines = []
     if opened:
         hits = sum(1 for v in opened["verdicts"] if v["hit"])
-        lines.append(f"📜 {opened['period']}の予言、開封するっス！"
+        lines.append(f"📜 {opened['period']}の予言、開封します！"
                      f"（{hits}/{len(opened['preds'])} 的中）")
         by_idx = {v["index"]: v for v in opened["verdicts"]}
         for i, p in enumerate(opened["preds"], 1):
@@ -173,7 +173,7 @@ def build_post(sealed, opened, accuracy):
             note = f"（{v['note']}）" if v and v["note"] else ""
             lines.append(f"{mark} {p['text']}{note}")
     if sealed:
-        lines.append("✉️ 今月の予言を封印したっス（来月開封するっス）:")
+        lines.append("✉️ 今月の予言を封印しました（来月開封します）:")
         for p in sealed:
             lines.append(f"- {p['text']}")
     if accuracy and accuracy["total"]:

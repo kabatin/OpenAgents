@@ -72,7 +72,7 @@ def find_stale_channel(db_path, *, exclude_channel_ids=(), home_channel_id=0,
 
 
 def build_text(ch, quiet_days=QUIET_DAYS):
-    return (f"このチャンネル、{quiet_days}日ほど動きが止まってるみたいっスけど、"
-            f"状況どうっスか？追跡中の宿題・タスクが{ch['open_signals']}件"
+    return (f"このチャンネル、{quiet_days}日ほど動きが止まっているようですが、"
+            f"状況はいかがですか？追跡中の宿題・タスクが{ch['open_signals']}件"
             "残ってるので、完了してたら✅、続いてるなら一言もらえると"
-            "安心っス🙋")
+            "安心です🙋")

@@ -108,11 +108,11 @@ def distill(db_path, *, model, invoke_fn=None, now=None):
 
 
 def build_proposal_text(proposals):
-    lines = ["🧹 ルールの棚卸し提案っス（増えてきたので整理したいっス）:"]
+    lines = ["🧹 ルールの棚卸し提案です（増えてきたので整理したいです）:"]
     for i, p in enumerate(proposals, 1):
         lines.append(f"{i}. id={p['rule_id']}「{p['rule_text'][:50]}」"
                      f"→ 無効化（{p['reason']}）")
-    lines.append("-# 管理者の✅でまとめて無効化するっス／❌で今回は見送りっス")
+    lines.append("-# 管理者の✅でまとめて無効化します／❌で今回は見送ります")
     return "\n".join(lines)
 
 

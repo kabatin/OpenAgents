@@ -85,13 +85,13 @@ class CheckupTest(TestBase):
                            is_bot=True)
             for i in range(3):
                 db.insert_message(conn, id=i + 1, channel_id=1, author_id=99,
-                                  content=f"了解っス{i}", created_at="t")
+                                  content=f"了解です{i}", created_at="t")
         utt = org_chart.sample_utterances(self.db_path, 99)
         self.assertEqual(len(utt), 3)
-        prompt = org_chart.build_checkup_prompt("エージェント1", "語尾は〜っス",
+        prompt = org_chart.build_checkup_prompt("エージェント1", "語尾は〜だね",
                                                 utt)
-        self.assertIn("語尾は〜っス", prompt)
-        self.assertIn("了解っス", prompt)
+        self.assertIn("語尾は〜だね", prompt)
+        self.assertIn("了解です", prompt)
         self.assertIn("提案に留める", prompt)
 
     def test_checkup_without_samples_returns_none(self):
@@ -105,7 +105,7 @@ class CheckupTest(TestBase):
             [("エージェント1", "概ね一致"), ("エージェント2", None)])
         self.assertIn("エージェント1", post)
         self.assertIn("概ね一致", post)
-        self.assertIn("判定できなかった", post)
+        self.assertIn("判定できませんでした", post)
         self.assertIn("管理者判断", post)
 
 

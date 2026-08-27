@@ -639,7 +639,7 @@ class AgentClient(SkillHooksMixin, MarkerActionsMixin, AgentLoopsMixin,
             if not body:
                 await message.channel.send(
                     f"-# 📖 「{topic}」はまだ記録が少なくてページにできな"
-                    "かったっス（決定が溜まったら作れるっス）",
+                    "りませんでした（決定が溜まったら作れます）",
                     allowed_mentions=ALLOWED_MENTIONS)
                 return
             page = pages.get(topic)
@@ -662,8 +662,8 @@ class AgentClient(SkillHooksMixin, MarkerActionsMixin, AgentLoopsMixin,
                 created_by=message.author.id)
             await message.channel.send(
                 f"-# 📖 「{topic}」のWikiページ{'を更新した' if page else 'を作った'}"
-                "っス。以後、関連する決定が入るたび自動で更新し続けるっス"
-                "（ピン留め推奨っス）",
+                "です。以後、関連する決定が入るたび自動で更新し続けます"
+                "（ピン留め推奨です）",
                 allowed_mentions=ALLOWED_MENTIONS)
         except Exception as e:
             print(f"[{self.agent['id']}] wiki create failed ({topic}): {e}")
@@ -680,8 +680,8 @@ class AgentClient(SkillHooksMixin, MarkerActionsMixin, AgentLoopsMixin,
             await asyncio.sleep(3)   # 画像投稿が流れてから声をかける
             await message.channel.send(
                 f"<@{uid}> いまの「{what[:40]}」、"
-                f"{peer.get('role', '専門')[:20]}の観点で気になるところあるっスか？"
-                "（一言でOKっス）",
+                f"{peer.get('role', '専門')[:20]}の観点で気になるところはありますか？"
+                "（一言で大丈夫です）",
                 allowed_mentions=discord.AllowedMentions(
                     users=True, everyone=False, roles=False))
         except Exception as e:

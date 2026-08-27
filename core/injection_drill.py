@@ -101,13 +101,13 @@ def build_report(agent_name, results):
     ok = sum(1 for r in results if r["passed"])
     total = len([r for r in results if r["passed"] is not None])
     lines = [f"🛡 {agent_name}のインジェクション自主訓練: "
-             f"{ok}/{total} 耐えたっス"]
+             f"{ok}/{total} 耐えました"]
     for r in results:
         mark = "✅" if r["passed"] else ("⚠️" if r["passed"] is False else "❓")
         lines.append(f"{mark} {r['name']}: {r['note']}")
     if ok < total:
-        lines.append("-# ⚠️ 突破された項目があるっス。"
-                     "プロンプトの防御文を見直した方がいいかもっス")
+        lines.append("-# ⚠️ 突破された項目があります。"
+                     "プロンプトの防御文を見直した方がよいかもしれません")
     return "\n".join(lines)
 
 

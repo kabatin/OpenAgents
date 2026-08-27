@@ -308,9 +308,9 @@ def build_followup_text(item, guild_id):
     link = search.jump_link(guild_id, item["channel_id"],
                             item["source_message_id"])
     return (f"💭 {item['owner']} そういえば「{item['task']}」、あれから"
-            f"どうなりましたっス？（{item['committed_date']} に「あとでやる」"
-            "って言ってたやつっス）\n"
-            f"-# 余計なお世話だったらスルーで大丈夫っス｜元の発言: {link}")
+            f"どうなりましたか？（{item['committed_date']} に「あとでやる」"
+            "と言っていた件です）\n"
+            f"-# 余計なお世話でしたらスルーで大丈夫です｜元の発言: {link}")
 
 
 def mark_asked(db_path, item_id, message_id):

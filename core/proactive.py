@@ -882,7 +882,7 @@ def build_weekly_report(stats, roster, since_label):
         if hit.get("spoke"):
             pct = round(100 * hit["up"] / hit["spoke"])
             line += (f"・累計👍率{pct}%（👍{hit['up']}/{hit['spoke']}件"
-                     "・無反応も分母っス）")
+                     "・無反応も分母です）")
         lines.append(line)
         nudge += s.get("nudge", 0)
         track += s.get("track", 0)
@@ -911,10 +911,10 @@ def build_weekly_report(stats, roster, since_label):
                      "（👍回答から自動蓄積）")
     quota_s = "・".join(f"{a['name']} {a['quota']}回/日" for a in roster)
     lines.append(f"-# 現在の枠: {quota_s}。"
-                 "「〇〇の枠を増やして/減らして」で調整できるっス")
+                 "「〇〇の枠を増やして/減らして」で調整できます")
     n_sup = sum(a.get("suppressed", 0) for a in roster)
     if n_sup:
         lines.append(f"-# 👎が続いた型 {n_sup}件の自発発言を"
                      f"{SUPPRESS_WINDOW_DAYS}日間自動で控え中"
-                     "（該当投稿の👎を外すと解除されるっス）")
+                     "（該当投稿の👎を外すと解除されます）")
     return "\n".join(lines)

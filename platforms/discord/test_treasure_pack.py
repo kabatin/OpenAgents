@@ -210,8 +210,8 @@ class ComebackTest(TestBase):
 class WikiTest(TestBase):
     def test_extract_markers(self):
         text, topics = wiki.extract_markers(
-            "作るっス！\n[WIKI: サマーカップ]\n[WIKI: サマーカップ]")
-        self.assertEqual(text, "作るっス！")
+            "作ります！\n[WIKI: サマーカップ]\n[WIKI: サマーカップ]")
+        self.assertEqual(text, "作ります！")
         self.assertEqual(topics, ["サマーカップ"])
 
     def test_compile_needs_material(self):

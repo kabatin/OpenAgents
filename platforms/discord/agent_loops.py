@@ -115,7 +115,7 @@ class AgentLoopsMixin:
         channel = (self.get_channel(int(entry["channel_id"]))
                    or await self.fetch_channel(int(entry["channel_id"])))
         mention = entry.get("mention") or f"<@{entry['user_id']}>"
-        text = f"⏰ {mention} リマインドっスよ: {entry['content']}"
+        text = f"⏰ {mention} リマインドです: {entry['content']}"
         due = reminders.parse_dt(entry["due"])
         if reminders.now_jst() - due >= timedelta(minutes=15):
             text += (f"\n-# 本来 {reminders.fmt_human(due)} 予定"
@@ -373,8 +373,8 @@ class AgentLoopsMixin:
         ref = discord.MessageReference(
             message_id=trigger["id"], channel_id=int(trigger["channel_id"]),
             guild_id=GUILD_ID, fail_if_not_exists=False)
-        text = (f"この話、{target['name']}の得意分野っスね！"
-                f"<@{uid}> さん、良かったら見てもらえるっスか？"
+        text = (f"この話、{target['name']}の得意分野です！"
+                f"<@{uid}> さん、良かったら見てもらえますか？"
                 f"（{handoff['reason']}）")
         posted = await channel.send(
             text, reference=ref,
@@ -488,9 +488,9 @@ class AgentLoopsMixin:
             channel = (self.get_channel(self.home_channel_id)
                        or await self.fetch_channel(self.home_channel_id))
             text = (f"🎨 「{ev['name'][:40]}」（{ev['event_date']}）の"
-                    "逆算プランが確定したっスよ。デザイン系の節目はこの辺っス:\n"
+                    "逆算プランが確定しました。デザイン系の節目はこの辺です:\n"
                     + "\n".join(f"- {ln}" for ln in lines)
-                    + "\n素材の相談はいつでもどうぞっス！")
+                    + "\n素材の相談はいつでもどうぞ！")
             posted = await channel.send(
                 text, allowed_mentions=discord.AllowedMentions.none())
             await asyncio.to_thread(
@@ -940,12 +940,12 @@ class AgentLoopsMixin:
                    or await self.fetch_channel(self.home_channel_id))
         ch_name = hr.ai_channel_name(prop["channel_name"])
         posted = await channel.send(
-            f"🧑‍💼 役割の空白を見つけたっス（{kind}の採用提案）\n"
+            f"🧑‍💼 役割の空白を見つけました（{kind}の採用提案）\n"
             f"**{prop['name']}**（id: {prop['new_id']}） — {prop['role']}\n"
             f"理由: {prop['reason']}\n"
             f"配属先: #{ch_name}（新規作成）\n"
-            "-# 管理者の👍で採用するっス（Webhook人格・試用枠）／"
-            "不要ならスルーでOKっス",
+            "-# 管理者の👍で採用します（Webhook人格・試用枠）／"
+            "不要ならスルーで大丈夫です",
             allowed_mentions=discord.AllowedMentions.none())
 
         def _save():
@@ -1641,6 +1641,7 @@ class AgentLoopsMixin:
         exclude |= {str(a.get("home_channel_id")) for a in AGENTS
                     if a.get("home_channel_id")}
         threshold = int(at.get("threshold", attention.THRESHOLD_DEFAULT))
+        persona = search.load_persona(self.persona_files)
         channels = await asyncio.to_thread(self._attention_channels, exclude)
         for cid in channels:
             def _has_pending(c=cid):
@@ -1659,7 +1660,8 @@ class AgentLoopsMixin:
                 judged = await asyncio.to_thread(
                     attention.score, msgs, agent_name=self.agent["name"],
                     model=cfg.get("screen_model",
-                                  attention.SCREEN_MODEL_DEFAULT))
+                                  attention.SCREEN_MODEL_DEFAULT),
+                    persona=persona)
             if not judged or judged["score"] < threshold:
                 continue
             await asyncio.to_thread(
@@ -1708,7 +1710,8 @@ class AgentLoopsMixin:
                     attention.recheck, DB_PATH, item,
                     agent_name=self.agent["name"],
                     model=self.proactive_cfg.get(
-                        "screen_model", attention.SCREEN_MODEL_DEFAULT))
+                        "screen_model", attention.SCREEN_MODEL_DEFAULT),
+                    persona=search.load_persona(self.persona_files))
             if resolved:
                 await asyncio.to_thread(self._attention_close, item,
                                         "resolved", None)

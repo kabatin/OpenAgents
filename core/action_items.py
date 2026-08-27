@@ -211,16 +211,16 @@ def build_carryover_note(open_items, carried, today):
 
 def build_confirmation(items, skipped_no_due):
     """追跡宣言の文面（純粋関数・メンションは鳴らさない前提で整形）。"""
-    lines = [f"📋 この議事録から期日つきタスク{len(items)}件を追跡するっス:"]
+    lines = [f"📋 この議事録から期日つきタスク{len(items)}件を追跡します:"]
     for i, it in enumerate(items, 1):
         flag = "🔴 " if it.get("urgent") else ""
         lines.append(f"{i}. {flag}{it['task']}（{it['owners']} ／ "
                      f"期日 {it['due_date']}）")
     if skipped_no_due:
         lines.append(f"-# 期日が具体化されていないTODO {skipped_no_due}件は"
-                     "追跡対象外っス（期日が決まったら教えてほしいっス）")
-    lines.append("-# 期日2日前と当日朝に担当の人へ声かけするっス。"
-                 "誤抽出ならこのメッセージに❌で追跡を取り消せるっス")
+                     "追跡対象外です（期日が決まったら教えてください）")
+    lines.append("-# 期日2日前と当日朝に担当の人へ声かけします。"
+                 "誤抽出ならこのメッセージに❌で追跡を取り消せます")
     return "\n".join(lines)
 
 
@@ -260,14 +260,14 @@ def build_nudge_text(item, stage, guild_id):
     """声かけ文面（静的・claude不使用: 定時通知の確実性優先）。"""
     link = search.jump_link(guild_id, item["channel_id"],
                             item["source_message_id"])
-    head = {"before": f"期日（{item['due_date']}）が近いっスよ",
-            "day": f"今日（{item['due_date']}）が期日っス",
-            "overdue": f"期日（{item['due_date']}）を過ぎてるっス"}[stage]
-    tail = ("進捗どうっスか？" if stage != "overdue"
-            else "状況だけでも教えてほしいっス")
+    head = {"before": f"期日（{item['due_date']}）が近づいています",
+            "day": f"今日（{item['due_date']}）が期日です",
+            "overdue": f"期日（{item['due_date']}）を過ぎています"}[stage]
+    tail = ("進捗はいかがですか？" if stage != "overdue"
+            else "状況だけでも教えてください")
     return (f"⏰ {item['owners']} 定例のタスク「{item['task']}」、{head}。"
             f"{tail}\n"
-            f"-# 完了してたらこのメッセージに✅で追跡を終了するっス｜"
+            f"-# 完了していたらこのメッセージに✅で追跡を終了します｜"
             f"元の議事録: {link}")
 
 
@@ -293,7 +293,7 @@ def drop_by_confirm_message(db_path, message_id):
 
 # ------------------------------------------- 会話スキル（キャンセル/完了）
 
-# 実例2026-08-07: 会話で「不要になった」と言われたアーカイブ担当が「キャンセルするっス」
+# 実例2026-08-07: 会話で「不要になった」と言われたアーカイブ担当が「キャンセルします」
 # と答えたが実行手段が無く、期日超過アラートが出続けた。会話からも
 # リアクション（✅/❌）と同じ実挙動に到達できるようマーカーを用意する。
 CANCEL_MARKER_RE = re.compile(r"\[ACTION_CANCEL:\s*(\d+)\s*\]")
@@ -380,22 +380,22 @@ def apply_conversation_ops(db_path, agent_id, *, author_id, is_admin,
         for rid, status in ops:
             item = db.get_action_item(conn, rid, agent_id)
             if item is None:
-                notes.append(f"-# ⚠️ 納期追跡: id={rid} は無いっス")
+                notes.append(f"-# ⚠️ 納期追跡: id={rid} はありません")
                 continue
             if item["status"] != "open":
                 label = _CLOSED_LABELS.get(item["status"], "終了済み")
-                notes.append(f"-# ⚠️ 納期追跡: id={rid} は既に{label}っス")
+                notes.append(f"-# ⚠️ 納期追跡: id={rid} は既に{label}です")
                 continue
             if not (is_admin or _is_owner(item, author_id)):
                 notes.append(f"-# ⚠️ 納期追跡: id={rid} は担当の人か管理者"
-                             "だけが操作できるっス")
+                             "だけが操作できます")
                 continue
             if isinstance(status, tuple):           # 期日変更
                 _, new_due = status
                 old = db.reschedule_action_item(conn, rid, agent_id, new_due)
                 if old is None:
                     notes.append(f"-# ⚠️ 納期追跡: id={rid} の期日を"
-                                 "変更できなかったっス")
+                                 "変更できませんでした")
                     continue
                 notes.append(f"-# 📅 納期追跡の期日を変更(id={rid}): "
                              f"{old} → {new_due}（{item['task'][:30]}）")
