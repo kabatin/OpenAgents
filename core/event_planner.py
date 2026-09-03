@@ -26,6 +26,7 @@ from core import invoke_claude
 from core import db
 from core import reminders
 from core import search
+from core import textsim
 PLAN_TIMEOUT_SEC = 300
 MAX_MILESTONES = 8
 MAX_TASK_LEN = 60
@@ -73,24 +74,14 @@ def detect_events(decisions_rows, today):
 
 
 # 同一イベント判定: 文字2-gramの重なり率がこれ以上なら言い回し違いとみなす
-SAME_EVENT_OVERLAP = 0.6
-
-
-def _bigrams(text):
-    t = re.sub(r"[\s（）()、。]", "", text or "")
-    return {t[i:i + 2] for i in range(len(t) - 1)}
+# 同一イベント判定: 決定台帳が同じ決定を再抽出するたびに逆算案が連投されて
+# いたため追加。判定本体は textsim に共通化（決定台帳の重複除去と共用）
+SAME_EVENT_OVERLAP = textsim.SAME_TEXT_OVERLAP
 
 
 def is_same_event(a, b):
-    """名前の言い回し違いを同一イベントとみなすか（純粋関数）。
-
-    決定台帳が同じ決定を再抽出するたびに逆算案が連投されていたため追加した。
-    片方に住所等の追記があっても拾えるよう、Jaccardでなく重なり率
-    （共通2-gram数 ÷ 短い方の2-gram数）で判定する。"""
-    ga, gb = _bigrams(a), _bigrams(b)
-    if not ga or not gb:
-        return False
-    return len(ga & gb) / min(len(ga), len(gb)) >= SAME_EVENT_OVERLAP
+    """名前の言い回し違いを同一イベントとみなすか（純粋関数）。"""
+    return textsim.is_same_text(a, b, SAME_EVENT_OVERLAP)
 
 
 def find_duplicate(candidate, existing_names):

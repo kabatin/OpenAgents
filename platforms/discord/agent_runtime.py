@@ -23,6 +23,7 @@ import discord
 from core import config as app_config
 from core import db
 from core import invoke_claude
+from core import msgref
 from core import paths
 from core import integrations
 from core import plugins
@@ -346,8 +347,11 @@ def _content_gate(trigger, text, has_attachments):
 
 
 async def _collect_attachments(message):
-    """本文の添付＋リプライ先の添付をID重複排除で結合（本文の添付が先）。
-    リプライ先の取得はbest-effort（削除済み・取得失敗は黙って空扱い）。"""
+    """本文の添付＋リプライ先の添付＋本文中のリンク/IDで指した投稿の添付を
+    ID重複排除で結合（本文の添付が先）。取得はbest-effort（削除済み・
+    取得失敗は黙って空扱い）。
+    「このリンクの資料から〜」と過去投稿のPDF等を後から指定して読めるように
+    する。参照先は同じguildの投稿に限る。"""
     atts = list(message.attachments)
     ref = message.reference
     if ref and ref.message_id:
@@ -361,6 +365,7 @@ async def _collect_attachments(message):
             target = None
         if target is not None:
             atts.extend(getattr(target, "attachments", None) or [])
+    atts.extend(await _linked_attachments(message))
     seen, out = set(), []
     for att in atts:
         if att.id in seen:
@@ -368,6 +373,28 @@ async def _collect_attachments(message):
         seen.add(att.id)
         out.append(att)
     return out
+
+
+async def _linked_attachments(message):
+    """本文中のメッセージリンク/IDが指す投稿の添付を集める（best-effort）。"""
+    refs = msgref.extract_refs(getattr(message, "clean_content", "") or "",
+                               getattr(getattr(message, "guild", None),
+                                       "id", None))
+    found = []
+    for channel_id, mid in refs:
+        if mid == getattr(message, "id", None):
+            continue
+        try:
+            channel = message.channel
+            if channel_id and channel_id != getattr(channel, "id", None):
+                guild = message.guild
+                channel = (guild.get_channel(channel_id)
+                           or await guild.fetch_channel(channel_id))
+            target = await channel.fetch_message(mid)
+        except Exception:
+            continue
+        found.extend(getattr(target, "attachments", None) or [])
+    return found
 
 
 #: 「引数が省略された」ことを None と区別するための印。

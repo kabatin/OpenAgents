@@ -1509,9 +1509,22 @@ class AgentLoopsMixin:
             channel_id)
         if batch is None:
             return  # 初回初期化 or 新着議事録なし
+        # 各TODOの「作業が進むch」を推定させる（従来は全件が議事録ch紐づきで、
+        # 実際の作業chから見えなかった）。候補は直近60日に人間が発言したchから、
+        # エージェントのホーム・除外chを外したもの
+        exclude = set(self.proactive_cfg.get("exclude_channel_ids") or ())
+        exclude |= {str(a.get("home_channel_id")) for a in AGENTS
+                    if a.get("home_channel_id")}
+        exclude.add(str(channel_id))
+
+        def _candidates():
+            with db.connect(DB_PATH) as conn:
+                return db.channel_candidates(conn, exclude_channel_ids=exclude)
+        channels = await asyncio.to_thread(_candidates)
         async with ANSWER_SEM:
             extracted = await asyncio.to_thread(
-                action_items.extract_items, batch["text"], batch["date"])
+                action_items.extract_items, batch["text"], batch["date"],
+                channels=channels)
         # 決定事項も同じ議事録から台帳へ（RM#4・TODOゼロでも記録する）
         n_dec = 0
         try:
@@ -1847,6 +1860,80 @@ class AgentLoopsMixin:
                 # 1件の失敗（ch削除等）が他の声かけをブロックしない
                 print(f"[{self.agent['id']}] homework followup failed "
                       f"(item={item['id']}): {e}")
+        await self._homework_stage(hw, now, shadow)
+
+    async def _homework_stage(self, hw, now, shadow):
+        """催促後の出口: asked のまま放置しない。
+        一度目から数日で二度目を聞き、それでも動かなければ「流れた」と1行で
+        手放す。どの段でも直前に後続会話＋リアクション（声かけへの👍❌含む）を
+        読み直し、済んでいれば黙って閉じる。"""
+        nudge2, close = await asyncio.to_thread(
+            homework.items_needing_stage, DB_PATH, self.agent["id"], now,
+            second_nudge_days=int(hw.get(
+                "second_nudge_days", homework.SECOND_NUDGE_DAYS_DEFAULT)),
+            close_days=int(hw.get("close_days", homework.CLOSE_DAYS_DEFAULT)))
+        queue = [(i, "nudge2") for i in nudge2] + [(i, "close") for i in close]
+        for item, stage in queue:
+            async with ANSWER_SEM:
+                resolved = await asyncio.to_thread(
+                    homework.check_resolved, DB_PATH, item)
+            if resolved:
+                await asyncio.to_thread(
+                    homework.mark_resolved, DB_PATH, item["id"])
+                await asyncio.to_thread(
+                    proactive.log_entry, DB_PATH, self.agent["id"],
+                    kind="homework", action="hw_resolved",
+                    channel_id=item["channel_id"],
+                    trigger_message_id=item["source_message_id"],
+                    detail=item["task"][:60])
+                continue
+            if stage == "nudge2":
+                text = homework.build_second_nudge_text(item, GUILD_ID)
+                action = "hw_nudge2"
+            else:
+                text = homework.build_close_text(item)
+                action = "hw_closed"
+            if shadow:
+                await asyncio.to_thread(
+                    proactive.log_entry, DB_PATH, self.agent["id"],
+                    kind="homework", action="hw_shadow",
+                    channel_id=item["channel_id"],
+                    trigger_message_id=item["source_message_id"],
+                    detail=text[:400])
+                await asyncio.to_thread(self._homework_advance, item, stage,
+                                        None)
+                continue
+            try:
+                channel = (self.get_channel(int(item["channel_id"]))
+                           or await self.fetch_channel(int(item["channel_id"])))
+                # 直前の声かけへのリプライで続ける（文脈を切らない）
+                ref = discord.MessageReference(
+                    message_id=(item.get("followup_message_id")
+                                or item["source_message_id"]),
+                    channel_id=int(item["channel_id"]), guild_id=GUILD_ID,
+                    fail_if_not_exists=False)
+                posted = await channel.send(
+                    text, reference=ref,
+                    allowed_mentions=discord.AllowedMentions(
+                        everyone=False, roles=False, users=True))
+                await asyncio.to_thread(self._homework_advance, item, stage,
+                                        posted.id)
+                await asyncio.to_thread(
+                    proactive.log_entry, DB_PATH, self.agent["id"],
+                    kind="homework", action=action,
+                    channel_id=item["channel_id"],
+                    trigger_message_id=item["source_message_id"],
+                    posted_message_id=posted.id, detail=item["task"][:60])
+            except Exception as e:
+                print(f"[{self.agent['id']}] homework stage failed "
+                      f"(item={item['id']}, {stage}): {e}")
+
+    def _homework_advance(self, item, stage, message_id):
+        if stage == "nudge2":
+            homework.mark_asked(DB_PATH, item["id"], message_id,
+                                status="asked2")
+        else:
+            homework.mark_closed(DB_PATH, item["id"], message_id)
 
     async def _maybe_weekly_report(self):
         """週次自己レポート（Phase D）: 金曜17時以降に1回、活動と抑制の実績を

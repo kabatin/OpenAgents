@@ -174,10 +174,11 @@ def _save_state(state):
 
 def add_reminder(channel_id, user_id, user_name, content, due, repeat,
                  agent_id="agent1", mention=None, mention_label=None,
-                 channel_label=None, now=None):
+                 channel_label=None, now=None, max_active=None):
     """登録して (entry, None) を返す。拒否時は (None, エラー文)。
     - 過去のonce: PAST_GRACE_MIN 分以内なら「今due」として登録、超は拒否
-    - 過去のrepeat: 未来の本来時刻へ前進して登録（「毎朝9時」を夜に頼んだ場合）"""
+    - 過去のrepeat: 未来の本来時刻へ前進して登録（「毎朝9時」を夜に頼んだ場合）
+    - max_active: 1ユーザーの上限（設定で可変。未指定なら MAX_ACTIVE_PER_USER）"""
     now = now or now_jst()
     anchor_day = due.day
     if repeat == "once":
@@ -186,11 +187,12 @@ def add_reminder(channel_id, user_id, user_name, content, due, repeat,
     elif due <= now:
         due = advance_past(due, repeat, anchor_day, now)
 
+    limit = int(max_active or MAX_ACTIVE_PER_USER)
     state = _load_state()
     mine = [r for r in state["reminders"]
             if r["status"] == "active" and r["user_id"] == str(user_id)]
-    if len(mine) >= MAX_ACTIVE_PER_USER:
-        return None, f"アクティブな登録が上限（{MAX_ACTIVE_PER_USER}件）に達している"
+    if len(mine) >= limit:
+        return None, f"アクティブな登録が上限（{limit}件）に達している"
     entry = {
         "id": state["next_id"],
         "channel_id": str(channel_id),

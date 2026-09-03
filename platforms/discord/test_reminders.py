@@ -236,6 +236,19 @@ class RemindersStateTest(unittest.TestCase):
         self.assertEqual(len(reminders.due_reminders(NOW, agent_id="agent1")), 1)
         self.assertEqual(reminders.due_reminders(NOW, agent_id="agent2"), [])
 
+    def test_active_limit_configurable(self):
+        # 上限を設定（max_active）で可変にする
+        due = datetime(2026, 8, 1, 9, 0)
+        for i in range(2):
+            _, err = self.add(due, user_id="300", content=f"件{i}", max_active=2)
+            self.assertIsNone(err)
+        e, err = self.add(due, user_id="300", content="超過分", max_active=2)
+        self.assertIsNone(e)
+        self.assertIn("上限（2件）", err)
+        # 未指定なら従来の既定値
+        _, err = self.add(due, user_id="300", content="既定側")
+        self.assertIsNone(err)
+
     def test_active_per_user_limit(self):
         for i in range(reminders.MAX_ACTIVE_PER_USER):
             _, err = self.add(datetime(2026, 8, 1, 9, 0), content=f"件{i}")

@@ -365,3 +365,78 @@ class RescheduleTest(unittest.TestCase):
         self.assertIn("[ACTION_DUE: id | YYYY-MM-DD]", note)
         self.assertIn("[FACT:]（事実台帳）に書かないこと", note)
         self.assertNotIn("期日・担当の変更はできない", note)
+
+
+class ChannelEstimateTest(unittest.TestCase):
+    """議事録TODOが全件 議事録ch 紐づきで、実際の作業chから見えなかった問題。
+    抽出時に「作業が進むch」を候補一覧から推定させる。"""
+    CHANNELS = [(701, "グッズ総合"), (702, "ショップ開発")]
+    RAW = ('{"items": ['
+           '{"task": "タンブラー試作発注", "owners": ["<@1>"], '
+           '"due": "2026-09-10", "channel": "#グッズ総合"},'
+           '{"task": "課金テスト", "owners": ["<@2>"], '
+           '"due": "2026-09-11", "channel": "存在しないch"},'
+           '{"task": "chなし", "owners": ["<@3>"], "due": "2026-09-12"}]}')
+
+    def test_prompt_lists_candidates_only_when_given(self):
+        p = action_items.build_extract_prompt("本文", "2026-09-03",
+                                              channels=self.CHANNELS)
+        self.assertIn("#グッズ総合、#ショップ開発", p)
+        self.assertIn('"channel"', p)
+        p0 = action_items.build_extract_prompt("本文", "2026-09-03")
+        self.assertNotIn("channel", p0)
+
+    def test_parse_maps_name_to_id_and_falls_back(self):
+        out = action_items.parse_extract_response(
+            self.RAW, "2026-09-03", channels=self.CHANNELS)
+        by_task = {it["task"]: it["channel_id"] for it in out["items"]}
+        self.assertEqual(by_task["タンブラー試作発注"], 701)
+        self.assertIsNone(by_task["課金テスト"])   # 一覧に無い名前は倒す
+        self.assertIsNone(by_task["chなし"])
+
+    def test_save_uses_estimated_channel_or_minutes(self):
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        try:
+            db.init_db(path)
+            items = action_items.parse_extract_response(
+                self.RAW, "2026-09-03", channels=self.CHANNELS)["items"]
+            action_items.save_items(path, "agent1", MINUTES_CH, 42, items)
+            with db.connect(path) as conn:
+                rows = {r["task"]: r["channel_id"]
+                        for r in db.open_action_items(conn, "agent1")}
+            self.assertEqual(rows["タンブラー試作発注"], 701)
+            self.assertEqual(rows["課金テスト"], MINUTES_CH)
+        finally:
+            os.unlink(path)
+
+
+class ChannelCandidatesTest(unittest.TestCase):
+    def test_human_channels_only_with_exclusion(self):
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        try:
+            db.init_db(path)
+            with db.connect(path) as conn:
+                for cid in (701, 702, 703):
+                    db.upsert_channel(conn, id=cid, name=f"ch{cid}", type="text")
+                db.upsert_user(conn, id=1, name="u1", display_name="人",
+                               is_bot=False)
+                db.upsert_user(conn, id=9, name="bot", display_name="bot",
+                               is_bot=True)
+                now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S+00:00")
+                db.insert_message(conn, id=1, channel_id=701, author_id=1,
+                                  content="a", created_at=now)
+                db.insert_message(conn, id=2, channel_id=701, author_id=1,
+                                  content="b", created_at=now)
+                db.insert_message(conn, id=3, channel_id=702, author_id=1,
+                                  content="c", created_at=now)
+                db.insert_message(conn, id=4, channel_id=703, author_id=9,
+                                  content="bot only", created_at=now)
+                self.assertEqual(
+                    db.channel_candidates(conn), [(701, "ch701"), (702, "ch702")])
+                self.assertEqual(
+                    db.channel_candidates(conn, exclude_channel_ids={"701"}),
+                    [(702, "ch702")])
+        finally:
+            os.unlink(path)

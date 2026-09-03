@@ -200,6 +200,7 @@ class MarkerActionsMixin:
                 content=req["content"],
                 due=req["due"],
                 repeat=req["repeat"],
+                max_active=self.agent.get("reminder_max_active"),
                 agent_id=self.agent["id"],
                 mention=mention,
                 mention_label=label,

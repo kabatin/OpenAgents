@@ -299,7 +299,8 @@ CREATE INDEX IF NOT EXISTS idx_action_items_status ON action_items(status);
 
 -- 宿題検出（自己コミットの追跡 / エージェントv3 Phase E）。設計: docs/agents-v3-proactive.md
 -- 会話中の「あとでやる」「確認しとく」等の自己コミットを検知し、数日後に本人へ一度だけ
--- 「あれどうなりました?」と声かけする。status: open→asked（声かけ済・終端）/expired/dropped。
+-- 「あれどうなりました?」と声かけする。status: open→asked（声かけ済）→asked2（二度目）
+-- →closed（流れたとして手放し・終端）/ resolved / expired / dropped。
 -- 検知は沈黙（追跡のみ）。外向きは声かけだけで、フラグ＋シャドーで安全化する。
 CREATE TABLE IF NOT EXISTS homework_items (
     id                   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -313,6 +314,7 @@ CREATE TABLE IF NOT EXISTS homework_items (
     status               TEXT DEFAULT 'open',
     followup_message_id  INTEGER,
     created_at           TEXT,
+    asked_at             TEXT,
     UNIQUE(agent_id, source_message_id)
 );
 CREATE INDEX IF NOT EXISTS idx_homework_status ON homework_items(status);
@@ -731,6 +733,18 @@ def _migrate(conn):
     if "expires_at" not in cols:
         # Phase 1で作った既存rulesテーブルにexpires_atを足す
         conn.execute("ALTER TABLE rules ADD COLUMN expires_at TEXT")
+    hcols = [r[1] for r in conn.execute("PRAGMA table_info(homework_items)")]
+    if hcols and "asked_at" not in hcols:
+        # 催促後の出口（二度目の催促・手放し）の起点となる時刻。
+        # 既存の asked 行は声かけログの投稿時刻で埋める（無ければ期日）
+        conn.execute("ALTER TABLE homework_items ADD COLUMN asked_at TEXT")
+        conn.execute(
+            """UPDATE homework_items SET asked_at = COALESCE(
+                   (SELECT p.created_at FROM proactive_log p
+                     WHERE p.posted_message_id = homework_items.followup_message_id
+                       AND p.action = 'hw_nudge' LIMIT 1),
+                   follow_up_date || 'T00:00')
+               WHERE status = 'asked' AND asked_at IS NULL""")
     acols = [r[1] for r in conn.execute("PRAGMA table_info(agents)")]
     if acols and "home_channel_created" not in acols:
         # AI人事が採用時に作ったチャンネルか（解雇時に削除するか判断）
@@ -1771,7 +1785,7 @@ def close_action_item(conn, item_id, agent_id, *, status):
 
 _HOMEWORK_COLS = ("id", "agent_id", "source_message_id", "channel_id", "owner",
                   "task", "committed_date", "follow_up_date", "status",
-                  "followup_message_id", "created_at")
+                  "followup_message_id", "created_at", "asked_at")
 
 
 def _homework_row(row):
@@ -1802,11 +1816,29 @@ def open_homework_due(conn, agent_id, on_or_before):
     return [_homework_row(r) for r in rows]
 
 
-def set_homework_status(conn, item_id, status, followup_message_id=None):
-    """宿題の状態を更新（声かけ済み='asked' / 期限切れ='expired' 等）。"""
-    conn.execute(
-        "UPDATE homework_items SET status=?, followup_message_id=? WHERE id=?",
-        (status, followup_message_id, item_id))
+def set_homework_status(conn, item_id, status, followup_message_id=None,
+                        asked_at=None):
+    """宿題の状態を更新（声かけ済み='asked' / 二度目='asked2' / 手放し='closed'
+    / 期限切れ='expired' 等）。asked_at を渡した時だけ声かけ時刻を更新する。"""
+    if asked_at is None:
+        conn.execute(
+            "UPDATE homework_items SET status=?, followup_message_id=? "
+            "WHERE id=?", (status, followup_message_id, item_id))
+    else:
+        conn.execute(
+            "UPDATE homework_items SET status=?, followup_message_id=?, "
+            "asked_at=? WHERE id=?",
+            (status, followup_message_id, asked_at, item_id))
+
+
+def staged_homework(conn, agent_id):
+    """催促済み（asked / asked2）の宿題（声かけの古い順）。
+    二度目の催促・手放しの判定用。"""
+    rows = conn.execute(
+        f"""SELECT {','.join(_HOMEWORK_COLS)} FROM homework_items
+            WHERE agent_id=? AND status IN ('asked', 'asked2')
+            ORDER BY asked_at ASC""", (agent_id,)).fetchall()
+    return [_homework_row(r) for r in rows]
 
 
 # -------------------------------------------------------- roadmap（進化バックログ）
@@ -2011,6 +2043,38 @@ def add_decision(conn, *, agent_id, decision, topic, source_kind,
         (agent_id, decision, topic, source_kind, source_message_id,
          channel_id, decided_on, created_at))
     return cur.lastrowid
+
+
+def recent_decisions(conn, since_created_at, status="active"):
+    """since 以降に記録された決定（重複除去の照合用・古い順）。"""
+    rows = conn.execute(
+        """SELECT id, decision, channel_id, created_at FROM decisions
+           WHERE status=? AND created_at >= ? ORDER BY id ASC""",
+        (status, since_created_at)).fetchall()
+    return [{"id": r[0], "decision": r[1], "channel_id": r[2],
+             "created_at": r[3]} for r in rows]
+
+
+def mark_decisions_duplicate(conn, ids):
+    """言い直しの重複行を duplicate にする（active から外れる）。"""
+    for did in ids:
+        conn.execute("UPDATE decisions SET status='duplicate' WHERE id=?",
+                     (int(did),))
+
+
+def channel_candidates(conn, *, exclude_channel_ids=(), days=60):
+    """直近daysで人間が発言したチャンネル [(id, name)]。
+    議事録TODOの「どのchの話か」推定の選択肢に使う。"""
+    excl = [int(c) for c in (exclude_channel_ids or ())]
+    sql = f"""SELECT m.channel_id, c.name FROM messages m
+              JOIN users u ON u.id=m.author_id
+              JOIN channels c ON c.id=m.channel_id
+              WHERE u.is_bot=0 AND m.deleted=0
+                AND m.created_at >= datetime('now', '-{int(days)} days')"""
+    if excl:
+        sql += f" AND m.channel_id NOT IN ({','.join('?' * len(excl))})"
+    sql += " GROUP BY m.channel_id ORDER BY count(*) DESC"
+    return [(r[0], r[1]) for r in conn.execute(sql, excl)]
 
 
 def search_decisions(conn, keywords, limit=8):

@@ -16,11 +16,15 @@ proactive.decide_reply の【決定事項台帳】ブロックで、①矛盾指
 import json
 import os
 import re
+from datetime import timedelta
 
 from core import invoke_claude
 from core import db
 from core import reminders
 from core import search
+from core import textsim
+
+DEDUP_DAYS = 7   # 言い直し重複の照合窓（同じ決定の再抽出はこの範囲に集中する）
 EXTRACT_TIMEOUT_SEC = 300
 MAX_DECISION_LEN = 200
 MAX_TOPIC_LEN = 40
@@ -80,13 +84,21 @@ def extract_from_minutes(minutes_text, minutes_date, *,
 
 def save_decisions(db_path, agent_id, items, *, source_kind, channel_id,
                    source_message_id, decided_on):
-    """決定事項を台帳へ保存（採番idリスト）。
+    """決定事項を台帳へ保存（採番idリスト。言い直しの重複は保存しない）。
     items: [{"decision","topic"(,"message_id","channel_id")}]。
-    会話由来は item 側の message_id/channel_id が優先される。"""
-    now = reminders.fmt(reminders.now_jst())
+    会話由来は item 側の message_id/channel_id が優先される。
+    同じ決定が語順違いで何度も抽出され台帳が水増しされていたため、
+    直近 DEDUP_DAYS 日の決定と照合し、同一なら捨てる。"""
+    now_dt = reminders.now_jst()
+    now = reminders.fmt(now_dt)
+    since = reminders.fmt(now_dt - timedelta(days=DEDUP_DAYS))
     ids = []
     with db.connect(db_path) as conn:
+        seen = [d["decision"] for d in db.recent_decisions(conn, since)]
         for it in items:
+            if textsim.find_same(it["decision"], seen) is not None:
+                continue   # 既に台帳にある決定の言い直し
+            seen.append(it["decision"])   # 同一バッチ内の重複も潰す
             ids.append(db.add_decision(
                 conn, agent_id=agent_id, decision=it["decision"],
                 topic=it.get("topic") or "", source_kind=source_kind,

@@ -66,6 +66,52 @@ class ParseMinutesTest(unittest.TestCase):
         self.assertIn("✅ 何かに決定", seen["prompt"])
 
 
+class DedupTest(DecisionsTestBase):
+    """同じ決定の言い直しが何度も保存され台帳が水増しされていた。保存時に弾く。"""
+
+    def test_same_batch_rephrase_saved_once(self):
+        ids = self._save([
+            {"decision": "25日のPVでクリアファイルを販売することに決定"},
+            {"decision": "25日のPVでクリアファイルを販売する"},
+            {"decision": "クリアファイルの販売価格を1000円に決定"},
+            {"decision": "クリアファイルの価格を1000円に設定する"},
+        ])
+        self.assertEqual(len(ids), 2)
+
+    def test_cross_save_rephrase_skipped(self):
+        first = self._save([{"decision": "9/1(火)の上映会の開催地を駅前ホールに決定"}])
+        again = self._save([{"decision": "9月1日(火)の上映会の開催地を駅前ホールで確定"}])
+        self.assertEqual(len(first), 1)
+        self.assertEqual(again, [])
+
+    def test_unrelated_decisions_kept(self):
+        ids = self._save([
+            {"decision": "クリアファイルの販売価格を1000円に決定"},
+            {"decision": "スポンサーロゴは一旦表示しない方針で進める"},
+        ])
+        self.assertEqual(len(ids), 2)
+
+    def test_short_texts_never_merged(self):
+        # 短文は2-gramの重なりが偶然高くなる（「決定1」と「決定11」）ので照合しない
+        ids = self._save([{"decision": f"決定{i}"} for i in range(12)])
+        self.assertEqual(len(ids), 12)
+
+
+class DedupeScriptTest(unittest.TestCase):
+    def test_find_duplicates_respects_window(self):
+        from core import dedupe_decisions
+        rows = [
+            {"id": 1, "decision": "25日のPVでクリアファイルを販売することに決定",
+             "created_at": "2026-08-01T10:00"},
+            {"id": 2, "decision": "25日のPVでクリアファイルを販売する",
+             "created_at": "2026-08-03T10:00"},   # 窓内 → 重複
+            {"id": 3, "decision": "25日のPVでクリアファイルを販売することに決定",
+             "created_at": "2026-08-20T10:00"},   # 窓外 → 別の決定として残す
+        ]
+        dups = dedupe_decisions.find_duplicates(rows)
+        self.assertEqual([(d["id"], o["id"]) for d, o in dups], [(2, 1)])
+
+
 class SaveSearchTest(DecisionsTestBase):
     def test_save_and_keyword_search(self):
         self._save([{"decision": "Tシャツは5000〜8000円台のみ対応する方針",

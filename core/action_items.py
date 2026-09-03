@@ -85,8 +85,16 @@ def collect_new_minutes(db_path, agent_id, channel_id, now=None):
             "header_id": rows[0]["id"], "channel_id": int(channel_id)}
 
 
-def build_extract_prompt(minutes_text, minutes_date):
-    """抽出プロンプト（純粋関数・テスト対象）。"""
+def build_extract_prompt(minutes_text, minutes_date, channels=None):
+    """抽出プロンプト（純粋関数・テスト対象）。
+    channels: [(id, name)] を渡すと、各TODOに「作業が進むチャンネル」の推定を
+    求める（全TODOが議事録chに紐づき、実際の作業chから見えなかったため）。"""
+    ch_rule, ch_field = "", ""
+    if channels:
+        names = "、".join(f"#{n}" for _i, n in channels)
+        ch_rule = ("- channel はそのTODOの作業や相談が実際に進むチャンネル名を"
+                   f"次の一覧から1つ選ぶ（判断できなければ null）: {names}\n")
+        ch_field = ', "channel": "#開発"'
     return (
         "以下は社内定例会議の議事録。この中の「担当者つきの未完了TODO」を"
         "すべて抽出して。\n\n"
@@ -99,17 +107,19 @@ def build_extract_prompt(minutes_text, minutes_date):
         "（メンションが無いTODOは含めない）\n"
         "- 完了済み・過去の報告・決定事項（✅）は含めない\n"
         "- task は要点だけ簡潔に（60文字以内）\n"
+        + ch_rule +
         "- 出力はJSONのみ（説明文・コードブロック不要）:\n"
         '{"items": [{"task": "…", "owners": ["<@123>"], '
-        '"due": "2026-08-29", "urgent": false}]}\n\n'
+        f'"due": "2026-08-29", "urgent": false{ch_field}}}]}}\n\n'
         f"【議事録】\n{minutes_text}"
     )
 
 
-def parse_extract_response(raw, minutes_date):
+def parse_extract_response(raw, minutes_date, channels=None):
     """抽出JSONを検証つきで解釈（純粋関数・テスト対象）。
     Returns: {"items": [追跡対象], "skipped_no_due": 期日なしで見送った件数}
-    不正なowners・壊れた日付は安全側（そのitemを捨てる）に倒す。"""
+    不正なowners・壊れた日付は安全側（そのitemを捨てる）に倒す。
+    channel は一覧に無い名前なら None（＝呼び出し側が議事録chへ倒す）。"""
     m = _JSON_RE.search(raw or "")
     if not m:
         return {"items": [], "skipped_no_due": 0}
@@ -117,6 +127,7 @@ def parse_extract_response(raw, minutes_date):
         data = json.loads(m.group(0))
     except ValueError:
         return {"items": [], "skipped_no_due": 0}
+    by_name = {n: i for i, n in (channels or [])}
     items, skipped = [], 0
     for it in (data.get("items") or [])[:MAX_ITEMS]:
         if not isinstance(it, dict):
@@ -132,29 +143,33 @@ def parse_extract_response(raw, minutes_date):
             continue
         if due < minutes_date:
             continue  # 過去日は追跡しない（抽出ミスの安全弁）
+        ch = str(it.get("channel") or "").strip().lstrip("#")
         items.append({"task": task, "owners": " ".join(owners),
-                      "due_date": due, "urgent": bool(it.get("urgent"))})
+                      "due_date": due, "urgent": bool(it.get("urgent")),
+                      "channel_id": by_name.get(ch)})
     return {"items": items, "skipped_no_due": skipped}
 
 
 def extract_items(minutes_text, minutes_date, *, model=search.DEFAULT_MODEL,
-                  invoke_fn=None):
+                  invoke_fn=None, channels=None):
     """議事録→追跡対象TODO。invoke_fnはテスト差し替え口。"""
-    prompt = build_extract_prompt(minutes_text, minutes_date)
+    prompt = build_extract_prompt(minutes_text, minutes_date, channels)
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
         p, model=model, timeout=EXTRACT_TIMEOUT_SEC).text)
-    return parse_extract_response(fn(prompt), minutes_date)
+    return parse_extract_response(fn(prompt), minutes_date, channels)
 
 
 def save_items(db_path, agent_id, channel_id, source_message_id, items):
-    """抽出結果を保存して採番idリストを返す。"""
+    """抽出結果を保存して採番idリストを返す。
+    item に channel_id（推定した作業ch）があればそれを、無ければ議事録chを使う。"""
     now = reminders.fmt(reminders.now_jst())
     ids = []
     with db.connect(db_path) as conn:
         for it in items:
             ids.append(db.add_action_item(
                 conn, agent_id=agent_id, source_message_id=source_message_id,
-                channel_id=channel_id, task=it["task"], owners=it["owners"],
+                channel_id=it.get("channel_id") or channel_id,
+                task=it["task"], owners=it["owners"],
                 due_date=it["due_date"], urgent=it["urgent"], created_at=now))
     return ids
 

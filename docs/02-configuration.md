@@ -64,6 +64,7 @@
     "role": "",                           // 「何の担当か」の1文
     "require_mention": false,             // true なら呼ばれた時だけ答える
     "runner_enabled": false,              // true でWeb検索などが使える経路になる
+    "reminder_max_active": 30,            // 1人が同時に持てるリマインダーの上限
 
     "skills": {
       "reminder": true,                   // リマインダーの登録・配信

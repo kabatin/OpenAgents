@@ -337,6 +337,25 @@ class ResolutionCheckTest(HomeworkTestBase):
             self.db_path, self.ITEM, invoke_fn=fake))
         self.assertNotIn("👀", seen["prompt"])
 
+    def test_nudge_reactions_visible_in_prompt(self):
+        # 声かけ（Bot投稿）への👍は後続会話に出てこないので別枠で読む
+        with db.connect(self.db_path) as conn:
+            self._msg(conn, 10, "あとで見積もり確認しとく")
+            db.upsert_user(conn, id=333, name="u333",
+                           display_name="担当者", is_bot=False)
+            db.add_reaction(conn, message_id=900, emoji="👍", user_id=333,
+                            created_at="2026-09-03T10:00")
+        seen = {}
+
+        def fake(prompt):
+            seen["prompt"] = prompt
+            return '{"resolved": true}'
+        item = {**self.ITEM, "followup_message_id": 900}
+        self.assertTrue(homework.check_resolved(
+            self.db_path, item, invoke_fn=fake))
+        self.assertIn("声かけ", seen["prompt"])
+        self.assertIn("👍(担当者)", seen["prompt"])
+
     def test_check_resolved_error_falls_back_to_ask(self):
         with db.connect(self.db_path) as conn:
             self._msg(conn, 10, "あとで見積もり確認しとく")
@@ -361,6 +380,100 @@ class ResolutionCheckTest(HomeworkTestBase):
         ask2, _ = homework.items_needing_followup(
             self.db_path, "agent1", "2026-08-03")
         self.assertEqual(ask2, [])
+
+
+class StageTest(HomeworkTestBase):
+    """催促後の出口。asked のまま長期滞留していた問題。
+    二度目の催促→手放し、の遷移と、溜まった分の分散を検証する。"""
+
+    def _seed(self, source, status, asked_at):
+        with db.connect(self.db_path) as conn:
+            db.add_homework_item(
+                conn, agent_id="agent1", source_message_id=source,
+                channel_id=CH, owner="<@111>", task=f"宿題{source}",
+                committed_date="2026-08-20", follow_up_date="2026-08-23",
+                created_at="2026-08-20T12:00")
+            iid = conn.execute(
+                "SELECT id FROM homework_items WHERE source_message_id=?",
+                (source,)).fetchone()[0]
+            db.set_homework_status(conn, iid, status,
+                                   followup_message_id=900 + source,
+                                   asked_at=asked_at)
+        return iid
+
+    def test_stage_action_transitions(self):
+        now = datetime(2026, 9, 3, 12, 0)
+        asked = {"status": "asked", "asked_at": "2026-09-01T12:00"}
+        self.assertEqual(homework.stage_action(asked, now), "wait")
+        asked = {"status": "asked", "asked_at": "2026-08-30T12:00"}
+        self.assertEqual(homework.stage_action(asked, now), "nudge2")
+        asked2 = {"status": "asked2", "asked_at": "2026-09-01T12:00"}
+        self.assertEqual(homework.stage_action(asked2, now), "wait")
+        asked2 = {"status": "asked2", "asked_at": "2026-08-30T12:00"}
+        self.assertEqual(homework.stage_action(asked2, now), "close")
+        # 声かけ時刻が無い旧データは触らない
+        self.assertEqual(homework.stage_action(
+            {"status": "asked", "asked_at": None}, now), "wait")
+
+    def test_items_needing_stage_partitions_and_limits(self):
+        now = datetime(2026, 9, 3, 12, 0)
+        self._seed(1, "asked", "2026-08-25T12:00")    # 二度目の対象
+        self._seed(2, "asked", "2026-09-02T12:00")    # まだ待つ
+        self._seed(3, "asked2", "2026-08-25T12:00")   # 手放しの対象
+        self._seed(4, "asked", "2026-08-26T12:00")    # 二度目の対象（3件目）
+        nudge2, close = homework.items_needing_stage(
+            self.db_path, "agent1", now, limit=2)
+        # 合計2件までに絞られ、古い順に拾う
+        self.assertEqual(len(nudge2) + len(close), 2)
+        picked = sorted(i["source_message_id"] for i in nudge2 + close)
+        self.assertEqual(picked, [1, 3])
+
+    def test_mark_asked_records_time_and_second_stage(self):
+        iid = self._seed(1, "asked", "2026-08-25T12:00")
+        homework.mark_asked(self.db_path, iid, 1234, status="asked2",
+                            now=datetime(2026, 9, 3, 12, 0))
+        with db.connect(self.db_path) as conn:
+            rows = db.staged_homework(conn, "agent1")
+        self.assertEqual(rows[0]["status"], "asked2")
+        self.assertEqual(rows[0]["asked_at"], "2026-09-03T12:00")
+        self.assertEqual(rows[0]["followup_message_id"], 1234)
+        homework.mark_closed(self.db_path, iid, 5678)
+        with db.connect(self.db_path) as conn:
+            self.assertEqual(db.staged_homework(conn, "agent1"), [])
+
+    def test_texts(self):
+        item = {"owner": "<@111>", "task": "見積もり確認", "channel_id": CH,
+                "source_message_id": 42}
+        second = homework.build_second_nudge_text(item, "1")
+        self.assertIn("もう一回だけ", second)
+        self.assertIn("👍", second)
+        self.assertIn("discord.com/channels/1/200/42", second)
+        close = homework.build_close_text(item)
+        self.assertIn("手放し", close)
+        self.assertNotIn("<@111>", close)   # 手放しは鳴らさない
+
+
+class MigrationTest(HomeworkTestBase):
+    def test_asked_at_backfilled_for_legacy_rows(self):
+        with db.connect(self.db_path) as conn:
+            conn.execute("ALTER TABLE homework_items RENAME TO hw_old")
+            conn.execute(
+                """CREATE TABLE homework_items (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT,
+                    source_message_id INTEGER, channel_id INTEGER, owner TEXT,
+                    task TEXT, committed_date TEXT, follow_up_date TEXT,
+                    status TEXT DEFAULT 'open', followup_message_id INTEGER,
+                    created_at TEXT, UNIQUE(agent_id, source_message_id))""")
+            conn.execute(
+                """INSERT INTO homework_items(agent_id, source_message_id,
+                       channel_id, owner, task, committed_date, follow_up_date,
+                       status, followup_message_id, created_at)
+                   VALUES('agent1', 1, 200, '<@1>', 't', '2026-08-20',
+                          '2026-08-23', 'asked', 900, '2026-08-20T12:00')""")
+        db.init_db(self.db_path)   # migration が走る
+        with db.connect(self.db_path) as conn:
+            rows = db.staged_homework(conn, "agent1")
+        self.assertEqual(rows[0]["asked_at"], "2026-08-23T00:00")
 
 
 if __name__ == "__main__":

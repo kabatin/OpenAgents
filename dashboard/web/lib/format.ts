@@ -71,6 +71,8 @@ export const ACTION_LABEL: Record<string, string> = {
   hw_track: "宿題を追跡開始",
   hw_shadow: "宿題の声かけ（シャドー）",
   hw_nudge: "宿題の声かけ",
+  hw_nudge2: "宿題の二度目の声かけ",
+  hw_closed: "宿題を流れたものとして手放した",
   hw_resolved: "宿題は会話で完了済みと判断",
   attention_tracked: "気になる話題を様子見",
   attention_shadow: "自発介入（シャドー）",

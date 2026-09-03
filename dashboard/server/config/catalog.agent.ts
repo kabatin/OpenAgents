@@ -59,6 +59,16 @@ const BASICS: Setting[] = [
     default: false,
   },
   {
+    path: "reminder_max_active",
+    label: "リマインダーの登録上限（1人あたり）",
+    desc: "同じ人が同時に持てるアクティブなリマインダーの数。超えると新規登録を断ります。",
+    kind: "int",
+    default: 30,
+    min: 1,
+    max: 200,
+    unit: "件",
+  },
+  {
     path: "runner_enabled",
     label: "新しい回答経路を使う",
     desc: "Web検索やツールを使える新しい経路で回答します。オフにすると旧経路（ツール無し）に戻ります。この経路は Claude Code 専用で、他のAIを選んでいるときは自動で旧経路になります。",

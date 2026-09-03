@@ -48,6 +48,12 @@ EXPIRE_DAYS_DEFAULT = 14      # follow_up 日をこれ以上過ぎたら掘り�
 FOLLOWUP_PER_CYCLE = 5        # 1周期の声かけ上限（ch連投防止）
 FOLLOWUP_HOURS = range(8, 22)  # 声かけしてよい時間帯（JST）
 
+# 催促後の出口: 一度聞いて返事が無いと asked のまま永久に残っていた。
+# 二度目の催促→それでも動かなければ手放す
+SECOND_NUDGE_DAYS_DEFAULT = 3  # 一度目の声かけから何日で二度目を聞くか
+CLOSE_DAYS_DEFAULT = 3         # 二度目から何日で「流れた」として手放すか
+STAGE_PER_CYCLE = 2            # 1周期の二度目/手放しの上限（溜まった分を分散）
+
 # 観察ループのcheckpointと同居させるための専用キー接頭辞（minutes: と同じ流儀）
 STATE_PREFIX = "homework:"
 
@@ -199,10 +205,12 @@ def _fmt_reactions(pairs):
     return "・".join(f"{e}({n})" for e, n in pairs)
 
 
-def build_resolution_prompt(item, later_messages, source_reactions=()):
+def build_resolution_prompt(item, later_messages, source_reactions=(),
+                            nudge_reactions=()):
     """完了確認プロンプト（純粋関数・テスト対象）。
     リアクションも判断材料に含める（「👍で完結」が見えず、
-    完了済みの話を掘り起こしていた）。"""
+    完了済みの話を掘り起こしていた）。
+    声かけ自体への👍❌も見る（返事の代わりにリアクションで済む）。"""
     lines = []
     for m in later_messages:
         text = (m["content"] or "").strip().replace("\n", " ")
@@ -213,15 +221,22 @@ def build_resolution_prompt(item, later_messages, source_reactions=()):
                      + (f"　←リアクション: {rx}" if rx else ""))
     src = _fmt_reactions(source_reactions)
     src_line = (f"【宿題発言へのリアクション】{src}\n\n" if src else "")
+    ndg = _fmt_reactions(nudge_reactions)
+    ndg_line = (f"【こちらの声かけ「あれどうなりました?」へのリアクション】{ndg}\n\n"
+                if ndg else "")
     return (
         "チャットの見守りAIの内部確認。ある人が「あとでやる」と言った宿題に"
-        "ついて、数日後に「あれどうなりました?」と声をかける直前の最終チェック。\n\n"
+        "ついて、「あれどうなりました?」と声をかける（または再度聞く）直前の"
+        "最終チェック。\n\n"
         f"【宿題】{item['task']}（{item['owner']} 本人の自己コミット）\n\n"
-        + src_line +
-        "【その後の同チャンネルのやりとり】\n" + "\n".join(lines) + "\n\n"
-        "この宿題は、上のやりとりの中で既に完了・解決・不要になったと読み取れるか。\n"
+        + src_line + ndg_line +
+        "【その後の同チャンネルのやりとり】\n"
+        + ("\n".join(lines) or "（発言なし）") + "\n\n"
+        "この宿題は、上の材料から既に完了・解決・不要になったと読み取れるか。\n"
         "- 完了報告・結果共有・「もうやった」等があれば resolved\n"
         "- 完了を示す発言に👍✅等のリアクションで合意が付いている場合も resolved\n"
+        "- こちらの声かけに👍✅❌が付いていれば「済んだ／もう追わなくていい」の"
+        "合図とみなして resolved\n"
         "- 話題が消えただけ・進捗が読み取れない場合は resolved にしない"
         "（声かけする価値がある）\n\n"
         '出力はJSONのみ: {"resolved": true} または {"resolved": false}'
@@ -247,17 +262,22 @@ def check_resolved(db_path, item, *, model=SCREEN_MODEL_DEFAULT,
     検知後の会話で完了済みになった話を掘り起こして声かけしていたため追加した。
     後続会話なし＝確認不要（claudeを呼ばず声かけへ）。確認自体の失敗も声かけへ
     倒す（LLM障害で機能全体が黙って止まるのを防ぐ）。"""
+    nudge_id = item.get("followup_message_id")
     with db.connect(db_path) as conn:
         later = db.channel_messages_after(
             conn, item["channel_id"], item["source_message_id"],
             limit=RESOLVED_CONTEXT_LIMIT)
-        rx = db.reactions_for_messages(
-            conn, [item["source_message_id"]] + [m["id"] for m in later])
+        ids = [item["source_message_id"]] + [m["id"] for m in later]
+        if nudge_id:
+            ids.append(nudge_id)   # 声かけ（Bot投稿）へのリアクションも読む
+        rx = db.reactions_for_messages(conn, ids)
     src_rx = rx.get(item["source_message_id"]) or ()
-    if not later and not src_rx:
+    ndg_rx = (rx.get(nudge_id) or ()) if nudge_id else ()
+    if not later and not src_rx and not ndg_rx:
         return False
     later = [{**m, "reactions": rx.get(m["id"]) or ()} for m in later]
-    prompt = build_resolution_prompt(item, later, source_reactions=src_rx)
+    prompt = build_resolution_prompt(item, later, source_reactions=src_rx,
+                                     nudge_reactions=ndg_rx)
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
         p, model=model, timeout=DETECT_TIMEOUT_SEC).text)
     try:
@@ -313,11 +333,14 @@ def build_followup_text(item, guild_id):
             f"-# 余計なお世話でしたらスルーで大丈夫です｜元の発言: {link}")
 
 
-def mark_asked(db_path, item_id, message_id):
-    """声かけ済み（終端）にする。同じ宿題を二度は掘り返さない。"""
+def mark_asked(db_path, item_id, message_id, status="asked", now=None):
+    """声かけ済みにする（asked=一度目 / asked2=二度目）。声かけ時刻を記録し、
+    それを起点に二度目の催促・手放しへ進む。"""
+    now = now or reminders.now_jst()
     with db.connect(db_path) as conn:
-        db.set_homework_status(conn, item_id, "asked",
-                               followup_message_id=message_id)
+        db.set_homework_status(conn, item_id, status,
+                               followup_message_id=message_id,
+                               asked_at=reminders.fmt(now))
 
 
 def mark_expired(db_path, item_ids):
@@ -327,3 +350,63 @@ def mark_expired(db_path, item_ids):
     with db.connect(db_path) as conn:
         for iid in item_ids:
             db.set_homework_status(conn, iid, "expired")
+
+
+# ---------------------------------------------------------------- 5) 催促後の出口
+
+def stage_action(item, now, *, second_nudge_days=SECOND_NUDGE_DAYS_DEFAULT,
+                 close_days=CLOSE_DAYS_DEFAULT):
+    """催促済み宿題の次の一手（純粋関数・テスト対象）。
+    'wait' / 'nudge2'（二度目を聞く）/ 'close'（流れたとして手放す）。"""
+    asked_at = item.get("asked_at")
+    if not asked_at:
+        return "wait"   # 声かけ時刻が無い行は触らない（migrationで埋まる想定）
+    elapsed = now - reminders.parse_dt(asked_at)
+    if item.get("status") == "asked":
+        return "nudge2" if elapsed >= timedelta(days=int(second_nudge_days)) \
+            else "wait"
+    if item.get("status") == "asked2":
+        return "close" if elapsed >= timedelta(days=int(close_days)) else "wait"
+    return "wait"
+
+
+def items_needing_stage(db_path, agent_id, now, *,
+                        second_nudge_days=SECOND_NUDGE_DAYS_DEFAULT,
+                        close_days=CLOSE_DAYS_DEFAULT, limit=STAGE_PER_CYCLE):
+    """(二度目を聞く宿題[], 手放す宿題[]) を返す。合計 limit 件まで
+    （溜まった分を一度に吐かず周期に分散する）。"""
+    with db.connect(db_path) as conn:
+        rows = db.staged_homework(conn, agent_id)
+    nudge2, close = [], []
+    for item in rows:
+        if len(nudge2) + len(close) >= limit:
+            break
+        act = stage_action(item, now, second_nudge_days=second_nudge_days,
+                           close_days=close_days)
+        if act == "nudge2":
+            nudge2.append(item)
+        elif act == "close":
+            close.append(item)
+    return nudge2, close
+
+
+def build_second_nudge_text(item, guild_id):
+    """二度目の声かけ（静的文面）。リアクションで返せる逃げ道を用意する。"""
+    link = search.jump_link(guild_id, item["channel_id"],
+                            item["source_message_id"])
+    return (f"💭 {item['owner']} 「{item['task']}」の件、もう一回だけ聞かせてください。"
+            "済んでいたら👍、もう不要になっていたら❌を付けてもらえれば追うのをやめます\n"
+            f"-# 元の発言: {link}")
+
+
+def build_close_text(item):
+    """手放しの一言（静的文面・メンションしない＝鳴らさずに締める）。"""
+    return (f"-# 「{item['task']}」の件は動きが無いので一旦手放します。"
+            "まだ生きていれば言ってもらえれば追い直します")
+
+
+def mark_closed(db_path, item_id, message_id=None):
+    """流れたものとして手放す（終端）。"""
+    with db.connect(db_path) as conn:
+        db.set_homework_status(conn, item_id, "closed",
+                               followup_message_id=message_id)
