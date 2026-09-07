@@ -543,7 +543,8 @@ def job_log_path(job_id):
 
 def job_log_label(job_id):
     """承認者向けの注意書きに載せる実行ログの場所（純粋関数）。"""
-    rel = os.path.relpath(job_log_path(job_id), paths.ROOT)
+    # Discord に貼る表示なので OS の区切り（Windows の \\）に依らず / で揃える
+    rel = os.path.relpath(job_log_path(job_id), paths.ROOT).replace(os.sep, "/")
     return f"🗒 実行ログ: {rel}（失敗の一次証拠）"
 
 

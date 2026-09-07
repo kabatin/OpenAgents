@@ -373,7 +373,8 @@ class Phase5Test(unittest.TestCase):
             log.event({"type": "result", "subtype": "success", "num_turns": 3,
                        "total_cost_usd": 0.5, "result": "done"})
             log.finish({"error": "exit=1: boom", "stderr": "traceback…"})
-            text = open(path, encoding="utf-8").read()
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
         for needle in ("TOOL Edit", "TEXT 直します", "TOOL_ERROR denied",
                        "RESULT success", "ERROR exit=1", "STDERR traceback"):
             self.assertIn(needle, text)
