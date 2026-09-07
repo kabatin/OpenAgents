@@ -278,6 +278,42 @@ CREATE TABLE IF NOT EXISTS proactive_log (
 CREATE INDEX IF NOT EXISTS idx_proactive_log_agent
     ON proactive_log(agent_id, action, created_at);
 
+-- LLM呼び出し台帳（v4 Phase 0 計測）。claude CLI 1起動＝1行。
+-- 用途別のコスト・所要時間・失敗率の物差し（ダッシュボード「LLM呼び出し」タブ）。
+-- 書き手は core/invoke_claude の RECORDER（bot.py が登録）。
+CREATE TABLE IF NOT EXISTS llm_calls (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id              TEXT,
+    purpose               TEXT,
+    model                 TEXT,
+    ok                    INTEGER,
+    error                 TEXT,
+    wall_ms               INTEGER,
+    duration_ms           INTEGER,
+    num_turns             INTEGER,
+    cost_usd              REAL,
+    input_tokens          INTEGER,
+    output_tokens         INTEGER,
+    cache_read_tokens     INTEGER,
+    cache_creation_tokens INTEGER,
+    thinking_tokens       INTEGER,
+    tool_calls            INTEGER,
+    denials               INTEGER,
+    stop_reason           TEXT,
+    created_at            TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_llm_calls_created ON llm_calls(created_at);
+
+-- 書き込み枠（1ユーザー1日の回数）。MCP サーバは1回答1プロセスなので
+-- プロセス内カウンタでは数えられない（v4 ツールループ）
+CREATE TABLE IF NOT EXISTS write_quota (
+    scope    TEXT,
+    user_id  TEXT,
+    day      TEXT,
+    count    INTEGER DEFAULT 0,
+    PRIMARY KEY(scope, user_id, day)
+);
+
 -- 議事録の納期追跡（エージェントv3 Phase B）。設計: docs/agents-v3-proactive.md §4
 -- 議事録から抽出した担当者・期日つきTODO。声かけ段階は none→before→day→overdue
 CREATE TABLE IF NOT EXISTS action_items (
@@ -420,6 +456,8 @@ CREATE TABLE IF NOT EXISTS events (
 
 -- ゴールデンセット（進化ロードマップ#16）。👍がついた実Q&Aを評価セットとして
 -- 自動蓄積する。将来のプロンプト/モデル変更時の回帰テスト資産（検証済み置換の土台）。
+-- kind: auto=👍の自動捕獲（status active/invalid） /
+--       curated=人のキュレーション（status candidate→curated/rejected）
 CREATE TABLE IF NOT EXISTS golden_set (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
     agent_id          TEXT,
@@ -427,7 +465,11 @@ CREATE TABLE IF NOT EXISTS golden_set (
     answer            TEXT,
     source_answer_id  INTEGER UNIQUE,
     channel_id        INTEGER,
-    created_at        TEXT
+    created_at        TEXT,
+    status            TEXT DEFAULT 'active',
+    kind              TEXT DEFAULT 'auto',
+    source_link       TEXT,
+    note              TEXT
 );
 
 -- ルール棚卸しの提案（進化ロードマップ#2）。週次でアーカイブ担当が重複・陳腐化を提案し
@@ -762,10 +804,20 @@ def _migrate(conn):
         # 汚れた既存行（質問と回答が無関係なペア）を無効化できるようにする
         conn.execute(
             "ALTER TABLE golden_set ADD COLUMN status TEXT DEFAULT 'active'")
+    if gcols and "kind" not in gcols:
+        # 自動捕獲(auto)と人のキュレーション(curated)を分ける。
+        # status は auto: active/invalid、curated: candidate/curated/rejected
+        conn.execute("ALTER TABLE golden_set ADD COLUMN kind TEXT DEFAULT 'auto'")
+        conn.execute("ALTER TABLE golden_set ADD COLUMN source_link TEXT")
+        conn.execute("ALTER TABLE golden_set ADD COLUMN note TEXT")
     if lcols and "streak" not in lcols:
         # 助言が何回連続で蒸留されたか（定着した癖の検出＝恒久ルールへの卒業）
         conn.execute(
             "ALTER TABLE proactive_lessons ADD COLUMN streak INTEGER DEFAULT 1")
+    aicols = [r[1] for r in conn.execute("PRAGMA table_info(action_items)")]
+    if aicols and "overdue_at" not in aicols:
+        # 超過の声かけ日時。ここから STALE_DAYS 動きが無ければ追跡を手放す
+        conn.execute("ALTER TABLE action_items ADD COLUMN overdue_at TEXT")
 
 
 #: meta テーブルのキー: このアーカイブが記録しているDiscordサーバー
@@ -1608,6 +1660,59 @@ def add_proactive_log(conn, *, agent_id, kind, action, channel_id=None,
     return cur.lastrowid
 
 
+LLM_CALL_COLUMNS = (
+    "agent_id", "purpose", "model", "ok", "error", "wall_ms", "duration_ms",
+    "num_turns", "cost_usd", "input_tokens", "output_tokens",
+    "cache_read_tokens", "cache_creation_tokens", "thinking_tokens",
+    "tool_calls", "denials", "stop_reason", "created_at")
+
+
+def add_llm_call(conn, **fields):
+    """LLM呼び出しの記録（v4 Phase 0）。未知のキーは無視し、既知の列だけ保存する
+    （invoke_claude 側の meta が増えても書込が落ちない）。採番idを返す。"""
+    row = {c: fields.get(c) for c in LLM_CALL_COLUMNS}
+    if row["ok"] is not None:
+        row["ok"] = 1 if row["ok"] else 0
+    cols = ", ".join(LLM_CALL_COLUMNS)
+    marks = ", ".join("?" for _ in LLM_CALL_COLUMNS)
+    cur = conn.execute(
+        f"INSERT INTO llm_calls({cols}) VALUES({marks})",
+        tuple(row[c] for c in LLM_CALL_COLUMNS))
+    return cur.lastrowid
+
+
+def write_quota_allow(conn, scope, user_id, day, limit):
+    """枠内なら count を +1 して True、上限なら False（1トランザクション内）。"""
+    row = conn.execute(
+        "SELECT count FROM write_quota WHERE scope=? AND user_id=? AND day=?",
+        (scope, user_id, day)).fetchone()
+    n = row[0] if row else 0
+    if n >= int(limit):
+        return False
+    conn.execute(
+        """INSERT INTO write_quota(scope, user_id, day, count) VALUES(?,?,?,1)
+           ON CONFLICT(scope, user_id, day) DO UPDATE SET count=count+1""",
+        (scope, user_id, day))
+    conn.execute("DELETE FROM write_quota WHERE day < ?", (day,))
+    return True
+
+
+def llm_daily(conn, since):
+    """日別の呼び出し数・失敗数・コスト・平均/最大所要（since は created_at 形式）。
+    週次レポートと自己点検の物差し。"""
+    cur = conn.execute(
+        """SELECT substr(created_at, 1, 10) AS day,
+                  COUNT(*) AS calls,
+                  SUM(CASE WHEN ok=0 THEN 1 ELSE 0 END) AS failed,
+                  COALESCE(SUM(cost_usd), 0) AS cost_usd,
+                  CAST(AVG(duration_ms) AS INTEGER) AS avg_ms,
+                  MAX(duration_ms) AS max_ms
+             FROM llm_calls WHERE created_at >= ?
+            GROUP BY day ORDER BY day DESC""", (since,))
+    cols = [d[0] for d in cur.description]
+    return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+
 def count_proactive_spoken_since(conn, agent_id, since, kind=None):
     """since（fmt形式文字列）以降の自発「発言」数。日次枠の執行に使う。
     納期声かけ(action='nudge')・追跡開始(action='track')は枠と別勘定で数えない。
@@ -1675,7 +1780,8 @@ def proactive_stats_since(conn, since):
 
 _ACTION_COLS = ("id", "agent_id", "source_message_id", "channel_id",
                 "confirm_message_id", "task", "owners", "due_date", "urgent",
-                "status", "nudge_stage", "last_nudge_message_id", "created_at")
+                "status", "nudge_stage", "last_nudge_message_id", "created_at",
+                "overdue_at")
 
 
 def _action_row(row):
@@ -1713,11 +1819,59 @@ def open_action_items(conn, agent_id):
     return [_action_row(r) for r in rows]
 
 
-def update_action_nudge(conn, item_id, *, stage, message_id):
-    """声かけ済み段階を前進させる（重複声かけ防止）。"""
+def update_action_nudge(conn, item_id, *, stage, message_id, now=None):
+    """声かけ済み段階を前進させる（重複声かけ防止）。超過に達した日時を記録する
+    （手放し判定の起点）。"""
     conn.execute(
         """UPDATE action_items SET nudge_stage=?, last_nudge_message_id=?
            WHERE id=?""", (stage, message_id, item_id))
+    if stage == "overdue" and now:
+        conn.execute(
+            "UPDATE action_items SET overdue_at=COALESCE(overdue_at, ?) WHERE id=?",
+            (now, item_id))
+
+
+def stale_action_items(conn, agent_id, before):
+    """超過の声かけから動きが無い open のタスク（overdue_at <= before）。"""
+    rows = conn.execute(
+        f"""SELECT {','.join(_ACTION_COLS)} FROM action_items
+            WHERE agent_id=? AND status='open' AND nudge_stage='overdue'
+              AND overdue_at IS NOT NULL AND overdue_at <= ?
+            ORDER BY due_date ASC""", (agent_id, before)).fetchall()
+    return [_action_row(r) for r in rows]
+
+
+def set_action_status(conn, item_id, agent_id, status):
+    """状態を直接更新（stale 化・会話からの再開）。対象があれば True。"""
+    cur = conn.execute(
+        "UPDATE action_items SET status=? WHERE id=? AND agent_id=?",
+        (status, item_id, agent_id))
+    return cur.rowcount > 0
+
+
+def open_homework_items(conn, agent_id):
+    """追跡中（open/asked/asked2）の宿題（確認日順）。統一ビュー用。"""
+    rows = conn.execute(
+        f"""SELECT {','.join(_HOMEWORK_COLS)} FROM homework_items
+            WHERE agent_id=? AND status IN ('open','asked','asked2')
+            ORDER BY follow_up_date ASC""", (agent_id,)).fetchall()
+    return [_homework_row(r) for r in rows]
+
+
+def get_homework_item(conn, item_id, agent_id):
+    for r in open_homework_items(conn, agent_id):
+        if r["id"] == item_id:
+            return r
+    return None
+
+
+def set_homework_follow_up(conn, item_id, agent_id, follow_up_date):
+    """宿題の確認日を変更して open に戻す（催促済みでも追跡し直す）。"""
+    cur = conn.execute(
+        """UPDATE homework_items SET follow_up_date=?, status='open'
+           WHERE id=? AND agent_id=? AND status IN ('open','asked','asked2')""",
+        (follow_up_date, item_id, agent_id))
+    return cur.rowcount > 0
 
 
 def complete_action_by_nudge_message(conn, message_id):
@@ -2376,14 +2530,34 @@ def is_unsolicited_post(conn, message_id):
         (message_id,)).fetchone() is not None
 
 
-def golden_rows(conn, active_only=True):
+def golden_rows(conn, active_only=True, statuses=None):
+    """statuses 指定でその status だけ（例: ("curated",)）。active_only は旧互換。"""
+    where = ""
+    params = ()
+    if statuses:
+        where = "WHERE status IN (%s)" % ",".join("?" for _ in statuses)
+        params = tuple(statuses)
+    elif active_only:
+        where = "WHERE status='active'"
     rows = conn.execute(
-        f"""SELECT id, agent_id, question, answer, source_answer_id, status
-            FROM golden_set
-            {"WHERE status='active'" if active_only else ""}
-            ORDER BY id""").fetchall()
+        f"""SELECT id, agent_id, question, answer, source_answer_id, status,
+                   channel_id, kind, source_link, note, created_at
+            FROM golden_set {where} ORDER BY id""", params).fetchall()
     return [{"id": r[0], "agent_id": r[1], "question": r[2], "answer": r[3],
-             "source_answer_id": r[4], "status": r[5]} for r in rows]
+             "source_answer_id": r[4], "status": r[5], "channel_id": r[6],
+             "kind": r[7] or "auto", "source_link": r[8], "note": r[9],
+             "created_at": r[10]} for r in rows]
+
+
+def add_golden_candidate(conn, *, agent_id, question, answer, source_link,
+                         note, created_at):
+    """キュレーション候補（人が採用/不採用を決める）。採番idを返す。"""
+    cur = conn.execute(
+        """INSERT INTO golden_set(agent_id, question, answer, source_answer_id,
+               channel_id, created_at, status, kind, source_link, note)
+           VALUES(?,?,?,NULL,NULL,?,'candidate','curated',?,?)""",
+        (agent_id, question, answer, created_at, source_link, note))
+    return cur.lastrowid
 
 
 def set_golden_status(conn, golden_id, status):
@@ -3016,6 +3190,14 @@ def proactive_hit_stats(conn, agent_id):
     return {"spoke": row[0] or 0, "up": row[1] or 0, "down": row[2] or 0}
 
 
+def count_proactive_log_detail_like(conn, kind, pattern, since):
+    """kind の行のうち detail が pattern（LIKE）に一致する件数（ツール利用の集計用）。"""
+    return conn.execute(
+        """SELECT COUNT(*) FROM proactive_log
+           WHERE kind=? AND detail LIKE ? AND created_at >= ?""",
+        (kind, pattern, since)).fetchone()[0]
+
+
 def count_proactive_log_since(conn, kind, action, since):
     """proactive_logの種別別カウント（週次レポート用の汎用集計）。"""
     return conn.execute(
@@ -3073,11 +3255,14 @@ def recent_proactive_lessons(conn, agent_id, limit=5, polarity="down"):
     return [{"kind": r[0], "text": r[1]} for r in rows]
 
 
-def replace_advice_lessons(conn, agent_id, texts, created_at):
+def replace_advice_lessons(conn, agent_id, texts, created_at, match=None):
     """蒸留結果を助言枠へ反映する（マージ方式・2026-08-18に差し替えから変更）。
     同じ文言が再び蒸留されたら streak を+1して活かし続ける＝「毎週同じことを
     学び直す」のを止め、定着した癖を検出できるようにする。
     今回出なかった助言は無効化する（枠は最新の関心事で保つ）。
+    match(text, candidate_texts) -> 一致した既存文言 or None。言い直しを
+    同一視する。完全一致だけだと毎週少し違う文言で streak がリセットされ、
+    3週連続の卒業提案が一度も発火しなかった。
     Returns: [{"id","text","streak"}]（反映後のactive助言）"""
     rows = conn.execute(
         """SELECT id, text, streak FROM proactive_lessons
@@ -3086,7 +3271,9 @@ def replace_advice_lessons(conn, agent_id, texts, created_at):
     existing = {r[1]: {"id": r[0], "streak": r[2] or 1} for r in rows}
     out = []
     for text in texts:
-        prev = existing.pop(text, None)
+        key = text if text in existing else (
+            match(text, list(existing.keys())) if match else None)
+        prev = existing.pop(key, None) if key else None
         if prev:
             streak = (prev["streak"] or 1) + 1
             conn.execute(

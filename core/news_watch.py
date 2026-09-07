@@ -88,7 +88,7 @@ def fetch(keywords, *, model, invoke_fn=None, now=None):
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
         p, model=model, timeout=TIMEOUT_SEC,
         allowed_tools=("WebSearch", "WebFetch"),
-        allow=("WebSearch", "WebFetch")).text)
+        allow=("WebSearch", "WebFetch"), purpose="news").text)
     try:
         return parse_items(fn(build_prompt(keywords,
                                            now.strftime("%Y-%m-%d"))))

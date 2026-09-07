@@ -88,7 +88,8 @@ def declare(db_path, agent_id, name, *, model, invoke_fn=None, now=None):
     stats = collect(db_path, agent_id, now)
     q = (now.month - 1) // 3 + 1
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
-        p, model=model, timeout=DECLARE_TIMEOUT_SEC).text)
+        p, model=model, timeout=DECLARE_TIMEOUT_SEC,
+        purpose="kpi").text)
     try:
         text = (fn(build_prompt(name, stats, f"{now.year}年Q{q}")) or "").strip()
     except Exception:

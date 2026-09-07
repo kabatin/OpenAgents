@@ -76,7 +76,8 @@ def extract_from_minutes(minutes_text, minutes_date, *,
     """議事録テキスト→決定事項リスト。invoke_fnはテスト差し替え口。"""
     prompt = build_minutes_prompt(minutes_text, minutes_date)
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
-        p, model=model, timeout=EXTRACT_TIMEOUT_SEC).text)
+        p, model=model, timeout=EXTRACT_TIMEOUT_SEC,
+        purpose="decisions").text)
     return parse_minutes_response(fn(prompt))
 
 

@@ -110,7 +110,8 @@ def discover(db_path, *, model, invoke_fn=None, now=None):
     if len(tasks) < MIN_ITEMS:
         return []
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
-        p, model=model, timeout=DISCOVER_TIMEOUT_SEC).text)
+        p, model=model, timeout=DISCOVER_TIMEOUT_SEC,
+        purpose="discover").text)
     return parse_ideas(fn(build_prompt(tasks)))
 
 

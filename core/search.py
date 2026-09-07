@@ -13,12 +13,12 @@
 import os
 import re
 import json
-import subprocess
 import sqlite3
 
 from core import chat
 from core import config
 from core import db
+from core import invoke_claude
 from core import llm
 from core import msgref
 from core import paths
@@ -30,14 +30,6 @@ from core.attachments import (
 #: 設定を渡されなかったときのモデル（利用者が config.llm.model を書けばそちら）
 DEFAULT_MODEL = llm.BUILTIN_PROVIDERS["claude"]["default_model"]
 CLAUDE_TIMEOUT_SEC = llm.LONG_TIMEOUT_SEC
-
-# 添付読解でツールを許可する際のガード（プロンプトインジェクション対策）。
-# 主防御は --permission-mode default: ヘッドレスではcwd（添付一時dir）外の
-# Readが自動拒否され、Readをcwdに閉じ込められる。このdenyは万一モード指定が
-# 効かない場合の二重防御（~/.ssh・token入りconfig等の最重要秘密を遮断。
-# denyはモード/allowより常に優先）。
-_TOOL_GUARD_SETTINGS = json.dumps(
-    {"permissions": {"deny": ["Read(~/**)"]}})
 
 # エージェント定義: {"name": 表示名, "persona_files": [パス...], "role": 担当説明}
 # persona_files は上から順に連結される（人物像 → 話し方 → 守ること の順を想定）。
@@ -83,7 +75,7 @@ def _config():
 
 
 def run_claude(prompt, model=None, timeout=CLAUDE_TIMEOUT_SEC,
-               allowed_tools=None, cwd=None, cfg=None):
+               allowed_tools=None, cwd=None, cfg=None, purpose="other"):
     """プロンプトを渡して本文を受け取る。
 
     テキスト生成だけなら設定で選ばれた任意のAI（Claude Code / Codex CLI /
@@ -91,41 +83,27 @@ def run_claude(prompt, model=None, timeout=CLAUDE_TIMEOUT_SEC,
     それ以外のプロバイダを選んでいる場合は理由を添えて断る
     （黙ってツール無しで実行すると、添付を読まずに答えてしまう）。
 
+    Claude Code を選んでいるときは、テキスト生成も core.invoke_claude に
+    委譲する（起動方法と計測を1箇所に集約。観察系の呼び出しも同じ
+    llm_calls 台帳に乗る）。他のプロバイダは llm.generate のままで、
+    計測台帳には載らない（stream-json を出さないため取れる値が無い）。
+
     allowed_tools: 有効化するツール名タプル（例: ("Read",)。添付読解用）。
     指定時はホーム配下Read禁止のガード設定を併せて渡す。
     cwd: 作業ディレクトリ（添付の一時dirを想定）。
+    purpose: 計測用の用途ラベル。
     """
     config = cfg if cfg is not None else _config()
-    if not allowed_tools:
+    if not allowed_tools and llm.selected(config) != "claude":
         return llm.generate(prompt, config, timeout=timeout)
 
-    # --- ここから下はツールが要る経路（Claude Code 専用） ---
-    if not llm.supports_tools(config):
+    # --- ここから下は Claude Code の経路（ツール要求時は他プロバイダを断る） ---
+    if allowed_tools and not llm.supports_tools(config):
         raise RuntimeError(llm.describe_limits(config))
-    spec = llm.spec_for(config, "claude")
-    claude_bin = llm.find_binary(spec)
-    if claude_bin is None:
-        raise RuntimeError("claude CLI が見つかりません")
-    argv = [claude_bin, "-p", "--model", model or llm.model_for(config),
-            "--tools", ",".join(allowed_tools),
-            "--permission-mode", "default",   # cwd外Readを自動拒否
-            "--settings", _TOOL_GUARD_SETTINGS]
-    proc = subprocess.run(
-        argv,
-        input=prompt,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        cwd=cwd,
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"claude CLI 失敗 (exit={proc.returncode}): {proc.stderr.strip()[:500]}"
-        )
-    reply = proc.stdout.strip()
-    if not reply:
-        raise RuntimeError("claude の出力が空でした")
-    return reply
+    return invoke_claude.invoke(
+        prompt, model=model or llm.model_for(config, "claude"),
+        timeout=timeout, allowed_tools=tuple(allowed_tools or ()), cwd=cwd,
+        purpose=purpose).text
 
 
 def extract_keywords(question, model=DEFAULT_MODEL, history="", claude_fn=None,
@@ -147,7 +125,8 @@ def extract_keywords(question, model=DEFAULT_MODEL, history="", claude_fn=None,
         "・JSON配列のみ出力（説明文・コードブロック不要）\n\n"
         f"{ctx}質問: {question}"
     )
-    fn = claude_fn or (lambda p: run_claude(p, model=model, timeout=120))
+    fn = claude_fn or (lambda p: run_claude(p, model=model, timeout=120,
+                                            purpose="keywords"))
     try:
         raw = fn(prompt)
         m = re.search(r"\[.*\]", raw, re.S)
@@ -340,7 +319,12 @@ GENERAL_SYSTEM_TMPL = """あなたはチームのチャットのアシスタン�
 
 def _build_system(template, agent):
     """テンプレートの {name}/{role_block} を埋める。
-    role は自己完結した文（複数行可: 担当説明・同僚一覧・スキル指示など）。"""
+    role は自己完結した文（複数行可: 担当説明・同僚一覧・スキル指示など）。
+    旧経路では agent["context"]（会話ごとの前提）も role に含める（runner 経路は
+    user プロンプト側に置く）。"""
+    if agent.get("context") and "{role_block}" in template:
+        agent = dict(agent, role=(agent.get("role") or "") + "\n"
+                     + agent["context"])
     role = (agent.get("role") or "").strip()
     role_block = f"\n{role}" if role else ""
     return template.format(name=agent["name"], role_block=role_block)
@@ -398,7 +382,8 @@ def answer_question(db_path, guild_id, question, model=DEFAULT_MODEL,
         system = _build_system(GENERAL_SYSTEM_TMPL, agent)
         prompt = (f"{persona}{system}\n\n{convo_block}【質問】\n{question}"
                   f"{ref_block}{att_block}")
-        answer = run_claude(prompt, model=model, **claude_kwargs)
+        answer = run_claude(prompt, model=model, purpose="answer",
+                            **claude_kwargs)
         return {"answer": answer, "keywords": keywords, "hits": 0}
     context = build_context(rows, guild_id)
     system = _build_system(ANSWER_SYSTEM_TMPL, agent)
@@ -406,5 +391,6 @@ def answer_question(db_path, guild_id, question, model=DEFAULT_MODEL,
         f"{persona}{system}\n\n{convo_block}【質問】\n{question}\n\n"
         f"【関連メッセージ】\n{context}{ref_block}{att_block}"
     )
-    answer = run_claude(prompt, model=model, **claude_kwargs)
+    answer = run_claude(prompt, model=model, purpose="answer",
+                        **claude_kwargs)
     return {"answer": answer, "keywords": keywords, "hits": len(rows)}

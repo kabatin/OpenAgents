@@ -155,7 +155,8 @@ def extract_items(minutes_text, minutes_date, *, model=search.DEFAULT_MODEL,
     """議事録→追跡対象TODO。invoke_fnはテスト差し替え口。"""
     prompt = build_extract_prompt(minutes_text, minutes_date, channels)
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
-        p, model=model, timeout=EXTRACT_TIMEOUT_SEC).text)
+        p, model=model, timeout=EXTRACT_TIMEOUT_SEC,
+        purpose="minutes").text)
     return parse_extract_response(fn(prompt), minutes_date, channels)
 
 
@@ -286,10 +287,37 @@ def build_nudge_text(item, stage, guild_id):
             f"元の議事録: {link}")
 
 
-def record_nudge(db_path, item_id, stage, message_id):
+def record_nudge(db_path, item_id, stage, message_id, now=None):
     with db.connect(db_path) as conn:
-        db.update_action_nudge(conn, item_id, stage=stage,
-                               message_id=message_id)
+        db.update_action_nudge(
+            conn, item_id, stage=stage, message_id=message_id,
+            now=reminders.fmt(now or reminders.now_jst()))
+
+
+# ---------------------------------------------------------------- 3b) 手放し
+
+STALE_DAYS = 7          # 超過の声かけからこれだけ動きが無ければ追跡を手放す
+STALE_PER_CYCLE = 3
+
+
+def items_needing_stale(db_path, agent_id, now, days=STALE_DAYS):
+    """超過の声かけから days 日以上動きが無い open のタスク。
+    超過後に open のまま永久に残って一覧を汚すのを止める出口。"""
+    before = reminders.fmt(now - timedelta(days=days))
+    with db.connect(db_path) as conn:
+        return db.stale_action_items(conn, agent_id, before)[:STALE_PER_CYCLE]
+
+
+def build_stale_text(item):
+    """手放しの一言（静的文面・メンションしない）。再開の手段を添える。"""
+    return (f"📭 「{item['task'][:60]}」（期日 {item['due_date']}）は動きが無いので"
+            f"追跡を手放します。再開するなら会話で「A{item['id']} を open に」か、"
+            "追跡宣言に✅を付けてください")
+
+
+def mark_stale(db_path, item_id, agent_id):
+    with db.connect(db_path) as conn:
+        return db.set_action_status(conn, item_id, agent_id, "stale")
 
 
 # ---------------------------------------------------------------- 4) 完了・取消

@@ -94,7 +94,8 @@ def compile_page(db_path, topic, guild_id, *, model, invoke_fn=None,
     if not (material["decisions"] or material["messages"]):
         return None
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
-        p, model=model, timeout=COMPILE_TIMEOUT_SEC).text)
+        p, model=model, timeout=COMPILE_TIMEOUT_SEC,
+        purpose="wiki").text)
     page = (fn(build_compile_prompt(topic, material, guild_id, today))
             or "").strip()
     return page[:MAX_PAGE_CHARS + 100] if page else None

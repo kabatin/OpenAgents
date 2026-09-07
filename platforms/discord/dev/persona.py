@@ -52,6 +52,10 @@ def progress(phase, ops, last):
     return f"🔧 {phase}です…（{ops}手目{tail}）"
 
 
+def job_phase_verify():
+    return "🔍 別のコンテキストで起票と差分を照合しています…"
+
+
 def job_phase_test():
     return "🧪 テストとpyflakes回してます…もうちょっとです！"
 

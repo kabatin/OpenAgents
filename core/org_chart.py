@@ -155,7 +155,8 @@ def checkup(name, persona_text, utterances, *, model, invoke_fn=None):
     if not utterances:
         return None
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
-        p, model=model, timeout=CHECKUP_TIMEOUT_SEC).text)
+        p, model=model, timeout=CHECKUP_TIMEOUT_SEC,
+        purpose="org_chart").text)
     try:
         return (fn(build_checkup_prompt(name, persona_text,
                                         utterances)) or "").strip()[:800]

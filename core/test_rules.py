@@ -332,3 +332,19 @@ class CorrectionTest(unittest.TestCase):
         self.assertIn("[RULE:", note)
         self.assertIn("訂正: ", note)
         self.assertIn("勝手に保存しない", note)
+
+    def test_tools_variant_names_tools_not_markers(self):
+        # ツールループ本番ではマーカーではなくツール名で指示し、
+        # 自分の癖への指摘は save_lesson で教訓に残す
+        t = rules.build_correction_note(tools=True)
+        self.assertIn("save_fact", t)
+        self.assertIn("save_rule", t)
+        self.assertIn("save_lesson", t)
+        self.assertIn("訂正: ", t)
+        self.assertNotIn("[FACT:", t)
+        self.assertNotIn("[RULE:", t)
+        m = rules.build_correction_note(tools=False)
+        self.assertIn("[FACT:", m)
+        s = rules.build_correction_note(state_only=True, tools=True)
+        self.assertIn("【状況の反映】", s)
+        self.assertIn("save_fact", s)

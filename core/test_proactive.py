@@ -5,6 +5,7 @@
 日次枠の執行を検証する。claude 呼び出しは invoke_fn/search_fn で注入する。
 """
 
+import json
 import os
 import tempfile
 import unittest
@@ -733,3 +734,56 @@ class ColleagueQuotaTest(unittest.TestCase):
                 conn, "agent1", midnight), 2)
             self.assertEqual(db.count_proactive_spoken_since(
                 conn, "agent1", midnight, kind="colleague"), 1)
+
+
+class WeeklyReportV4Test(unittest.TestCase):
+    """v4: 手放したTODO・ツール使用率・教訓の参照/記録・模範Q&Aの回帰採点の行。"""
+
+    def test_new_lines(self):
+        stats = {"agents": {}, "open_action_items": 2, "stale_week": 1,
+                 "tool_used_week": 7, "tool_unused_week": 3, "lessons_week": 2,
+                 "golden_latest": {"mean": 3.4, "n": 15, "date": "20260913"}}
+        text = proactive.build_weekly_report(stats, [], "09/06")
+        self.assertIn("手放した追跡TODO: 今週1件", text)
+        self.assertIn("7/10件（70%）", text)
+        self.assertIn("教訓の参照/記録2回", text)
+        self.assertIn("平均3.4点/5（15問・20260913）", text)
+        text2 = proactive.build_weekly_report({"agents": {}}, [], "09/06")
+        self.assertNotIn("ツールで調べて", text2)
+        self.assertNotIn("手放した追跡TODO", text2)
+
+    def test_golden_eval_latest(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertIsNone(proactive.golden_eval_latest(d))
+            for name, mean in (("20260906-2223.json", 3.07),
+                               ("20260913-0330.json", 3.4)):
+                with open(os.path.join(d, name), "w") as f:
+                    json.dump({"mean": mean, "scored": 15}, f)
+            g = proactive.golden_eval_latest(d)
+        self.assertEqual((g["mean"], g["n"], g["date"]), (3.4, 15, "20260913"))
+
+    def test_golden_eval_latest_ignores_broken_json(self):
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "20260913-0330.json"), "w") as f:
+                f.write("{broken")
+            self.assertIsNone(proactive.golden_eval_latest(d))
+
+
+class WeeklyStatsV4Test(ProactiveTestBase):
+    def test_counts_from_proactive_log(self):
+        since = "2026-07-30T00:00"
+        for action in ("used", "used", "unused"):
+            proactive.log_entry(self.db_path, "agent1", kind="tool_loop",
+                                action=action, channel_id=1,
+                                trigger_message_id=1, detail="search_messages")
+        proactive.log_entry(self.db_path, "agent1", kind="tool_loop",
+                            action="used", channel_id=1, trigger_message_id=2,
+                            detail="recall_lessons, save_lesson")
+        proactive.log_entry(self.db_path, "agent1", kind="deadline",
+                            action="stale", channel_id=1, trigger_message_id=3,
+                            detail="x")
+        stats = proactive.weekly_stats(self.db_path, since)
+        self.assertEqual(stats["stale_week"], 1)
+        self.assertEqual(stats["tool_used_week"], 3)
+        self.assertEqual(stats["tool_unused_week"], 1)
+        self.assertEqual(stats["lessons_week"], 2)

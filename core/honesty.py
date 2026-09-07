@@ -124,6 +124,38 @@ ASSERTION_RE = re.compile(
 LINK_RE = re.compile(r"https?://(?:\w+\.)?discord(?:app)?\.com/channels/")
 
 
+# ツールループ本番用: 完了主張の kind ごとに「呼ばれていれば実行した」とみなす archive
+# ツール（v4）。-# 行の書式に依存しないので、新しいツールを足しても
+# ここに名前を1つ足すだけで済む（DEEDS の正規表現は旧マーカー経路の保険として残す）
+CLAIM_TOOLS = {
+    "remind": {"add_reminder", "cancel_reminder"},
+    "rule": {"save_rule", "cancel_rule"},
+    "capability": {"request_capability"},
+    "action": {"update_task"},
+    "memory": {"save_fact", "cancel_fact", "save_rule", "cancel_rule",
+               "save_glossary", "save_term", "save_lesson"},
+}
+
+
+def register_tools(kind, tool_names):
+    """外部連携が自分のツール名を「できたフリ」検出（ツール版）に加える。"""
+    CLAIM_TOOLS.setdefault(kind, set()).update(tool_names)
+
+
+def detect_fake_done_by_tools(answer, tools_used, skip=()):
+    """完了主張があるのに、対応する archive ツールが1つも呼ばれていない kind
+    （純粋関数・ツールループ本番用）。tools_used は短いツール名の集合。"""
+    text = answer or ""
+    used = set(tools_used or ())
+    missing = []
+    for kind, claim_re in CLAIMS.items():
+        if kind in skip:
+            continue
+        if claim_re.search(text) and not (used & CLAIM_TOOLS.get(kind, set())):
+            missing.append(kind)
+    return missing
+
+
 def detect_fake_done(answer, skip=()):
     """完了主張があるのに実行の証拠（-#行）が無い kind のリストを返す（純粋関数）。
     skip: 検査しない kind（そのスキルを持たないエージェントの誤検出防止）。"""

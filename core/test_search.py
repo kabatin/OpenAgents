@@ -8,8 +8,10 @@ import unittest
 
 from core import attachments
 from core import db
+from core import invoke_claude
 from core import llm
 from core import search
+from core import invoke_claude
 
 #: 検索を差し替えるので中身は使われない。それでも sqlite が触るので、
 #: リポジトリを汚さないよう一時ファイルにする
@@ -47,26 +49,50 @@ class _FakeBinary:
         llm.find_binary = self._find
 
 
+# run_claude は invoke_claude（stream-json）経由になったので、偽の stdout もその形にする
+_STREAM_OK = ('{"type": "result", "subtype": "success", "result": "ok", '
+              '"total_cost_usd": 0.01, "duration_ms": 5, "num_turns": 1}')
+
+
 class RunClaudeTest(unittest.TestCase):
     def test_all_tools_disabled(self):
         # -p はツール実行を挟むと最終メッセージしか返さず本文が失われる。
-        # --tools "" が常に付くことを保証する（YouTube要約欠落の再発防止）
+        # --tools "" が常に付くことを保証する（YouTube要約欠落の再発防止）。
+        # v4 Phase 0 で invoke_claude に委譲したので、起動はそちらを捕まえる
         captured = {}
 
         def fake_run(cmd, **kw):
             captured["cmd"] = cmd
-            return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+            return SimpleNamespace(returncode=0, stdout=_STREAM_OK, stderr="")
 
-        orig = search.subprocess.run
+        orig = invoke_claude.subprocess.run
         try:
-            search.subprocess.run = fake_run
+            invoke_claude.subprocess.run = fake_run
             with _FakeBinary():
-                search.run_claude("テスト")
+                out = search.run_claude("テスト")
         finally:
-            search.subprocess.run = orig
+            invoke_claude.subprocess.run = orig
         cmd = captured["cmd"]
         self.assertIn("--tools", cmd)
         self.assertEqual(cmd[cmd.index("--tools") + 1], "")
+        self.assertEqual(out, "ok")  # 本文（result イベント）を返す
+
+    def test_other_provider_uses_llm_generate(self):
+        # Claude Code 以外を選んでいるときはテキスト生成を llm.generate に任せる
+        captured = {}
+
+        def fake_generate(prompt, cfg, *, timeout=None, provider=None):
+            captured["prompt"] = prompt
+            return "こたえ"
+
+        orig = search.llm.generate
+        try:
+            search.llm.generate = fake_generate
+            out = search.run_claude("q", cfg={"llm": {"provider": "codex"}})
+        finally:
+            search.llm.generate = orig
+        self.assertEqual(out, "こたえ")
+        self.assertEqual(captured["prompt"], "q")
 
 
 class LoadPersonaTest(unittest.TestCase):
@@ -87,15 +113,15 @@ class RunClaudeAttachmentTest(unittest.TestCase):
         def fake_run(cmd, **kw):
             captured["cmd"] = cmd
             captured["kw"] = kw
-            return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+            return SimpleNamespace(returncode=0, stdout=_STREAM_OK, stderr="")
 
-        orig = search.subprocess.run
+        orig = invoke_claude.subprocess.run
         try:
-            search.subprocess.run = fake_run
+            invoke_claude.subprocess.run = fake_run
             with _FakeBinary():
                 search.run_claude("テスト", **kwargs)
         finally:
-            search.subprocess.run = orig
+            invoke_claude.subprocess.run = orig
         return captured
 
     def test_default_argv_unchanged(self):

@@ -119,7 +119,8 @@ def check(db_path, new_decision, *, model, invoke_fn=None):
     if not any(cands.values()):
         return []
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
-        p, model=model, timeout=TIMEOUT_SEC).text)
+        p, model=model, timeout=TIMEOUT_SEC,
+        purpose="ripple").text)
     return parse_impacts(fn(build_prompt(new_decision, cands)), cands)
 
 

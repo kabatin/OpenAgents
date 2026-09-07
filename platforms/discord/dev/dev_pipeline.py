@@ -385,7 +385,9 @@ def stream_claude(prompt, cwd, on_event, *, model=MODEL,
     if error is None and proc.returncode not in (0, None):
         tail = "".join(c for c in stderr_chunks if c)[-300:]
         error = f"claude exit={proc.returncode}: {tail}"
+    stderr_all = "".join(c for c in stderr_chunks if c)
     return {"ok": error is None, "final_text": final_text, "error": error,
+            "stderr": stderr_all[-2000:],
             "n_events": n}
 
 
@@ -510,32 +512,116 @@ _DEPS_HINTS = ("requirements", "pyproject.toml", "setup.py", "setup.cfg")
 _TESTED_DIRS = {"core", "platforms"}
 
 
+# エージェントの中核（脳と安全弁）。設計原則「手足は生やさせ、脳と安全弁は
+# 触らせない」を機械化する第一歩: 禁止ではなく、触れたら必ず警告して diff を
+# 読ませる（v4 Phase 5）
+BRAIN_FILES = ("platforms/discord/bot.py", "platforms/discord/agent_runtime.py",
+               "platforms/discord/agent_loops.py",
+               "core/honesty.py", "core/rules.py", "core/db.py",
+               "core/invoke_claude.py",
+               "core/archive_tools/registry.py", "core/archive_tools/server.py",
+               "core/archive_tools/launch.py")
+
+
+def brain_files_touched(files):
+    """変更ファイルのうち中核に当たるものの basename 一覧（純粋関数）。"""
+    hits = []
+    for f in files or []:
+        norm = f.replace("\\", "/")
+        if any(norm.endswith(b) for b in BRAIN_FILES):
+            hits.append(os.path.basename(norm))
+    return hits
+
+
+# 1ジョブの一次証拠の置き場（state/ 配下＝git 管理外）
+JOBS_DIR = os.path.join(paths.LOGS_DIR, "dev-jobs")
+
+
+def job_log_path(job_id):
+    return os.path.join(JOBS_DIR, f"{int(job_id)}.log")
+
+
+def job_log_label(job_id):
+    """承認者向けの注意書きに載せる実行ログの場所（純粋関数）。"""
+    rel = os.path.relpath(job_log_path(job_id), paths.ROOT)
+    return f"🗒 実行ログ: {rel}（失敗の一次証拠）"
+
+
+class JobLog:
+    """1ジョブの一次証拠（claude のイベント・エラー・stderr）をファイルに残す。
+    常駐の再起動で bot.log が流れ、失敗の原因が追えなかった反省（v4 Phase 5）。"""
+
+    def __init__(self, path):
+        self.path = path
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        self._f = open(path, "a", encoding="utf-8")
+
+    def _line(self, text):
+        self._f.write(time.strftime("%m-%d %H:%M:%S ") + text + "\n")
+        self._f.flush()
+
+    def event(self, ev):
+        try:
+            t = ev.get("type")
+            if t == "assistant":
+                for b in (ev.get("message") or {}).get("content") or []:
+                    if not isinstance(b, dict):
+                        continue
+                    if b.get("type") == "tool_use":
+                        arg = json.dumps(b.get("input"), ensure_ascii=False)[:160]
+                        self._line(f"TOOL {b.get('name')} {arg}")
+                    elif b.get("type") == "text" and (b.get("text") or "").strip():
+                        self._line("TEXT " + b["text"].strip()[:300].replace("\n", " / "))
+            elif t == "user":
+                for b in (ev.get("message") or {}).get("content") or []:
+                    if (isinstance(b, dict) and b.get("type") == "tool_result"
+                            and b.get("is_error")):
+                        self._line("TOOL_ERROR " + str(b.get("content"))[:200])
+            elif t == "result":
+                self._line(f"RESULT {ev.get('subtype')} turns={ev.get('num_turns')} "
+                           f"cost={ev.get('total_cost_usd')} {(ev.get('result') or '')[:200]}")
+        except Exception as e:  # noqa: BLE001 - ログで本流を止めない
+            self._line(f"LOGERR {e}")
+
+    def finish(self, run):
+        if run.get("error"):
+            self._line("ERROR " + str(run["error"])[:500])
+        if run.get("stderr"):
+            self._line("STDERR " + str(run["stderr"])[-800:].replace("\n", " / "))
+        self._f.close()
+
+
 def risk_warnings(files):
     """diffの内容から、承認者(👍)に見せる注意書きを作る（純粋関数）。"""
     warns = []
     targets = restart_targets(files)
     areas = _areas_touched(files)
+    brain = brain_files_touched(files)
+    if brain:
+        warns.append("🧠 **エージェントの中核（" + "・".join(brain) + "）に触れる変更です**。"
+                     "設計上「脳と安全弁」は人間が守る場所なので、diff を必ず読んでから"
+                     "👍してください")
     if "platforms/discord/dev/" in areas and "devbot" in targets:
-        warns.append("⚠️ **開発BOT自身（あたしの脳）のコードに触れる変更**っす。"
-                     "diffは特に注意して見てほしいっす。反映時はあたしの再起動も入るっす")
+        warns.append("⚠️ **開発BOT自身（自分の脳）のコードに触れる変更です**。"
+                     "diff は特に注意して見てください。反映時は開発BOTの再起動も入ります")
     elif any(os.path.basename(f) == "dev-guidelines.md" for f in files or []):
-        warns.append("📏 実装規約(dev-guidelines)の変更っす。"
-                     "今後の全ジョブの振る舞いに効くやつっす（再起動は不要）")
+        warns.append("📏 実装規約(dev-guidelines)の変更です。"
+                     "今後の全ジョブの振る舞いに効きます（再起動は不要）")
     elif "devbot" in targets:
         warns.append("🔁 共有モジュール（core/）の変更なので、"
-                     "反映時にあたし自身の再起動も入るっす")
+                     "反映時に開発BOT自身の再起動も入ります")
     untested = _top_dirs(files) - _TESTED_DIRS
     if untested:
         warns.append(f"🧪 {'、'.join(sorted(untested))} にはテストスイートが"
-                     "無いので、自動検証は効いてないっす（目視必須）")
+                     "無いので、自動検証は効いていません（目視必須）")
     if any(any(h in os.path.basename(f) for h in _DEPS_HINTS)
            for f in files or []):
-        warns.append("📦 依存関係（requirements等）に触れる変更っす。venvへの"
-                     "installはパイプラインが面倒見ないので、承認前に中身と"
-                     "反映手順を確認してほしいっす")
+        warns.append("📦 依存関係（requirements等）に触れる変更です。venvへの"
+                     "installはパイプラインが面倒を見ないので、承認前に中身と"
+                     "反映手順を確認してください")
     if "meetingbot" in targets:
-        warns.append("🎙 反映時に meetingbot の再起動が入るっす。"
-                     "**会議の録音中でないこと**を確認してから👍してほしいっす")
+        warns.append("🎙 反映時に meetingbot の再起動が入ります。"
+                     "**会議の録音中でないこと**を確認してから👍してください")
     return warns
 
 
@@ -579,3 +665,78 @@ def run_pyflakes(root, files):
         return True, ""
     r = _run([LIVE_VENV_PY, "-m", "pyflakes", *pys], cwd=root, timeout=120)
     return r.returncode == 0, (r.stdout or r.stderr)
+
+
+# ---------------------------------------------------------------- 別コンテキストの検証（v4 Phase 5）
+
+VERIFY_MODEL = "claude-sonnet-5"
+VERIFY_TIMEOUT_SEC = 300
+_VERIFY_JSON_RE = re.compile(r"\{.*\}", re.S)
+
+
+def verify_prompt(cap_req, diff, test_tail=""):
+    """実装した本人とは別のコンテキストで「起票を満たしているか」を照合する
+    プロンプト（純粋関数）。自己批評より新しい目の方が漏れを見つける。"""
+    return (
+        "あなたはコードレビュアーです。次の能力起票に対する実装差分を、起票の要件と"
+        "照らして検証してください。必要なら Read/Grep/Glob で周辺コードを読んで構いません"
+        "（変更や実行はしない）。\n\n"
+        f"【能力起票 #{cap_req['id']}】\n{cap_req['description'][:1500]}\n\n"
+        "【差分】\n```diff\n" + (diff or "")[:12000] + "\n```\n\n"
+        + (f"【テスト結果の末尾】\n{test_tail[:800]}\n\n" if test_tail else "")
+        + "観点: (1) 起票の要件を満たすか・抜けは無いか (2) 既存の振る舞いを壊す危険 "
+        "(3) テストが変更を守っているか (4) 設定を足したのにダッシュボードのカタログに"
+        "無い、マーカー方式で書いている等の規約違反。\n"
+        "出力はJSONのみ: {\"verdict\": \"pass\"|\"concern\", "
+        "\"notes\": [\"一言ずつ最大4件\"]}"
+    )
+
+
+def parse_verify(raw):
+    """検証結果JSONの解釈（純粋関数）。壊れた出力・不明な verdict は None。"""
+    m = _VERIFY_JSON_RE.search(raw or "")
+    if not m:
+        return None
+    try:
+        data = json.loads(m.group(0))
+    except ValueError:
+        return None
+    verdict = str(data.get("verdict") or "").lower()
+    if verdict not in ("pass", "concern"):
+        return None
+    notes = [str(n)[:160] for n in (data.get("notes") or []) if str(n).strip()][:4]
+    return {"verdict": verdict, "notes": notes}
+
+
+def verify(cap_req, wt, *, model=VERIFY_MODEL, test_tail="", invoke_fn=None):
+    """差分を別コンテキストで照合する（IO）。失敗は None（best-effort）。
+    Read/Grep/Glob だけを許可し、cwd を worktree に閉じ込める。"""
+    diff = full_diff(wt)
+    if not diff.strip():
+        return None
+    prompt = verify_prompt(cap_req, diff, test_tail)
+    if invoke_fn is None:
+        from core import invoke_claude
+
+        def invoke_fn(p):
+            return invoke_claude.invoke(
+                p, model=model, allowed_tools=("Read", "Grep", "Glob"),
+                cwd=wt, timeout=VERIFY_TIMEOUT_SEC).text
+    try:
+        return parse_verify(invoke_fn(prompt))
+    except Exception as e:  # noqa: BLE001 - 検証の失敗で実装を捨てない
+        print(f"verify failed: {e}")
+        return None
+
+
+def verify_warning(result):
+    """検証結果を承認者向けの1〜2行に（純粋関数）。None は「検証できず」。"""
+    if result is None:
+        return "🔍 別コンテキストの検証: 実行できませんでした（目視で確認してください）"
+    if result["verdict"] == "pass":
+        head = "🔍 別コンテキストの検証: 問題なし"
+    else:
+        head = "🔍 別コンテキストの検証: **気になる点あり**"
+    if result["notes"]:
+        head += "\n" + "\n".join(f"　・{n}" for n in result["notes"])
+    return head

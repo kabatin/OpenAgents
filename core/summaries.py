@@ -87,7 +87,8 @@ def maybe_update(db_path, channel_id, model=invoke_claude.DEFAULT_MODEL,
         return None
     prompt = build_update_prompt((prev or {}).get("summary"), lines)
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
-        p, model=model, timeout=UPDATE_TIMEOUT_SEC).text)
+        p, model=model, timeout=UPDATE_TIMEOUT_SEC,
+        purpose="summary").text)
     summary = (fn(prompt) or "").strip()
     if not summary:
         return None

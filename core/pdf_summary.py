@@ -67,7 +67,7 @@ def summarize(persona, saved, skipped, tmpdir, user_text=""):
     戻り値は「📄 ヘッダ + 要約本文」。"""
     prompt = build_prompt(persona, saved, skipped, user_text)
     body = search.run_claude(prompt, allowed_tools=("Read",), cwd=tmpdir,
-                             timeout=attachments.TIMEOUT_SEC)
+                             timeout=attachments.TIMEOUT_SEC, purpose="pdf")
     names = [s["orig"] for s in saved]
     header = (f"📄 **{names[0]}**" if len(names) == 1
               else f"📄 PDF {len(names)}本の要約")

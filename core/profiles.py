@@ -68,7 +68,8 @@ def maybe_update_one(db_path, *, model, min_new=MIN_NEW_MESSAGES,
     prompt = build_update_prompt(cand["display_name"],
                                  (prev or {}).get("profile"), rows)
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
-        p, model=model, timeout=UPDATE_TIMEOUT_SEC).text)
+        p, model=model, timeout=UPDATE_TIMEOUT_SEC,
+        purpose="profile").text)
     profile = (fn(prompt) or "").strip()[:MAX_PROFILE_CHARS + 100]
     if not profile:
         return None

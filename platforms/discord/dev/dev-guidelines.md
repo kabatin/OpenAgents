@@ -15,11 +15,21 @@
   - 観察ループ系（定期的に見て動く）→ ロジックは新モジュール、配線は
     **agent_loops.py の `_cycle_plan()` に1行**＋サイクルメソッド追加
   - プリフック型スキル（投稿を見て即発動）→ **skill_hooks.py**
-  - マーカー型（LLM出力→副作用）→ **marker_actions.py**
+  - **エージェントが使う能力（読む・書く）→ archive_tools の tools_read.py / tools_write.py に
+    `Tool` を register する（v4 以降の標準）**。LLM の回答途中でツールとして呼ばれ、
+    結果（ok / evidence）を見てから本文が書かれる。description には「いつ使うか・書き忘れると
+    何が起きるか」を書き、evidence の -# 行は honesty.py の SUCCESS/FAIL_DEEDS と同じ書式にする。
+    権限（管理者・本人・上限）はツール内のコードで判定し、LLM の申告を信用しない
+  - マーカー型（LLM出力を正規表現で拾って副作用）→ **旧方式**。新規には使わない
+    （marker_actions.py は残っているが、ツールループ本番では除去のみ）
   - リアクション起点 → **reaction_handlers.py**
 - 外向き機能は config フラグ（既定オフ）＋シャドーモード（下記）。判定・整形の
   純粋ロジックは独立モジュールに置き、mixin からは薄く呼ぶ。
-- 既存のコード規約・命名・粒度・マーカー方式に合わせ、単一責任/KISS を保ち、差分は最小限に。
+- 既存のコード規約・命名・粒度に合わせ、単一責任/KISS を保ち、差分は最小限に。
+- **中核（bot.py / agent_runtime.py / agent_loops.py / honesty.py / rules.py / db.py /
+  invoke_claude.py / archive_tools の registry・server・launch）は原則触らない**。新しい能力は
+  ツールと独立モジュールで足す。中核に触れざるを得ない場合は要約で理由を明記する
+  （承認者に 🧠 の警告が出る）。
 - 純粋関数（テスト対象）とIOを分離する。このリポジトリの既存モジュールがその手本。
 
 ## 使ってよい手段
@@ -28,7 +38,11 @@
 - 外部ネットワークへのアクセス（curl/wget等）とパッケージ追加（pip install）は禁止。
   依存追加が必要だと判断したら、実装せず最終要約で「必要な依存」として申告する。
 - 振る舞いを変える場合は必ず対応するテストを追加/更新し、可能なら自分で
-  unittest を回して緑を確認すること（最終的にパイプラインも検証する）。
+  unittest を回して緑を確認すること（`venv/bin/python -m unittest discover -s core -t . -q`。
+  pytest ではなく unittest。システムの python3 では discord が無く動かない）。
+  最終的にパイプラインも検証する。
+- 回答の内容に影響する変更（指示文・ツールの description・注入）は、要約に
+  「golden_eval で回帰確認が必要」と明記する（パイプラインは回さない）。
 
 ## 設定を増やしたら管理ダッシュボードのカタログも直す（必須）
 

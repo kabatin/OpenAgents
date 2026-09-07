@@ -19,11 +19,16 @@ import {
   deployHistory,
   devJobs,
   glossary,
+  goldenRows,
+  llmByPurpose,
+  llmDaily,
+  llmRecent,
   observationShadow,
   recentActivity,
   roadmapItems,
   rules,
   subLoops,
+  tasksUnified,
   terms,
 } from "../db/queries.ts";
 import { avatarFor, letterAvatar } from "../ops/avatars.ts";
@@ -189,12 +194,37 @@ api.get("/data/summary", async (c) => {
 api.get("/data/rules", (c) => c.json(rules()));
 // 観察の実験（シャドー記録）と、いま効いている自己改善メモ
 api.get("/data/observations", (c) =>
-  c.json({ shadow: observationShadow(), advice: adviceLessons() }),
+  c.json({ shadow: observationShadow(), advice: adviceLessons(), golden: goldenRows() }),
+);
+// LLM呼び出し台帳（v4 Phase 0 計測）: 日別・用途別・直近
+api.get("/data/llm", (c) =>
+  c.json({ daily: llmDaily(), byPurpose: llmByPurpose(), recent: llmRecent() }),
 );
 api.get("/data/capabilities", (c) => c.json(capabilityRequests()));
 api.get("/data/roadmap", (c) => c.json(roadmapItems()));
 api.get("/data/dev-jobs", (c) => c.json({ jobs: devJobs(), deploys: deployHistory() }));
 api.get("/data/reminders", async (c) => c.json(await readReminders()));
+// 追跡タスクの統一ビュー: DB の2種＋リマインダー（JSON）を1つの形で
+api.get("/data/tasks", async (c) => {
+  const rem = await readReminders();
+  const reminders = rem.items
+    .filter((r) => r.status === "active")
+    .map((r) => ({
+      key: `R${r.id}`,
+      kind: "reminder" as const,
+      id: r.id,
+      task: r.content,
+      owner: r.user_name,
+      due: r.due,
+      status: r.status,
+      stage: r.repeat,
+      channelId: null,
+    }));
+  const rows = [...tasksUnified(), ...reminders].sort((a, b) =>
+    (a.due ?? "9999").localeCompare(b.due ?? "9999"),
+  );
+  return c.json({ items: rows });
+});
 // 名前まわりは2つで1組（正式表記を覚える辞書と、決め打ちで直す単語帳）なので
 // 1タブ＝1リクエストにまとめる
 api.get("/data/dictionary", (c) => c.json({ terms: terms(), glossary: glossary() }));

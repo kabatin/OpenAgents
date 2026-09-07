@@ -98,7 +98,8 @@ def review(db_path, agent_ids, names, *, model, invoke_fn=None, now=None):
     since = reminders.fmt(now - timedelta(days=30))
     data = collect(db_path, agent_ids, since)
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
-        p, model=model, timeout=REVIEW_TIMEOUT_SEC).text)
+        p, model=model, timeout=REVIEW_TIMEOUT_SEC,
+        purpose="persona_review").text)
     try:
         proposals = (fn(build_prompt(data, names)) or "").strip()[:1200]
     except Exception:

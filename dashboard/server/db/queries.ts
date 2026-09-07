@@ -451,10 +451,179 @@ export function glossary(): GlossaryRow[] {
   );
 }
 
+// ---------------------------------------------------------------- ゴールデン（模範Q&A）
+
+export type GoldenRow = {
+  id: number;
+  agentId: string | null;
+  kind: string | null;
+  status: string | null;
+  question: string | null;
+  answer: string | null;
+  sourceLink: string | null;
+  note: string | null;
+  createdAt: string | null;
+};
+
+/** 模範Q&A。kind=curated は人が採用/不採用を決める候補、auto は👍の自動捕獲。 */
+export function goldenRows(limit = 200): GoldenRow[] {
+  return safeQuery(
+    (conn) =>
+      conn
+        .prepare<[number], GoldenRow>(
+          `SELECT id, agent_id AS agentId, COALESCE(kind, 'auto') AS kind, status,
+                  question, answer, source_link AS sourceLink, note,
+                  created_at AS createdAt
+             FROM golden_set
+            ORDER BY CASE status WHEN 'candidate' THEN 0 WHEN 'curated' THEN 1 ELSE 2 END,
+                     id DESC
+            LIMIT ?`,
+        )
+        .all(limit),
+    [],
+  );
+}
+
 /** 自発ログの最大ID（SSEで「それ以降の新着」を取るためのカーソル） */
+// ---------------------------------------------------------------- LLM呼び出し台帳（v4 Phase 0）
+
+export type LlmDailyRow = {
+  day: string;
+  calls: number;
+  failed: number;
+  costUsd: number;
+  avgMs: number | null;
+  maxMs: number | null;
+  cacheReadTokens: number;
+  outputTokens: number;
+};
+
+export type LlmPurposeRow = {
+  agentId: string | null;
+  purpose: string | null;
+  calls: number;
+  failed: number;
+  costUsd: number;
+  avgMs: number | null;
+};
+
+export type LlmCallRow = {
+  id: number;
+  agentId: string | null;
+  purpose: string | null;
+  model: string | null;
+  ok: number | null;
+  error: string | null;
+  durationMs: number | null;
+  wallMs: number | null;
+  numTurns: number | null;
+  costUsd: number | null;
+  toolCalls: number | null;
+  denials: number | null;
+  createdAt: string | null;
+};
+
+/** created_at（"YYYY-MM-DDTHH:MM"・JST naive）と比較できる「N日前の0時」 */
+function sinceStamp(days: number): string {
+  const d = new Date(Date.now() + 9 * 3600 * 1000 - days * 86400 * 1000);
+  return `${d.toISOString().slice(0, 10)}T00:00`;
+}
+
+/** 日別: 呼び出し数・失敗・コスト・所要（claude CLI の result イベント由来）。 */
+export function llmDaily(days = 14): LlmDailyRow[] {
+  return safeQuery(
+    (conn) =>
+      conn
+        .prepare<[string], LlmDailyRow>(
+          `SELECT substr(created_at, 1, 10) AS day,
+                  COUNT(*) AS calls,
+                  SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS failed,
+                  COALESCE(SUM(cost_usd), 0) AS costUsd,
+                  CAST(AVG(duration_ms) AS INTEGER) AS avgMs,
+                  MAX(duration_ms) AS maxMs,
+                  COALESCE(SUM(cache_read_tokens), 0) AS cacheReadTokens,
+                  COALESCE(SUM(output_tokens), 0) AS outputTokens
+             FROM llm_calls WHERE created_at >= ?
+            GROUP BY day ORDER BY day DESC`,
+        )
+        .all(sinceStamp(days)),
+    [],
+  );
+}
+
+/** 用途別（直近N日）: どの機能がいくら使い、どれだけ失敗しているか。 */
+export function llmByPurpose(days = 7): LlmPurposeRow[] {
+  return safeQuery(
+    (conn) =>
+      conn
+        .prepare<[string], LlmPurposeRow>(
+          `SELECT agent_id AS agentId, purpose,
+                  COUNT(*) AS calls,
+                  SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS failed,
+                  COALESCE(SUM(cost_usd), 0) AS costUsd,
+                  CAST(AVG(duration_ms) AS INTEGER) AS avgMs
+             FROM llm_calls WHERE created_at >= ?
+            GROUP BY agent_id, purpose ORDER BY costUsd DESC`,
+        )
+        .all(sinceStamp(days)),
+    [],
+  );
+}
+
+/** 直近の呼び出し（失敗の理由を読むため error 込み）。 */
+export function llmRecent(limit = 60): LlmCallRow[] {
+  return safeQuery(
+    (conn) =>
+      conn
+        .prepare<[number], LlmCallRow>(
+          `SELECT id, agent_id AS agentId, purpose, model, ok, error,
+                  duration_ms AS durationMs, wall_ms AS wallMs,
+                  num_turns AS numTurns, cost_usd AS costUsd,
+                  tool_calls AS toolCalls, denials, created_at AS createdAt
+             FROM llm_calls ORDER BY id DESC LIMIT ?`,
+        )
+        .all(limit),
+    [],
+  );
+}
+
 export function maxActivityId(): number {
   return safeQuery(
     (conn) => conn.prepare<[], { n: number | null }>(`SELECT MAX(id) AS n FROM proactive_log`).get()?.n ?? 0,
     0,
+  );
+}
+
+// ---------------------------------------------------------------- 追跡タスクの統一ビュー
+
+export type TaskRow = {
+  key: string;
+  kind: "action" | "homework" | "reminder";
+  id: number;
+  task: string | null;
+  owner: string | null;
+  due: string | null;
+  status: string | null;
+  stage: string | null;
+  channelId: number | null;
+};
+
+/** 議事録TODO・宿題を1つの形で（リマインダーは reminders.json 側で合流）。 */
+export function tasksUnified(): TaskRow[] {
+  return safeQuery(
+    (conn) =>
+      conn
+        .prepare<[], TaskRow>(
+          `SELECT 'A' || id AS key, 'action' AS kind, id, task, owners AS owner,
+                  due_date AS due, status, nudge_stage AS stage, channel_id AS channelId
+             FROM action_items WHERE status IN ('open','stale')
+           UNION ALL
+           SELECT 'H' || id, 'homework', id, task, owner, follow_up_date, status, status,
+                  channel_id
+             FROM homework_items WHERE status IN ('open','asked','asked2')
+           ORDER BY due ASC, key ASC`,
+        )
+        .all(),
+    [],
   );
 }

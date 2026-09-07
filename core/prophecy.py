@@ -91,7 +91,8 @@ def seal(db_path, agent_id, *, model, invoke_fn=None, now=None):
     if len(ctx) < 4:
         return []
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
-        p, model=model, timeout=TIMEOUT_SEC).text)
+        p, model=model, timeout=TIMEOUT_SEC,
+        purpose="prophecy").text)
     preds = parse_predictions(fn(build_seal_prompt(period_of(now), ctx)))
     if not preds:
         return []
@@ -150,7 +151,8 @@ def open_envelope(db_path, agent_id, *, model, invoke_fn=None, now=None):
         return None
     ctx = collect_context(db_path, now)
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
-        p, model=model, timeout=TIMEOUT_SEC).text)
+        p, model=model, timeout=TIMEOUT_SEC,
+        purpose="prophecy").text)
     verdicts = parse_verdicts(
         fn(build_open_prompt(env["period"], preds, ctx)), len(preds))
     with db.connect(db_path) as conn:

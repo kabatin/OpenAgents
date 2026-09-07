@@ -4,8 +4,10 @@
 実行: ../chatbot/venv/bin/python -m unittest test_dev_pipeline -v
 """
 
+import os
 import unittest
 
+from core import paths
 from platforms.discord.dev import dev_pipeline
 
 
@@ -210,18 +212,24 @@ class RiskWarningsTest(unittest.TestCase):
         self.assertNotIn("脳", warns[0])
 
     def test_plain_change_has_no_warnings(self):
-        # 会話BOTだけに効く変更＝他プロセスを巻き込まないので注意書き不要
+        # 会話BOTだけに効く変更（中核以外）＝他プロセスを巻き込まないので注意書き不要
         self.assertEqual(
             dev_pipeline.risk_warnings(
-                ["platforms/discord/bot.py"]), [])
+                ["platforms/discord/reaction_handlers.py"]), [])
 
     def test_shared_module_change_notes_devbot_restart(self):
         # core/ は全BOTの土台なので、開発BOTと議事録BOTの両方に注意が要る
-        warns = dev_pipeline.risk_warnings(["core/db.py"])
+        warns = dev_pipeline.risk_warnings(["core/summaries.py"])
         self.assertIn("共有モジュール", warns[0])
         self.assertNotIn("脳", warns[0])
         self.assertTrue(any("録音中でないこと" in w for w in warns),
                         f"議事録BOTの再起動警告が無い: {warns}")
+
+    def test_core_brain_file_warns_first_then_restart(self):
+        # 中核（db.py）は 🧠 警告が先頭、共有モジュールの再起動注意も残る
+        warns = dev_pipeline.risk_warnings(["core/db.py"])
+        self.assertIn("中核", warns[0])
+        self.assertTrue(any("共有モジュール" in w for w in warns))
 
     def test_untested_dir_warns(self):
         warns = dev_pipeline.risk_warnings(
@@ -330,6 +338,103 @@ class BuildPromptTest(unittest.TestCase):
     def test_load_guidelines_falls_back_when_missing(self):
         text = dev_pipeline.load_guidelines("/no/such/file.md")
         self.assertEqual(text, dev_pipeline.DEFAULT_GUIDELINES)
+
+
+class Phase5Test(unittest.TestCase):
+    def test_brain_files_warning(self):
+        warns = dev_pipeline.risk_warnings(
+            ["platforms/discord/bot.py", "core/x.py"])
+        self.assertTrue(any("中核" in w and "bot.py" in w for w in warns))
+        self.assertEqual(dev_pipeline.brain_files_touched(
+            ["core/tasks.py"]), [])
+        self.assertEqual(dev_pipeline.brain_files_touched(
+            ["core/invoke_claude.py"]), ["invoke_claude.py"])
+        self.assertEqual(dev_pipeline.brain_files_touched(
+            ["platforms\\discord\\agent_loops.py"]), ["agent_loops.py"])
+
+    def test_no_dialect_in_warnings(self):
+        warns = dev_pipeline.risk_warnings(
+            ["platforms/discord/dev/bot.py", "requirements.txt",
+             "platforms/discord/meeting/bot.py", "builder/x.py"])
+        self.assertTrue(warns)
+        for w in warns:
+            self.assertNotIn("っす", w)
+
+    def test_job_log_writes_events_and_finish(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "jobs", "1.log")
+            log = dev_pipeline.JobLog(path)
+            log.event({"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "name": "Edit", "input": {"file_path": "a.py"}},
+                {"type": "text", "text": "直します"}]}})
+            log.event({"type": "user", "message": {"content": [
+                {"type": "tool_result", "is_error": True, "content": "denied"}]}})
+            log.event({"type": "result", "subtype": "success", "num_turns": 3,
+                       "total_cost_usd": 0.5, "result": "done"})
+            log.finish({"error": "exit=1: boom", "stderr": "traceback…"})
+            text = open(path, encoding="utf-8").read()
+        for needle in ("TOOL Edit", "TEXT 直します", "TOOL_ERROR denied",
+                       "RESULT success", "ERROR exit=1", "STDERR traceback"):
+            self.assertIn(needle, text)
+
+    def test_job_log_path_under_state_and_label(self):
+        p = dev_pipeline.job_log_path(7)
+        self.assertTrue(p.endswith(os.path.join("dev-jobs", "7.log")))
+        self.assertTrue(p.startswith(paths.STATE_DIR))
+        self.assertIn("dev-jobs/7.log", dev_pipeline.job_log_label(7))
+
+
+class VerifyPassTest(unittest.TestCase):
+    def test_prompt_parse_warning(self):
+        cap = {"id": 19, "description": "通知先を個別に設定できるようにする"}
+        p = dev_pipeline.verify_prompt(cap, "+ x = 1", "OK")
+        self.assertIn("起票 #19", p)
+        self.assertIn("+ x = 1", p)
+        self.assertEqual(dev_pipeline.parse_verify('{"verdict": "pass", "notes": []}'),
+                         {"verdict": "pass", "notes": []})
+        r = dev_pipeline.parse_verify(
+            '前置き {"verdict": "concern", "notes": ["テスト不足", 2]} 後')
+        self.assertEqual(r["verdict"], "concern")
+        self.assertEqual(r["notes"], ["テスト不足", "2"])
+        self.assertIsNone(dev_pipeline.parse_verify('{"verdict": "maybe"}'))
+        self.assertIsNone(dev_pipeline.parse_verify("JSONなし"))
+        self.assertIn("問題なし",
+                      dev_pipeline.verify_warning({"verdict": "pass", "notes": []}))
+        w = dev_pipeline.verify_warning({"verdict": "concern", "notes": ["a"]})
+        self.assertIn("気になる点あり", w)
+        self.assertIn("　・a", w)
+        self.assertIn("実行できませんでした", dev_pipeline.verify_warning(None))
+
+    def test_verify_uses_injected_fn_and_skips_empty_diff(self):
+        import subprocess
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            subprocess.run(["git", "init", "-q", d], check=True)
+            subprocess.run(["git", "-C", d, "-c", "user.email=t@example.com",
+                            "-c", "user.name=t", "commit", "-q",
+                            "--allow-empty", "-m", "init"], check=True)
+            self.assertIsNone(dev_pipeline.verify(
+                {"id": 1, "description": "x"}, d,
+                invoke_fn=lambda p: '{"verdict":"pass"}'))
+            with open(os.path.join(d, "a.py"), "w") as f:
+                f.write("x = 1\n")
+            subprocess.run(["git", "-C", d, "add", "a.py"], check=True)
+            seen = {}
+
+            def fake(p):
+                seen["prompt"] = p
+                return '{"verdict": "concern", "notes": ["テストが無い"]}'
+            r = dev_pipeline.verify({"id": 1, "description": "x"}, d,
+                                    invoke_fn=fake)
+            self.assertEqual(r["verdict"], "concern")
+            self.assertIn("x = 1", seen["prompt"])
+
+            # 検証側の例外は None（実装を捨てない）
+            def boom(p):
+                raise RuntimeError("claude down")
+            self.assertIsNone(dev_pipeline.verify(
+                {"id": 1, "description": "x"}, d, invoke_fn=boom))
 
 
 if __name__ == "__main__":

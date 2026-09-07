@@ -264,9 +264,11 @@ class MarkerActionsMixin:
             return text
         return (text + "\n" if text else "") + "\n".join(notes)
 
-    def _apply_honesty_check(self, message, answer, hits):
+    def _apply_honesty_check(self, message, answer, hits, tools_used=None):
         """「できたフリ」検出（RM#20）。①完了主張×マーカー不発→正直化の-#行を
-        付記＋記録 ②根拠なし断定→シャドー記録のみ（本文は触らない）。"""
+        付記＋記録 ②根拠なし断定→シャドー記録のみ（本文は触らない）。
+        tools_used（ツールループ本番）が渡されたら、-# 行の書式ではなく
+        「対応するツールが呼ばれたか」で①を判定する（v4）。"""
         # そのスキルを持たないエージェントでは検査自体をしない（誤検出防止）。
         # 例: 納期追跡を持たないエージェントの「追跡はキャンセルします」は
         # ただの日常会話であって、できたフリではない。
@@ -281,7 +283,11 @@ class MarkerActionsMixin:
         # 失敗した時は「できました」と言わせない: 嘘の完了主張の文を本文から
         # 消し、1行目に失敗を置く（人間は1行目を読んで判断する。矛盾した
         # 2つの文を並べて読み手に解決させるのは誤り）
-        missing = honesty.detect_fake_done(answer, skip=skip)
+        if tools_used is not None:
+            missing = honesty.detect_fake_done_by_tools(answer, tools_used,
+                                                        skip=skip)
+        else:
+            missing = honesty.detect_fake_done(answer, skip=skip)
         if missing:
             proactive.log_entry(
                 DB_PATH, self.agent["id"], kind="fake_done", action="caught",

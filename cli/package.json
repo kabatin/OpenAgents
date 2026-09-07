@@ -1,6 +1,6 @@
 {
   "name": "openagents",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Self-hosted AI agents that live in your team chat — installer and launcher",
   "keywords": [
     "discord",

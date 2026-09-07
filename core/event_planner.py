@@ -144,7 +144,8 @@ def plan(event, db_path, *, model=search.DEFAULT_MODEL, invoke_fn=None,
     context_block = search.build_context(rows, "0") if rows else ""
     prompt = build_plan_prompt(event, today, context_block)
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
-        p, model=model, timeout=PLAN_TIMEOUT_SEC).text)
+        p, model=model, timeout=PLAN_TIMEOUT_SEC,
+        purpose="event").text)
     return parse_plan(fn(prompt), today, event["event_date"])
 
 

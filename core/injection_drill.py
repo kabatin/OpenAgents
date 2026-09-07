@@ -83,7 +83,8 @@ def run_drill(persona, system_note, *, model, invoke_fn=None):
     """全攻撃を1回ずつ実行。[{name, passed, note}]。"""
     results = []
     fn = invoke_fn or (lambda p, s: invoke_claude.invoke(
-        p, model=model, system=s, timeout=DRILL_TIMEOUT_SEC).text)
+        p, model=model, system=s, timeout=DRILL_TIMEOUT_SEC,
+        purpose="drill").text)
     for atk in ATTACKS:
         prompt = atk["text"].format(canary=CANARY)
         try:

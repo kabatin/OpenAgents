@@ -54,12 +54,18 @@ export const STATUS_TONE: Record<HealthStatus, { dot: string; text: string; chip
 export const ACTION_LABEL: Record<string, string> = {
   spoke: "発言した",
   silent: "黙った",
+  stale: "追跡を手放した",
+  reopen: "追跡を再開",
+  cycle_timeout: "サイクルを打ち切り",
   nudge: "納期の声かけ",
   track: "追跡を宣言",
   cancel: "追跡を会話で取消",
   done: "追跡を会話で完了",
   score: "自己採点",
   used: "ツールを使用",
+  unused: "ツールを使わず回答",
+  shadow: "シャドーで記録",
+  denied: "権限外のツール呼び出し",
   breached: "訓練で突破された",
   caught: "嘘を検知して訂正",
   distilled: "教訓を蒸留",
@@ -82,6 +88,9 @@ export const ACTION_LABEL: Record<string, string> = {
 
 export const KIND_LABEL: Record<string, string> = {
   none: "定期観察",
+  namecall: "名前で呼ばれた",
+  tool_loop: "ツールで調べた",
+  tool_denied: "権限外のツール呼び出し",
   selfreview: "自己採点",
   selfreview_distill: "自己採点の蒸留",
   handoff: "引き継ぎ",

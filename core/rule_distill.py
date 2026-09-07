@@ -18,7 +18,7 @@ from core import reminders
 STATE_KEY_PREFIX = "ruledistill:"
 WEEKDAY_DEFAULT = 0    # 月曜
 HOUR_DEFAULT = 10
-MIN_RULES = 8          # これ未満なら棚卸し不要（ノイズ防止）
+MIN_RULES = 5          # これ未満なら棚卸し不要（ノイズ防止）。実運用の active 5件で一度も発火しなかった 8 から引き下げ
 MAX_PROPOSALS = 5
 DISTILL_TIMEOUT_SEC = 180
 _JSON_RE = re.compile(r"\{.*\}", re.S)
@@ -103,7 +103,8 @@ def distill(db_path, *, model, invoke_fn=None, now=None):
     by_id = {r["id"]: r for r in rows}
     prompt = build_prompt(rows, now.strftime("%Y-%m-%d"))
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
-        p, model=model, timeout=DISTILL_TIMEOUT_SEC).text)
+        p, model=model, timeout=DISTILL_TIMEOUT_SEC,
+        purpose="rule_distill").text)
     return parse_proposals(fn(prompt), by_id)
 
 

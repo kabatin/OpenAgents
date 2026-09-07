@@ -30,6 +30,7 @@ from datetime import timedelta
 from core import invoke_claude
 from core import db
 from core import reminders
+from core import textsim
 STATE_KEY_PREFIX = "svdistill:"
 WEEKDAY_DEFAULT = 0    # 月曜（rule_distillの1時間前）
 HOUR_DEFAULT = 9
@@ -203,14 +204,16 @@ def distill_full(db_path, agent_id, *, model, invoke_fn=None, now=None):
     with db.connect(db_path) as conn:
         previous = [r["text"] for r in db.advice_lessons(conn, agent_id)]
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
-        p, model=model, timeout=DISTILL_TIMEOUT_SEC).text)
+        p, model=model, timeout=DISTILL_TIMEOUT_SEC,
+        purpose="distill").text)
     advice = parse(fn(build_prompt(issues, previous=previous)))
     if not advice:
         return {"advice": [], "graduates": []}
     with db.connect(db_path) as conn:
         merged = db.replace_advice_lessons(
             conn, agent_id, advice,
-            reminders.fmt(now or reminders.now_jst()))
+            reminders.fmt(now or reminders.now_jst()),
+            match=textsim.find_same)
     graduates = [m for m in merged if m["streak"] >= GRADUATE_STREAK]
     return {"advice": merged, "graduates": graduates}
 

@@ -205,7 +205,8 @@ def summarize_highlights(messages, *, agent_name,
         return []
     prompt = build_highlight_prompt(messages, agent_name)
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
-        p, model=model, timeout=HIGHLIGHT_TIMEOUT_SEC).text)
+        p, model=model, timeout=HIGHLIGHT_TIMEOUT_SEC,
+        purpose="briefing").text)
     try:
         return parse_highlight_response(fn(prompt))
     except Exception:

@@ -32,6 +32,8 @@ REMINDERS_PATH = os.path.join(STATE_DIR, "reminders.json")
 HEARTBEAT_DIR = os.path.join(STATE_DIR, "heartbeat")
 #: ログの集約先
 LOGS_DIR = os.path.join(STATE_DIR, "logs")
+# 模範Q&A（ゴールデン）の回帰採点レポート置き場（golden_eval が JSON を書く）
+GOLDEN_EVAL_DIR = os.path.join(STATE_DIR, "golden_eval")
 
 #: 人格ファイル置き場
 PERSONAS_DIR = os.path.join(ROOT, "personas")

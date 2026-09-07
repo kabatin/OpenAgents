@@ -143,5 +143,6 @@ def detect(db_path, roster, *, model, invoke_fn=None, now=None):
     if len(signals) < MIN_SIGNALS and not events:
         return None
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
-        p, model=model, timeout=DETECT_TIMEOUT_SEC).text)
+        p, model=model, timeout=DETECT_TIMEOUT_SEC,
+        purpose="demand").text)
     return parse_proposal(fn(build_prompt(signals, roster, events)))

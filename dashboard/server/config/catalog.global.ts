@@ -173,6 +173,20 @@ const DEV_BOT: Setting[] = [
     secret: true,
   },
   {
+    path: "dev_bot.model",
+    label: "実装に使うモデル",
+    desc: "起票を実装するときに開発BOTが使う Claude のモデル名。空なら既定（claude-opus-4-8）。変更は次のジョブから。",
+    kind: "string",
+    default: "claude-opus-4-8",
+  },
+  {
+    path: "dev_bot.verify_model",
+    label: "検証に使うモデル",
+    desc: "実装後に別のコンテキストで起票と差分を照合するモデル名。空にすると検証を省きます。",
+    kind: "string",
+    default: "claude-sonnet-5",
+  },
+  {
     path: "dev_bot.dev_channel_id",
     label: "開発用チャンネル",
     desc: "開発BOTが常駐して、監視の報告と開発指示の受付をするチャンネル。",

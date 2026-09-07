@@ -95,6 +95,11 @@ class DevBot(discord.Client):
         self.admins = admins            # 開発指示を出せるのは管理者のみ
         self.dev_cfg = dev_cfg
         self.dev_channel_id = int(dev_cfg["dev_channel_id"])
+        # 本体改修に使うモデル（config で差し替え可能・既定は dev_pipeline.MODEL）
+        self.build_model = str(dev_cfg.get("model") or dev_pipeline.MODEL)
+        # 別コンテキストの検証に使うモデル（空文字で検証をスキップ）
+        self.verify_model = str(
+            dev_cfg.get("verify_model", dev_pipeline.VERIFY_MODEL) or "")
         mon = dev_cfg.get("monitor") or {}
         self.interval_sec = int(mon.get("interval_sec", 60))
         self.stall_after_sec = int(mon.get("stall_after_sec",
@@ -133,8 +138,10 @@ class DevBot(discord.Client):
                   f"exit={sig.last_exit_status}")
         if self._monitor_task is None:
             self._monitor_task = asyncio.create_task(self._monitor_loop())
+            # 起動の挨拶は投稿しない（再起動のたびに流れて邪魔になる）。
+            # 監視開始はログにだけ残す
             names = ", ".join(t["name"] for t in self.targets)
-            await self._notify(persona.startup(names, self.interval_sec))
+            print(persona.startup(names, self.interval_sec))
             await self._recover_interrupted_jobs()
             # 進化ロードマップ: シード投入（冪等）→未提案があればカードを1枚出す
             try:
@@ -412,7 +419,8 @@ class DevBot(discord.Client):
             _load_persona(), DevBot._chat_context(), caps)
         try:
             res = invoke_claude.invoke(user_text or "（無言でメンションされた）",
-                                       model="claude-sonnet-5", system=system)
+                                       model="claude-sonnet-5", system=system,
+                                       purpose="dev")
             d = router.parse_route(res.text, {c["id"] for c in caps})
         except Exception as e:
             return {"action": "chat", "req_id": None,
@@ -524,20 +532,26 @@ class DevBot(discord.Client):
         # 2) claude 実装（別スレッド）＋進捗ティッカー
         progress.set_phase("実装中")
 
+        job_log = dev_pipeline.JobLog(dev_pipeline.job_log_path(job_id))
+
         def on_event(ev):
             label = dev_pipeline.classify_event(ev)
             if label:
                 progress.add_op(label)
+            job_log.event(ev)
 
         guidelines, lessons = await asyncio.to_thread(self._prompt_inputs)
         prompt = dev_pipeline.build_prompt(cap_req, guidelines, lessons,
                                            resume=resume)
         ticker = self._spawn(self._tick_progress(prog, progress))
+        run = {"error": "中断"}
         try:
             run = await asyncio.to_thread(
-                dev_pipeline.stream_claude, prompt, cwd, on_event)
+                dev_pipeline.stream_claude, prompt, cwd, on_event,
+                model=self.build_model)
         finally:
             ticker.cancel()
+            job_log.finish(run)
         # 3) 検証
         progress.set_phase("テスト＋pyflakes実行中")
         await self._safe_edit(prog, persona.job_phase_test())
@@ -554,11 +568,22 @@ class DevBot(discord.Client):
         # 4) サマリー投稿（👍承認待ち）。中断エラーでも差分あり＋検証緑なら
         #    salvage＝builtとして承認待ちに乗せる（完成品をfailedで捨てない）
         salvaged = bool(run.get("error")) and bool(files) and test_ok and flakes_ok
+        warnings = dev_pipeline.risk_warnings(files)
+        # 別コンテキストの検証（v4 Phase 5）: 実装者とは別の目で起票と差分を照合し、
+        # 承認者に見せる。判定は人間（👍👎）に委ね、ここでは止めない
+        if files and self.verify_model and (not run.get("error") or salvaged):
+            progress.set_phase("別コンテキストで検証中")
+            await self._safe_edit(prog, persona.job_phase_verify())
+            verdict = await asyncio.to_thread(
+                dev_pipeline.verify, cap_req, wt, model=self.verify_model,
+                test_tail=test_tail)
+            warnings.append(dev_pipeline.verify_warning(verdict))
+        warnings.append(dev_pipeline.job_log_label(job_id))
         summary = dev_pipeline.summarize(
             cap_req, test_ok=test_ok, test_tail=test_tail, flakes_ok=flakes_ok,
             flakes_tail=flakes_tail, diff_stat=dstat,
             final_text=run.get("final_text", ""), error=run.get("error"),
-            salvaged=salvaged, warnings=dev_pipeline.risk_warnings(files))
+            salvaged=salvaged, warnings=warnings)
         summary_msg = await self._post_summary(summary, wt, req_id)
         built = (not run.get("error")) or salvaged
         if built and summary_msg is None:

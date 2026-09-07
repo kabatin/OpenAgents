@@ -380,9 +380,29 @@ class AdviceGraduationTest(unittest.TestCase):
     def tearDown(self):
         os.unlink(self.tmp.name)
 
-    def _merge(self, texts):
+    def _merge(self, texts, match=None):
         with db.connect(self.tmp.name) as conn:
-            return db.replace_advice_lessons(conn, "agent1", texts, self.now)
+            return db.replace_advice_lessons(conn, "agent1", texts, self.now,
+                                             match=match)
+
+    def test_rewording_keeps_streak_with_matcher(self):
+        # 言い直しを同一視しないと毎週少し違う文言で streak がリセットされ、
+        # 3週連続の卒業提案が一度も発火しなかった
+        from core import textsim
+        a = "社内固有の事実は根拠を確認してから断定する。推測で答えない"
+        b = "社内固有の事実は根拠を確認してから断定する。推測では答えないこと"
+        self._merge([a], match=textsim.find_same)
+        m2 = self._merge([b], match=textsim.find_same)
+        self.assertEqual(m2[0]["streak"], 2)
+        m3 = self._merge([b], match=textsim.find_same)
+        self.assertEqual(m3[0]["streak"], 3)
+        with db.connect(self.tmp.name) as conn:
+            self.assertEqual(len(db.advice_lessons(conn, "agent1")), 1)
+
+    def test_without_matcher_exact_only(self):
+        self._merge(["根拠を確認してから断定する。推測で答えない"])
+        m2 = self._merge(["根拠を確認してから断定する。推測では答えないこと"])
+        self.assertEqual(m2[0]["streak"], 1)
 
     def test_same_text_increments_streak(self):
         self._merge(["断定しない"])

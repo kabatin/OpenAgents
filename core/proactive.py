@@ -27,6 +27,7 @@ from core import invoke_claude
 from core import db
 from core import decisions
 from core import facts
+from core import paths
 from core import reminders
 from core import rules
 from core import search
@@ -363,7 +364,8 @@ def screen(messages, *, agent_name, model=SCREEN_MODEL_DEFAULT,
                                  allow_others=allow_others,
                                  allow_colleague=allow_colleague)
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
-        p, model=model, timeout=SCREEN_TIMEOUT_SEC).text)
+        p, model=model, timeout=SCREEN_TIMEOUT_SEC,
+        purpose="screen").text)
     raw = fn(prompt)
     ids = {m["id"] for m in messages}
     return {"candidates": parse_screen_response(raw, ids),
@@ -463,11 +465,19 @@ def colleague_quota_left(db_path, agent_id, now=None):
     return max(0, COLLEAGUE_DAILY_MAX - used)
 
 
+DECIDE_TOOL_NOTE = (
+    "【ツール】上の裏付けで足りなければ、search_messages（別の言い回しで再検索）・"
+    "get_decisions・get_facts で引き直してから判断してよい。引いても裏付けが無ければ沈黙。")
+
+
 def decide_reply(db_path, guild_id, agent_id, cand, trigger, *, persona,
                  agent_name, model=search.DEFAULT_MODEL, scope_note=None,
-                 invoke_fn=None, search_fn=None):
+                 invoke_fn=None, search_fn=None, mcp_config=None,
+                 mcp_allow=(), max_budget_usd=None):
     """二次判定: 裏取り→発言文 or 沈黙。Returns: (本文|None, 記録用メモ)。
-    invoke_fn / search_fn はテスト差し替え口。"""
+    invoke_fn / search_fn はテスト差し替え口。
+    mcp_config: v4 ツールループ（読み取りのみ）。事前の裏取りで足りない時に
+    自分で引き直せる（観察ループへの適用）。"""
     sfn = search_fn or (lambda kws: search.search_messages(
         db_path, kws, limit=12))
     row_hits = sfn(cand.get("search_terms") or []) or []
@@ -511,8 +521,12 @@ def decide_reply(db_path, guild_id, agent_id, cand, trigger, *, persona,
                                      (facts_block + "\n\n" + ledger_block)
                                      if facts_block and ledger_block
                                      else (facts_block or ledger_block)))
+    if mcp_config:
+        prompt = prompt + "\n\n" + DECIDE_TOOL_NOTE
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
-        p, model=model, system=system, timeout=DECIDE_TIMEOUT_SEC).text)
+        p, model=model, system=system, timeout=DECIDE_TIMEOUT_SEC,
+        purpose="decide", mcp_config=mcp_config, allow=tuple(mcp_allow),
+        max_budget_usd=max_budget_usd).text)
     return gate_reply(fn(prompt), cand["kind"])
 
 
@@ -540,7 +554,8 @@ def skeptic_check(reply, cand, *, model, invoke_fn=None):
     """懐疑役の判定。(投稿してよいか, 理由)。パース失敗は通す
     （既にゲートを通過済みの発言を判定不能で殺さない）。"""
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
-        p, model=model, timeout=SKEPTIC_TIMEOUT_SEC).text)
+        p, model=model, timeout=SKEPTIC_TIMEOUT_SEC,
+        purpose="skeptic").text)
     try:
         raw = fn(build_skeptic_prompt(reply, cand))
     except Exception:
@@ -804,7 +819,8 @@ def audit_silences(db_path, agent_id, since, *, model, invoke_fn=None):
     if not samples:
         return None
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
-        p, model=model, timeout=SCREEN_TIMEOUT_SEC).text)
+        p, model=model, timeout=SCREEN_TIMEOUT_SEC,
+        purpose="audit").text)
     verdicts = parse_audit(fn(build_audit_prompt(samples)),
                            {s_["log_id"] for s_ in samples})
     missed = sum(1 for v in verdicts.values() if v)
@@ -857,7 +873,37 @@ def weekly_stats(db_path, since):
             conn, "fake_done", "assert_shadow", since)
         stats["golden_total"] = db.count_golden(conn)
         stats["selfreview"] = db.selfreview_avg_since(conn, since)
+        # v4: 手放した TODO・ツール使用率・教訓の参照/記録
+        stats["stale_week"] = db.count_proactive_log_since(
+            conn, "deadline", "stale", since)
+        stats["tool_used_week"] = db.count_proactive_log_since(
+            conn, "tool_loop", "used", since)
+        stats["tool_unused_week"] = db.count_proactive_log_since(
+            conn, "tool_loop", "unused", since)
+        stats["lessons_week"] = (
+            db.count_proactive_log_detail_like(conn, "tool_loop",
+                                               "%recall_lessons%", since)
+            + db.count_proactive_log_detail_like(conn, "tool_loop",
+                                                 "%save_lesson%", since))
+    stats["golden_latest"] = golden_eval_latest()
     return stats
+
+
+def golden_eval_latest(dir_path=None):
+    """模範Q&Aの回帰採点の最新レポート（平均点・日付・問数）。無ければ None。
+    golden_eval が state/golden_eval/<YYYYMMDD-HHMM>.json に書いたものを読む。"""
+    import glob
+    d = dir_path or paths.GOLDEN_EVAL_DIR
+    files = sorted(glob.glob(os.path.join(d, "*.json")))
+    if not files:
+        return None
+    try:
+        with open(files[-1], encoding="utf-8") as f:
+            rep = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return {"mean": rep.get("mean"), "n": rep.get("scored"),
+            "date": os.path.basename(files[-1])[:8]}
 
 
 def build_weekly_report(stats, roster, since_label):
@@ -906,6 +952,18 @@ def build_weekly_report(stats, roster, since_label):
     if sr.get("n"):
         lines.append(f"- 投稿セルフレビュー: 平均{sr['avg']:.1f}点"
                      f"（{sr['n']}件・シャドー計測）")
+    if stats.get("stale_week"):
+        lines.append(f"- 手放した追跡TODO: 今週{stats['stale_week']}件"
+                     "（超過から7日動きなし。再開は「A〇 を open に」）")
+    used, unused = stats.get("tool_used_week", 0), stats.get("tool_unused_week", 0)
+    if used or unused:
+        pct = round(100 * used / (used + unused))
+        lines.append(f"- ツールで調べてから答えた回答: {used}/{used + unused}件"
+                     f"（{pct}%）・教訓の参照/記録{stats.get('lessons_week', 0)}回")
+    g = stats.get("golden_latest")
+    if g and g.get("mean") is not None:
+        lines.append(f"- 模範Q&Aの回帰採点: 平均{g['mean']}点/5"
+                     f"（{g.get('n', '?')}問・{g['date']}）")
     if stats.get("golden_total"):
         lines.append(f"- ゴールデンセット: 累計{stats['golden_total']}問"
                      "（👍回答から自動蓄積）")

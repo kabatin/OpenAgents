@@ -9,6 +9,7 @@ _cycle_plan() の登録制: 新しい観察系機能は「モジュール実装�
 import asyncio
 import re
 import tempfile
+import time
 from datetime import timedelta
 
 import discord
@@ -49,6 +50,7 @@ from core import wiki
 from core import stale_watch
 from core import runner_answer
 from core import search
+from core.archive_tools import launch as tool_launch
 from platforms.discord import agent_runtime
 from core import hr
 from core import integrations
@@ -88,8 +90,22 @@ def _integration_cycle(client, integration, fn):
     return run
 
 
+# 観察ループの遅延隔離: 1サイクルが claude の待ちで固まっても後続を巻き込まない
+CYCLE_TIMEOUT_SEC = 900   # 1サイクルの壁時計上限（claude 600s ＋ 余裕）
+SLOW_CYCLE_SEC = 60       # これを超えたら所要をログに出す
+
+
 class AgentLoopsMixin:
     """AgentClient に混ぜる mixin（self.* は bot.py の属性・設定を参照する）。"""
+
+    def _observe_tool_kwargs(self, *, actor_id, channel_id, message_id):
+        """観察ループ用のツールループ引数。本体は ToolLoopMixin（bot 側）。
+        mixin 単体でテストする時など、無ければ {}（ツール無し＝従来どおり）。"""
+        impl = getattr(super(), "_observe_tool_kwargs", None)
+        if impl is None:
+            return {}
+        return impl(actor_id=actor_id, channel_id=channel_id,
+                    message_id=message_id)
 
     async def _reminder_loop(self):
         """リマインダー配信: 30秒ごとにdueを確認して配信する。
@@ -271,11 +287,29 @@ class AgentLoopsMixin:
                 await asyncio.sleep(interval)
                 continue
             for name, cycle in self._cycle_plan():
-                try:
-                    await cycle()
-                except Exception as e:
-                    print(f"[{self.agent['id']}] {name} cycle failed: {e}")
+                await self._run_cycle(name, cycle)
             await asyncio.sleep(interval)
+
+    async def _run_cycle(self, name, cycle):
+        """1サイクルを壁時計で隔離して実行する。超過は打ち切って記録し、
+        失敗は握って次のサイクルへ進む（ループ自体は殺さない）。"""
+        started = time.monotonic()
+        try:
+            await asyncio.wait_for(cycle(), timeout=CYCLE_TIMEOUT_SEC)
+        except asyncio.TimeoutError:
+            print(f"[{self.agent['id']}] {name} cycle timed out "
+                  f"({CYCLE_TIMEOUT_SEC}s)")
+            try:
+                await asyncio.to_thread(
+                    proactive.log_entry, DB_PATH, self.agent["id"],
+                    kind="none", action="cycle_timeout", detail=name)
+            except Exception as e:
+                print(f"[{self.agent['id']}] cycle_timeout log failed: {e}")
+        except Exception as e:
+            print(f"[{self.agent['id']}] {name} cycle failed: {e}")
+        took = time.monotonic() - started
+        if took > SLOW_CYCLE_SEC:
+            print(f"[{self.agent['id']}] {name} cycle took {took:.0f}s")
 
     async def _prep_pack_cycle(self, pp):
         """会議前の予習パック（RM#43）: 定例1時間前に未完了タスク・直近決定・
@@ -1287,14 +1321,20 @@ class AgentLoopsMixin:
         with_quota = await asyncio.to_thread(self._rescue_quota_left)
         if with_quota <= 0:
             return   # 枠切れの日は翌日以降の周期で拾い直せる（recordしない）
+        # ツールループ（読み取りのみ）: 事前の裏取りで足りなければ自分で引き直せる
+        tool_kw = self._observe_tool_kwargs(
+            actor_id=cand.get("author_id"), channel_id=cand["channel_id"],
+            message_id=cand["id"])
         agent_param = {"name": self.agent["name"],
                        "persona_files": self.persona_files,
-                       "role": self.agent.get("role") or ""}
+                       "role": (self.agent.get("role") or "")
+                       + ("\n" + tool_launch.skill_note(False)
+                          if tool_kw else "")}
         async with ANSWER_SEM:
             result = await asyncio.to_thread(
                 runner_answer.answer_question, DB_PATH, str(GUILD_ID),
                 cand["content"], search.DEFAULT_MODEL, None,
-                [], agent_param)
+                [], agent_param, **tool_kw)
         channel = (self.get_channel(int(cand["channel_id"]))
                    or await self.fetch_channel(int(cand["channel_id"])))
         ref = discord.MessageReference(
@@ -1443,12 +1483,18 @@ class AgentLoopsMixin:
         trigger = next(m for m in digest["messages"]
                        if m["id"] == cand["message_id"])
         persona = search.load_persona(self.persona_files)
+        # ツールループ（読み取りのみ）: 二次判定でも裏付けを引き直せる
+        tool_kw = self._observe_tool_kwargs(
+            actor_id=trigger.get("author_id"), channel_id=trigger["channel_id"],
+            message_id=trigger["id"])
+        tool_kw = {k: v for k, v in tool_kw.items()
+                   if k in ("mcp_config", "mcp_allow", "max_budget_usd")}
         async with ANSWER_SEM:
             reply, note = await asyncio.to_thread(
                 proactive.decide_reply, DB_PATH, GUILD_ID, self.agent["id"],
                 cand, trigger, persona=persona,
                 agent_name=self.agent["name"],
-                scope_note=cfg.get("scope_note"))
+                scope_note=cfg.get("scope_note"), **tool_kw)
         if reply is None:
             await asyncio.to_thread(
                 proactive.log_entry, DB_PATH, self.agent["id"],
@@ -1614,6 +1660,38 @@ class AgentLoopsMixin:
             except Exception as e:
                 # 1件の失敗（ch削除等）が他の声かけをブロックしない
                 print(f"[{self.agent['id']}] nudge failed "
+                      f"(item={item['id']}): {e}")
+        await self._stale_cycle(now)
+
+    async def _stale_cycle(self, now):
+        """手放し: 超過の声かけから STALE_DAYS 動きが無い TODO は stale にして
+        1行で手放す（宿題の「流れた」と同じ流儀）。open のまま永久に残って
+        一覧を汚すのを止める。再開は会話（A6 を open に）か ✅。"""
+        stale = await asyncio.to_thread(
+            action_items.items_needing_stale, DB_PATH, self.agent["id"], now)
+        for item in stale:
+            try:
+                channel = (self.get_channel(int(item["channel_id"]))
+                           or await self.fetch_channel(int(item["channel_id"])))
+                ref = discord.MessageReference(
+                    message_id=(item.get("last_nudge_message_id")
+                                or item.get("confirm_message_id")
+                                or item["source_message_id"]),
+                    channel_id=int(item["channel_id"]), guild_id=GUILD_ID,
+                    fail_if_not_exists=False)
+                posted = await channel.send(
+                    action_items.build_stale_text(item), reference=ref,
+                    allowed_mentions=discord.AllowedMentions.none())
+                await asyncio.to_thread(
+                    action_items.mark_stale, DB_PATH, item["id"],
+                    self.agent["id"])
+                await asyncio.to_thread(
+                    proactive.log_entry, DB_PATH, self.agent["id"],
+                    kind="deadline", action="stale",
+                    channel_id=item["channel_id"], posted_message_id=posted.id,
+                    detail=item["task"][:60])
+            except Exception as e:
+                print(f"[{self.agent['id']}] stale failed "
                       f"(item={item['id']}): {e}")
 
     async def _homework_detect_cycle(self, hw):

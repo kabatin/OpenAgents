@@ -63,7 +63,9 @@
     "persona_files": ["personas/agent1.md"],
     "role": "",                           // 「何の担当か」の1文
     "require_mention": false,             // true なら呼ばれた時だけ答える
+    "name_call": { "enabled": false, "shadow": true, "aliases": ["あかり"] },
     "runner_enabled": false,              // true でWeb検索などが使える経路になる
+    "tool_loop": { "enabled": false, "shadow": true },   // 調べてから答える（下記）
     "reminder_max_active": 30,            // 1人が同時に持てるリマインダーの上限
 
     "skills": {
@@ -88,6 +90,33 @@ DBに記録します（複数だと同じ発言が二重に記録されます）
 `false`（既定）だと、ホームチャンネルの人間の発言すべてに答えます。
 `true` にすると、名指しされたときだけ答えます。
 **チャンネルを静かに保ちたいエージェントはこちら**にしてください。
+
+### `name_call`
+
+@メンションが無くても、`aliases` の呼び名が含まれる人間の発言に応答します
+（ホームチャンネル以外でも）。既定はオフ＋シャドー（応答せず記録だけ）。
+他のエージェントが名指しされている発言、他のエージェントのホームチャンネル、
+観察ループの `exclude_channel_ids` では応答しません。
+
+### `tool_loop`（調べてから答える）
+
+`runner_enabled: true` が前提。回答の途中で過去ログの検索・事実台帳・決定台帳・
+一覧をエージェント自身が引き、本番では記録・登録もツールで実行して結果を見てから
+本文を書きます（[docs/08-architecture.md](08-architecture.md) のツールループ）。
+
+```jsonc
+"tool_loop": {
+  "enabled": true,
+  "shadow": true,            // true=読み取りだけ・記録のみ / false=本番（書き込みも）
+  "max_budget_usd": 0.5,     // 1回答の上限額（超えたら打ち切り）
+  "inject_search_hits": 24,  // 先に渡す関連メッセージの件数（0で渡さない）
+  "inject_facts": true,      // 事実台帳を先に渡すか
+  "prompt_style": "v3"       // v3=従来 / v4=目的と制約だけの短い指示文
+}
+```
+
+オンの間は `session_resume` を使いません（引き継いだ会話ではツールを使わなく
+なるため）。ダッシュボードでは「調べてから答える（ツールループ）」です。
 
 ---
 

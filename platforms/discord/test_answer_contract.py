@@ -39,7 +39,11 @@ class SignatureContractTest(unittest.TestCase):
         # 追加は許すが、意図せず増えていないことを見る（契約の見張り）
         extra = _kwargs(runner_answer.answer_question) - _kwargs(
             search.answer_question)
-        self.assertEqual(extra, {"resume", "session_cwd"})
+        self.assertEqual(extra, {
+            "resume", "session_cwd",
+            # v4 ツールループ（archive_tools）と注入の切り替え（Step D）
+            "mcp_config", "mcp_allow", "on_event", "max_budget_usd",
+            "inject_search_hits", "inject_facts", "prompt_style"})
 
     def test_両経路とも外部連携のブロックを受け取れる(self):
         for fn in (search.answer_question, runner_answer.answer_question):

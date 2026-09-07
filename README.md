@@ -88,6 +88,10 @@ The essentials:
 asks "what happened with that?", the agent searches the log and answers with
 citation links. Reminders in natural language, YouTube/PDF auto-summaries, and
 "from now on, do it this way" rule memory are all built in.
+Since v0.2.0 the model can also **query the archive itself while answering**
+(a dependency-free MCP tool loop): it re-searches when the first hit is thin,
+and every side effect such as a reminder goes through a tool so the reply is
+written *after* seeing the result. Off by default; roll out shadow → live.
 
 **Works unprompted — 30 observation loops.** It periodically scans channels and
 speaks only when it has something: extracting action items from meeting minutes

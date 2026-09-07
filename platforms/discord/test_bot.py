@@ -294,3 +294,60 @@ class FetchHistoryTest(unittest.IsolatedAsyncioTestCase):
         trigger.channel = _Boom()
         self.assertEqual(await agent_runtime.fetch_history(trigger), [])
 
+
+
+class NameCallTest(unittest.TestCase):
+    """名前呼び応答: 呼び名の検出と、出てはいけない場所（他エージェントの
+    ホーム ch・観察の除外 ch・他エージェントの名指し）のゲート。"""
+
+    def _self(self, cfg, *, exclude=()):
+        from types import SimpleNamespace as NS
+        return NS(name_call_cfg=bot.normalize_name_call(cfg),
+                  agent={"id": "agent1"},
+                  proactive_cfg={"exclude_channel_ids": list(exclude)})
+
+    @staticmethod
+    def _msg(text, channel_id=999, mentions=()):
+        from types import SimpleNamespace as NS
+        return NS(clean_content=text, mentions=list(mentions),
+                  channel=NS(id=channel_id))
+
+    def test_normalize(self):
+        self.assertEqual(bot.normalize_name_call(None),
+                         {"enabled": False, "shadow": True, "aliases": []})
+        self.assertFalse(bot.normalize_name_call(True)["enabled"])  # 事故形
+        cfg = bot.normalize_name_call(
+            {"enabled": True, "shadow": False, "aliases": [" あかり ", "", 1]})
+        self.assertEqual(cfg, {"enabled": True, "shadow": False,
+                               "aliases": ["あかり", "1"]})
+
+    def test_aliases_and_gates(self):
+        me = self._self({"enabled": True, "shadow": False,
+                         "aliases": ["あかり", "アカリ"]})
+        called = bot.AgentClient._name_called
+        self.assertTrue(called(me, self._msg("あかり、これ見て")))
+        self.assertFalse(called(me, self._msg("関係ない話")))
+        # 無効・呼び名なしは反応しない
+        self.assertFalse(called(self._self({"enabled": False,
+                                            "aliases": ["あかり"]}),
+                                self._msg("あかり、これ見て")))
+        self.assertFalse(called(self._self({"enabled": True, "aliases": []}),
+                                self._msg("あかり、これ見て")))
+
+    def test_other_agent_home_and_excluded_channels(self):
+        me = self._self({"enabled": True, "aliases": ["あかり"]},
+                        exclude=(555,))
+        called = bot.AgentClient._name_called
+        self.assertFalse(called(me, self._msg("あかり、これ見て", channel_id=555)))
+        other_home = next((a.get("home_channel_id") for a in bot.AGENTS
+                           if a["id"] != "agent1" and a.get("home_channel_id")),
+                          None)
+        if other_home:
+            self.assertFalse(called(
+                me, self._msg("あかり、これ見て", channel_id=int(other_home))))
+        self.assertTrue(called(me, self._msg("あかり、これ見て", channel_id=999)))
+
+    def test_allowed_here(self):
+        self.assertFalse(bot.name_call_allowed_here(10, {"10"}, set()))
+        self.assertFalse(bot.name_call_allowed_here(20, set(), {"20"}))
+        self.assertTrue(bot.name_call_allowed_here(30, {"10"}, {"20"}))

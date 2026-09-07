@@ -24,6 +24,9 @@ sys.stdout.reconfigure(line_buffering=True)
 sys.stderr.reconfigure(line_buffering=True)
 os.environ["PYTHONUNBUFFERED"] = "1"
 
+from core import logstamp  # noqa: E402
+logstamp.install()  # ログの各行に時刻（v4 Phase 0 計測）
+
 import discord
 
 from core import action_items
@@ -35,6 +38,7 @@ from core import wiki
 from core import glossary
 from core import heartbeat
 from core import integrations
+from core import invoke_claude
 from core import msgref
 from core import plugins
 from core import proactive
@@ -54,6 +58,9 @@ from platforms.discord.agent_loops import AgentLoopsMixin
 from platforms.discord.marker_actions import MarkerActionsMixin
 from platforms.discord.reaction_handlers import ReactionHandlersMixin
 from platforms.discord.skill_hooks import SkillHooksMixin
+from platforms.discord.tool_loop import ToolLoopMixin
+from core.archive_tools import evidence as tool_evidence
+from core.archive_tools import launch as tool_launch
 from platforms.discord.webhook_personas import WebhookPersonaMixin
 from platforms.discord import agent_runtime
 from platforms.discord.agent_runtime import (
@@ -101,7 +108,26 @@ _resolve_mention = agent_runtime._resolve_mention
 # （load_plugins が中身を入れ替える）
 
 
-class AgentClient(SkillHooksMixin, MarkerActionsMixin, AgentLoopsMixin,
+def normalize_name_call(raw):
+    """agents[].name_call を {enabled, shadow, aliases} に正規化する（純粋関数）。
+    dict 以外（トグル事故で true が書かれた形）は既定＝オフに倒す。"""
+    nc = raw if isinstance(raw, dict) else {}
+    aliases = [str(x).strip() for x in (nc.get("aliases") or [])
+               if str(x).strip()]
+    return {"enabled": bool(nc.get("enabled", False)),
+            "shadow": bool(nc.get("shadow", True)),
+            "aliases": aliases}
+
+
+def name_call_allowed_here(channel_id, other_home_ids, excluded_ids):
+    """名前呼びに応答してよい ch か（純粋関数）。他エージェントのホーム ch と
+    観察の除外 ch では応答しない。"""
+    ch = str(channel_id)
+    return ch not in other_home_ids and ch not in excluded_ids
+
+
+class AgentClient(ToolLoopMixin, SkillHooksMixin, MarkerActionsMixin,
+                  AgentLoopsMixin,
                   ReactionHandlersMixin, WebhookPersonaMixin, discord.Client):
     """1エージェント = 1 Botアカウント = 1クライアント。
 
@@ -146,6 +172,9 @@ class AgentClient(SkillHooksMixin, MarkerActionsMixin, AgentLoopsMixin,
             agent.get("thread_reply"))
         # True: ホームchでもメンション必須（チャンネルを静かに保つ）
         self.require_mention = bool(agent.get("require_mention"))
+        # 名前呼び: ID メンション無しで「〇〇、これ見て」と呼び名で呼ばれた人間の
+        # 発言にも応答する。既定オフ＋シャドー（記録のみ）。名前呼びの取りこぼし対策
+        self.name_call_cfg = normalize_name_call(agent.get("name_call"))
         # 自発性の層（v3 Phase A）: 観察ループの設定（無ければ機能オフ）
         self.proactive_cfg = agent.get("proactive") or {}
         # 納期追跡の会話スキル: 議事録追跡を持つエージェントだけ
@@ -161,6 +190,10 @@ class AgentClient(SkillHooksMixin, MarkerActionsMixin, AgentLoopsMixin,
         # 落ちる。既定で有効にする以上、使えない環境では黙って旧経路に寄せる
         # （明示 true のときは従来どおり理由を出して失敗させる）
         self.runner_enabled = agent_runtime.resolve_runner_enabled(agent)
+        # ツールループ（v4 Phase 1）: 回答の途中で社内データを自分で引く。
+        # 既定オフ＋シャドー（証拠行は記録のみ・write は dry-run）。
+        # 配線は platforms/discord/tool_loop.py（ToolLoopMixin）
+        self.tool_loop_cfg = tool_launch.normalize(agent.get("tool_loop"))
         # create_task はイベントループが弱参照しか持たないため、
         # 参照を保持しないと実行途中でGC回収され得る（要約更新タスク用）
         self._bg_tasks = set()
@@ -223,6 +256,19 @@ class AgentClient(SkillHooksMixin, MarkerActionsMixin, AgentLoopsMixin,
             return None
         if mentioned:
             return "human_mention"  # guild内のどこでも応答
+        if self._name_called(message):
+            if self.name_call_cfg["shadow"]:
+                proactive.log_entry(
+                    DB_PATH, self.agent["id"], kind="namecall",
+                    action="shadow", channel_id=message.channel.id,
+                    trigger_message_id=message.id,
+                    detail=(message.clean_content or "")[:120])
+                return None
+            proactive.log_entry(
+                DB_PATH, self.agent["id"], kind="namecall", action="used",
+                channel_id=message.channel.id, trigger_message_id=message.id,
+                detail=(message.clean_content or "")[:120])
+            return "human_mention"
         if self.require_mention:
             return None  # メンション必須エージェントはここまで
         if message.channel.id == self.home_channel_id:
@@ -231,6 +277,23 @@ class AgentClient(SkillHooksMixin, MarkerActionsMixin, AgentLoopsMixin,
                 return None
             return "home"
         return None
+
+    def _name_called(self, message):
+        """人間の発言に自分の呼び名が含まれるか（ID メンション無し・他エージェントの
+        名指し無し・ホーム ch 以外でも）。他のエージェントのホーム ch と観察の
+        除外 ch では出ない（誤爆防止）。"""
+        if not self.name_call_cfg["enabled"] or not self.name_call_cfg["aliases"]:
+            return False
+        if any(u.id in registered_bot_ids() for u in message.mentions):
+            return False
+        others = {str(a.get("home_channel_id")) for a in AGENTS
+                  if a["id"] != self.agent["id"] and a.get("home_channel_id")}
+        excluded = {str(x) for x in
+                    (self.proactive_cfg.get("exclude_channel_ids") or ())}
+        if not name_call_allowed_here(message.channel.id, others, excluded):
+            return False
+        text = message.clean_content or ""
+        return any(a in text for a in self.name_call_cfg["aliases"])
 
     async def on_message(self, message):
         if message.guild is None or message.guild.id != GUILD_ID:
@@ -309,8 +372,12 @@ class AgentClient(SkillHooksMixin, MarkerActionsMixin, AgentLoopsMixin,
                            state_only=False):
         """search.answer_question に渡す agent dict（役割＋同僚一覧＋スキル）。
         correction=True は「自分の発言への訂正リプライ」検知時（RM#17）。"""
+        # parts = system に入る安定した内容。会話ごとに変わるものは ctx_parts に
+        # 分けて user プロンプト側へ渡す（毎回 system が変わると回答ごとに
+        # 数万トークンのキャッシュ作り直しが起きる）
         parts = [self.agent.get("role") or "",
                  build_roster_note(self.agent["id"])]
+        ctx_parts = []
         if self.image_gen:
             parts.append(IMAGE_SKILL_NOTE)
         if self.is_archiver and not message.author.bot:
@@ -333,21 +400,28 @@ class AgentClient(SkillHooksMixin, MarkerActionsMixin, AgentLoopsMixin,
         # ルール保存・能力起票・プラグインの指示文は人間の発言にのみ注入
         # （Bot同士の会話でマーカーを出す誘因自体を消す）
         if message is not None and not message.author.bot:
+            tool_on = self._tool_loop_on()
+            tool_live = self._tool_loop_live()
+            if tool_on:
+                parts.append(tool_launch.skill_note(tool_live))
             plugin_note = plugins.build_skill_notes(agent_runtime.PLUGINS)
             if plugin_note:
                 parts.append(plugin_note)
-            parts.append(rules.build_skill_note(active))
-            # 事実台帳スキル（2026-08-18）: 訂正・状況説明の受け皿
-            with db.connect(DB_PATH) as conn:
-                recent_facts = db.search_facts(conn, [], limit=10)
-            parts.append(facts.build_skill_note(recent_facts))
-            parts.append(glossary.build_skill_note())
+            # 本番ツールループでは、ツールに置き換えたマーカー型スキルの指示文は
+            # 出さない（マーカーとツールの二重経路を作らない）
+            if not tool_live:
+                parts.append(rules.build_skill_note(active))
+                # 事実台帳スキル（2026-08-18）: 訂正・状況説明の受け皿
+                with db.connect(DB_PATH) as conn:
+                    recent_facts = db.search_facts(conn, [], limit=10)
+                parts.append(facts.build_skill_note(recent_facts))
+                parts.append(glossary.build_skill_note())
             terms_ctx = glossary.build_terms_context(
                 glossary.load_terms(DB_PATH))
             if terms_ctx:
                 parts.append(terms_ctx)
             # リマインダー指示文も人間発言にのみ（管理者は全員分を見られる）
-            if self.reminder:
+            if self.reminder and not tool_live:
                 is_admin = str(message.author.id) in ADMIN_IDS
                 parts.append(reminders.build_skill_note(
                     reminders.now_jst(),
@@ -356,7 +430,7 @@ class AgentClient(SkillHooksMixin, MarkerActionsMixin, AgentLoopsMixin,
                                  if is_admin else None)))
             # 納期追跡の会話スキル: 追跡中一覧＋キャンセル/完了マーカー。
             # 「不要になった」への口約束だけで何も起きない事故の再発防止
-            if self.action_tracking:
+            if self.action_tracking and not tool_live:
                 with db.connect(DB_PATH) as conn:
                     open_items = db.open_action_items(conn, self.agent["id"])
                 parts.append(action_items.build_skill_note(open_items))
@@ -369,21 +443,23 @@ class AgentClient(SkillHooksMixin, MarkerActionsMixin, AgentLoopsMixin,
                 prof = db.get_profile(conn, message.author.id)
             prof_block = profiles.build_profile_block(prof)
             if prof_block:
-                parts.append(prof_block)
+                ctx_parts.append(prof_block)
             # エピソード記憶（RM#3）＋得意分野マップ（RM#53）
             timeline = episodes.build_timeline_block(DB_PATH,
                                                      message.channel.id)
             if timeline:
-                parts.append(timeline)
+                ctx_parts.append(timeline)
             if self.is_archiver:
                 expertise = episodes.build_expertise_map(DB_PATH)
                 if expertise:
-                    parts.append(expertise)
+                    ctx_parts.append(expertise)
             # 訂正の学習（RM#17）: 自分の発言への訂正リプライ検知時のみ
             if correction:
-                parts.append(rules.build_correction_note(state_only=state_only))
+                ctx_parts.append(rules.build_correction_note(
+                    state_only=state_only, tools=tool_live))
             # 自発発言の枠調整（Phase D）: マネージャ（アーカイブ担当）×管理者のみ告知
-            if self.is_archiver and str(message.author.id) in ADMIN_IDS:
+            if (self.is_archiver and str(message.author.id) in ADMIN_IDS
+                    and not tool_live):
                 enabled = [a["id"] for a in AGENTS
                            if (a.get("proactive") or {}).get("enabled")]
                 if enabled:
@@ -392,6 +468,7 @@ class AgentClient(SkillHooksMixin, MarkerActionsMixin, AgentLoopsMixin,
             "name": self.agent["name"],
             "persona_files": self.persona_files,
             "role": "\n".join(p for p in parts if p),
+            "context": "\n".join(p for p in ctx_parts if p),
         }
 
     def _integration_ctx(self, message, attachments_saved=None):
@@ -479,8 +556,13 @@ class AgentClient(SkillHooksMixin, MarkerActionsMixin, AgentLoopsMixin,
             # 会話セッションの持続（resume方式カナリア）: runner経路＋
             # 添付なしターンのみ。ch単位ロックで同一セッションの同時resumeを防ぐ
             sess_cfg = self.agent.get("session_resume") or {}
+            tool_loop_on = self._tool_loop_on()
+            # ツールループ中は resume しない: 引き継いだ会話では前ターンの
+            # 「ツール無しで回答」の惰性でツールを使わない（告知を強めても 0 回）。
+            # 直近の会話は history 注入で残るので文脈は保つ
             use_session = (agent_runtime.resolve_session_resume(
                                self.agent, self.runner_enabled)
+                           and not tool_loop_on
                            and not (att_ctx is not None
                                     and att_ctx.has_supported))
             extra = {}
@@ -490,6 +572,17 @@ class AgentClient(SkillHooksMixin, MarkerActionsMixin, AgentLoopsMixin,
                     message.channel.id, sess_cfg)
                 extra = {"resume": resume_sid,
                          "session_cwd": sessions.SESSION_CWD}
+            tool_plan = None
+            if tool_loop_on:
+                tool_plan = tool_launch.build(self._tool_context(message))
+                extra.update(
+                    mcp_config=tool_plan.mcp_config,
+                    mcp_allow=tool_plan.allow,
+                    max_budget_usd=self.tool_loop_cfg["max_budget_usd"],
+                    on_event=self._tool_progress,
+                    inject_search_hits=self.tool_loop_cfg["inject_search_hits"],
+                    inject_facts=self.tool_loop_cfg["inject_facts"],
+                    prompt_style=self.tool_loop_cfg["prompt_style"])
             async with self._session_lock(message.channel.id, use_session):
                 async with ANSWER_SEM:
                     async with _best_effort_typing(message.channel):
@@ -536,13 +629,29 @@ class AgentClient(SkillHooksMixin, MarkerActionsMixin, AgentLoopsMixin,
                         message.channel.id, result["session_id"],
                         resumed=bool(extra.get("resume")))
             answer = result["answer"]
+            if tool_plan is not None:
+                answer = self._apply_tool_evidence(
+                    message, answer, result.get("events") or [])
+                if self.tool_loop_cfg["shadow"]:
+                    # シャドー観察用の一次証拠（実プロンプト・system・全イベント）。
+                    # 「使えたのに使わなかった」を手元で再生して原因を追える
+                    await asyncio.to_thread(
+                        tool_launch.dump_trace, message.id,
+                        {"question": question, "answer": answer,
+                         "prompt": result.get("prompt"),
+                         "system": result.get("system"),
+                         "events": result.get("events") or [],
+                         "meta": result.get("meta") or {},
+                         "plan": tool_plan.mcp_config})
             image_prompt = caption = None
             if self.image_gen:
                 answer, image_prompt, caption = extract_image_marker(answer)
             wiki_topics = []
             if self.is_archiver and not message.author.bot:
                 answer, wiki_topics = wiki.extract_markers(answer)
-            if self.reminder and not message.author.bot:
+            tool_live = (tool_plan is not None
+                         and not self.tool_loop_cfg["shadow"])
+            if self.reminder and not message.author.bot and not tool_live:
                 answer = self._apply_reminder_markers(message, answer)
             # 外部連携のマーカー実行。ネットワークI/Oを含み得るので別スレッドで。
             # 実行は人間の発言のときだけ（Bot同士の会話で外部を書き換えない）
@@ -554,15 +663,29 @@ class AgentClient(SkillHooksMixin, MarkerActionsMixin, AgentLoopsMixin,
                     answer += f"\n{note}"
             # ルール保存・能力起票マーカーは人間の発言にのみ適用
             if not message.author.bot:
-                if self.action_tracking:
-                    answer = self._apply_action_markers(message, answer)
-                answer = self._apply_rule_markers(message, answer)
-                answer = self._apply_fact_markers(message, answer)
-                answer = self._apply_quota_markers(message, answer)
-                answer = self._apply_glossary_markers(message, answer)
-                # 「できたフリ」検出（RM#20）: 完了主張×マーカー不発を正直化
-                answer = self._apply_honesty_check(
-                    message, answer, result.get("hits", 0))
+                if tool_live:
+                    # 本番ツールループ: 置き換え済みマーカーは除去だけ
+                    # （実行はツールが済ませ、証拠行も付いている）
+                    answer = tool_launch.strip_retired_markers(answer)
+                else:
+                    if self.action_tracking:
+                        answer = self._apply_action_markers(message, answer)
+                    answer = self._apply_rule_markers(message, answer)
+                    answer = self._apply_fact_markers(message, answer)
+                    answer = self._apply_quota_markers(message, answer)
+                    answer = self._apply_glossary_markers(message, answer)
+                # 「できたフリ」検出（RM#20）: 完了主張×マーカー不発を正直化。
+                # ツールで引いたヒット数も根拠として数える（注入を減らすと
+                # 事前ヒットが0になるため）
+                hits = result.get("hits", 0)
+                tools_used = None
+                if tool_plan is not None:
+                    events = result.get("events") or []
+                    hits = max(hits, tool_evidence.search_hits(events))
+                    if tool_live:
+                        tools_used = tool_evidence.tools_used(events)
+                answer = self._apply_honesty_check(message, answer, hits,
+                                                   tools_used=tools_used)
             # 単語帳（RM#5）: 誤表記を決定論で常時修正（登録直後の回答から効く）
             pairs = glossary.load_pairs(DB_PATH)
             if pairs:
@@ -594,7 +717,10 @@ class AgentClient(SkillHooksMixin, MarkerActionsMixin, AgentLoopsMixin,
                         and not message.author.bot
                         and len(answer) >= self_review.MIN_ANSWER_LEN):
                     task = asyncio.create_task(
-                        self._self_review_bg(question, answer, message))
+                        self._self_review_bg(
+                            question, answer, message,
+                            events=(result.get("events") or []
+                                    if tool_plan is not None else [])))
                     self._bg_tasks.add(task)
                     task.add_done_callback(self._bg_tasks.discard)
             for topic in wiki_topics[:2]:
@@ -687,14 +813,18 @@ class AgentClient(SkillHooksMixin, MarkerActionsMixin, AgentLoopsMixin,
         except Exception as e:
             print(f"[{self.agent['id']}] peer review request failed: {e}")
 
-    async def _self_review_bg(self, question, answer, message):
-        """投稿後の自己採点（RM#14・シャドー）。結果はproactive_logへ記録のみ。"""
+    async def _self_review_bg(self, question, answer, message, events=None):
+        """投稿後の自己採点（RM#14・シャドー）。結果はproactive_logへ記録のみ。
+        events: ツールループの stream-json。使ったツールと結果を根拠として渡す
+        （検索して答えた事実を「根拠のない断定」と誤採点しないため）。"""
         try:
+            evidence = tool_evidence.summarize_for_review(events or [])
             async with ANSWER_SEM:
                 r = await asyncio.to_thread(
                     self_review.review, question, answer,
                     model=self.proactive_cfg.get(
-                        "screen_model", proactive.SCREEN_MODEL_DEFAULT))
+                        "screen_model", proactive.SCREEN_MODEL_DEFAULT),
+                    evidence=evidence or None)
             if r:
                 await asyncio.to_thread(
                     proactive.log_entry, DB_PATH, self.agent["id"],
@@ -813,6 +943,20 @@ class AgentClient(SkillHooksMixin, MarkerActionsMixin, AgentLoopsMixin,
         with db.connect(DB_PATH) as conn:
             db.mark_deleted(conn, message.id)
 
+def _record_llm_call(meta):
+    """core/invoke_claude の計測フック（v4 Phase 0）: 1起動1行を llm_calls へ。"""
+    with db.connect(DB_PATH) as conn:
+        db.add_llm_call(conn, created_at=reminders.fmt(reminders.now_jst()),
+                        **meta)
+
+
+async def _run_client(client):
+    """クライアントごとのタスク起点。contextvar に自分のidを置くと、
+    この配下で作られる全タスク／to_thread に「どのエージェントの起動か」が届く。"""
+    invoke_claude.CURRENT_AGENT.set(client.agent["id"])
+    await client.start(client.agent["token"])
+
+
 async def main():
     # 設定が揃っていなければ、何が足りないかを並べて終了する
     # （黙って起動して「反応しないBOT」になるのが一番わかりにくい）
@@ -837,6 +981,9 @@ async def main():
 
     # 過去障害対策: discordロガーのINFO spam（RESUMED等）でログ肥大させない
     discord.utils.setup_logging(level=logging.WARNING)
+    # LLM計測フック（v4 Phase 0）。import 時ではなく起動時に登録する
+    # （テストが bot を import しても本番DBへ書かないため）
+    invoke_claude.RECORDER = _record_llm_call
 
     clients = []
     for agent in AGENTS:
@@ -846,8 +993,7 @@ async def main():
         clients.append(AgentClient(agent, intents=intents))
 
     try:
-        await asyncio.gather(
-            *(c.start(c.agent["token"]) for c in clients))
+        await asyncio.gather(*(_run_client(c) for c in clients))
     finally:
         # 1体でも落ちたら全員閉じてプロセス終了 → launchdが再起動
         await asyncio.gather(*(c.close() for c in clients),

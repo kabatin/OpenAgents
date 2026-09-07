@@ -98,7 +98,8 @@ def judge(candidate, follow_rows, *, model, invoke_fn=None):
     """LLM判定: 救済すべきか。invoke_fnはテスト差し替え口。"""
     prompt = build_judge_prompt(candidate, follow_rows)
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
-        p, model=model, timeout=JUDGE_TIMEOUT_SEC).text)
+        p, model=model, timeout=JUDGE_TIMEOUT_SEC,
+        purpose="rescue").text)
     return parse_judge(fn(prompt))
 
 

@@ -7,7 +7,62 @@
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-09-07
+
+回答経路を「1回生成して事後にマーカーを拾う」形から、**モデルが必要な時に自分で
+社内データを引き、書いた結果を見てから本文を書く**ツールループへ変えたリリース。
+あわせて LLM 呼び出しの計測台帳、追跡タスクの統一入口と出口、学習ループの
+行動接続、開発BOTの検証パスを足した。切り出し元プロジェクトの
+運用34日分の実データに基づく改善も含む。
+
 ### 追加
+
+- **ツールループ（archive-tools MCP サーバ）** — 依存ゼロの stdio MCP サーバ
+  `core/archive_tools/` を `claude -p` に渡し、回答中に search_messages /
+  get_facts / get_decisions / list_reminders / list_tasks / lookup_terms /
+  recall_lessons で引き直し、save_fact / save_rule / add_reminder /
+  update_task / save_glossary / save_term / request_capability / save_lesson
+  などの書き込みをツールで行う。権限（管理者・本人・上限）と1日の書き込み枠
+  （`write_quota` テーブル）はサーバ側で判定し、LLM の申告は信用しない。
+  Bot 起点のターンとシャドー中は書き込みツールを見せない。
+  エージェント設定 `tool_loop`（OFF／シャドー／本番）で段階導入でき、本番では
+  同じ種別のマーカー処理を止めて証拠行（`-#`）を結果から決定論で生成する。
+  「できたフリ」の検出も日本語の言い回しではなくツール呼び出しの有無で行う
+- **事前注入の削減設定** — `tool_loop.inject_search_hits`（0で注入なし）・
+  `inject_facts`・`prompt_style`（v3=従来／v4=目的と制約だけの統合テンプレ）。
+  切り出し元の A/B ではキュレーション済み16問で「注入なし＋v4」が採点・費用とも
+  優位だったが、既定は従来どおり
+- **LLM 呼び出しの計測台帳（`llm_calls`）** — 1起動1行で用途（purpose）・所要・
+  ターン数・コスト・トークン内訳・ツール呼び出し数・権限拒否数を記録。
+  観察ループも同じ経路に乗る。ダッシュボード「データ → LLM呼び出し」タブ。
+  ログの各行に時刻（`core/logstamp.py`）
+- **固定費対策** — 常に `--setting-sources ""` と
+  `--exclude-dynamic-system-prompt-sections` を付け、利用者の CLAUDE.md が
+  BOTの回答に漏れ込む事故も構造的に防ぐ。会話ごとに変わる前提（プロファイル・
+  エピソード・訂正注記）は system ではなく user プロンプト先頭に置き、
+  キャッシュを安定させる
+- **追跡タスクの統一入口と出口（`core/tasks.py`）** — 議事録TODO／宿題／
+  リマインダーを A6 / H27 / R57 の key で1つの形に読み替え、会話やツールから
+  done / cancel / due / open を振り分ける。超過の声かけから7日動きが無い
+  TODO は `stale` にして1行で手放す。観察ループの各サイクルを 900 秒で隔離し、
+  超過は打ち切って記録する。ダッシュボード「データ → 追跡タスク」タブ
+- **模範Q&Aのキュレーションと回帰採点** — `python -m core.golden_curate` が
+  決定台帳・事実台帳・固有名詞辞書から候補を作り、人が採用する。
+  `python -m core.golden_eval --set curated` が採用済みを今の経路で答え直して
+  参照と比較採点し、週次レポートに最新平均を載せる
+- **学習の行動接続** — 自己採点にツールで確認した事実を渡し「根拠のない断定」と
+  誤採点しない。助言の蒸留は言い直しを同一視して連続週数を積む（完全一致だと
+  卒業提案が一度も出なかった）。訂正検知時の指示をツール版に。
+  `rule_distill` の発火下限を 8→5
+- **名前呼び応答（`name_call`）** — ID メンション無しで名前や別名を呼ばれた
+  発言に応答する。他のエージェントの名指し・他エージェントのホームch・
+  観察の除外chでは出さない
+- **開発BOTの検証パス** — 実装後に別コンテキスト（Read/Grep/Glob のみ）で
+  起票と差分を照合し、承認者に 🔍 の1〜2行で見せる。中核ファイルに触れる差分に
+  🧠 警告。ジョブごとの claude イベント／エラーを `state/logs/dev-jobs/` に残す。
+  `dev_bot.model` / `dev_bot.verify_model` で設定可
+- **週次レポートの拡充** — 手放したTODO数・ツールで調べてから答えた割合・
+  教訓の参照／記録数・模範Q&Aの最新平均
 
 - **宿題の催促に出口** — 一度目の「あれどうなりました？」に返事が無いと
   `asked` のまま永久に残っていた。数日後（`proactive.homework.second_nudge_days`）
@@ -28,6 +83,11 @@
 - **リマインダー上限の設定化** — 1人あたりのアクティブ上限を
   エージェント設定 `reminder_max_active` で変えられる（既定30件）。
   ダッシュボードの「基本動作」からも変更可
+
+### 変更
+
+- ログローテーションの上限を 20MB → 10MB
+- 開発BOTの起動挨拶を投稿せずログのみに
 
 ## [0.1.2] — 2026-08-27
 
@@ -145,7 +205,8 @@ macOS・Windows・Linux で緑。
 - 添付読解・Web検索などツールを使う機能は Claude Code 選択時のみ
 - ドキュメントは日本語が正（英語は README のみ）
 
-[Unreleased]: https://github.com/kabatin/OpenAgents/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/kabatin/OpenAgents/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/kabatin/OpenAgents/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/kabatin/OpenAgents/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/kabatin/OpenAgents/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/kabatin/OpenAgents/releases/tag/v0.1.0

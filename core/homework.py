@@ -155,7 +155,8 @@ def detect(messages, *, agent_name, model=SCREEN_MODEL_DEFAULT,
     """検知: 自己コミット候補のリストを返す（無ければ空）。invoke_fnはテスト差し替え口。"""
     prompt = build_detect_prompt(messages, agent_name)
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
-        p, model=model, timeout=DETECT_TIMEOUT_SEC).text)
+        p, model=model, timeout=DETECT_TIMEOUT_SEC,
+        purpose="homework").text)
     return parse_detect_response(fn(prompt), {m["id"] for m in messages})
 
 
@@ -279,7 +280,8 @@ def check_resolved(db_path, item, *, model=SCREEN_MODEL_DEFAULT,
     prompt = build_resolution_prompt(item, later, source_reactions=src_rx,
                                      nudge_reactions=ndg_rx)
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
-        p, model=model, timeout=DETECT_TIMEOUT_SEC).text)
+        p, model=model, timeout=DETECT_TIMEOUT_SEC,
+        purpose="homework").text)
     try:
         return parse_resolution_response(fn(prompt))
     except Exception as e:

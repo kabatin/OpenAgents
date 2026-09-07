@@ -167,3 +167,115 @@ class RunnerAnswerBuildPromptTest(unittest.TestCase):
     def test_minimal(self):
         p = runner_answer.build_prompt("質問だけ", "", "", None, "")
         self.assertEqual(p, "【質問】\n質問だけ")
+
+    def test_agent_context_comes_first(self):
+        p = runner_answer.build_prompt("質問", "", "", None, "",
+                                       facts_block="【事実台帳】x",
+                                       agent_context="【発言者】A: 代表")
+        self.assertTrue(p.startswith("【この会話の前提】\n【発言者】A: 代表"))
+        self.assertLess(p.index("この会話の前提"), p.index("事実台帳"))
+
+
+class CacheStabilityTest(unittest.TestCase):
+    """固定費対策: 設定ファイルを読まず、会話ごとの前提を system に入れない。"""
+
+    def test_argv_has_setting_sources_and_dynamic_exclusion(self):
+        argv = invoke_claude.build_argv("claude", model="m")
+        self.assertEqual(argv[argv.index("--setting-sources") + 1], "")
+        self.assertIn("--exclude-dynamic-system-prompt-sections", argv)
+        # 従来の契約は据え置き（ツール無し・stream-json）
+        self.assertEqual(argv[argv.index("--tools") + 1], "")
+        self.assertEqual(argv[argv.index("--output-format") + 1], "stream-json")
+
+    def test_context_goes_to_user_prompt_not_system(self):
+        captured = {}
+
+        class R:
+            text = "a"
+            session_id = None
+            events = []
+            meta = {}
+
+        def fake_invoke(prompt, **kwargs):
+            captured["prompt"] = prompt
+            captured["system"] = kwargs.get("system")
+            return R()
+
+        agent = dict(search.DEFAULT_AGENT, role="役割の文",
+                     context="【発言者】A: 代表")
+        with patch.object(runner_answer.invoke_claude, "invoke", fake_invoke), \
+                patch.object(search, "extract_keywords", return_value=["kw"]), \
+                patch.object(search, "search_messages", return_value=[]):
+            runner_answer.answer_question(_TMP_DB, "1", "質問", agent=agent)
+        self.assertIn("役割の文", captured["system"])
+        self.assertNotIn("A: 代表", captured["system"])
+        self.assertIn("【この会話の前提】", captured["prompt"])
+        self.assertIn("A: 代表", captured["prompt"])
+
+    def test_legacy_route_keeps_context_in_role(self):
+        # 旧経路（search.answer_question）は context を role に合流させる
+        agent = dict(search.DEFAULT_AGENT, role="役割の文",
+                     context="【発言者】A: 代表")
+        system = search._build_system(search.GENERAL_SYSTEM_TMPL, agent)
+        self.assertIn("役割の文", system)
+        self.assertIn("A: 代表", system)
+
+
+class ToolLoopArgvTest(unittest.TestCase):
+    """v4 ツールループ: mcp_config / strict / budget / on_event の配線。"""
+
+    def test_mcp_config_adds_settings_strict_and_budget(self):
+        argv = invoke_claude.build_argv(
+            "claude", model="m", mcp_config='{"mcpServers":{}}',
+            allow=("mcp__archive__search_messages",), max_budget_usd=0.5)
+        self.assertEqual(argv[argv.index("--tools") + 1], "")
+        self.assertIn("--permission-mode", argv)
+        settings = json.loads(argv[argv.index("--settings") + 1])
+        self.assertEqual(settings["permissions"]["allow"],
+                         ["mcp__archive__search_messages"])
+        i = argv.index("--mcp-config")
+        self.assertEqual(argv[i + 2], "--strict-mcp-config")
+        self.assertEqual(argv[argv.index("--max-budget-usd") + 1], "0.5")
+
+    def test_no_mcp_no_tools_means_no_settings(self):
+        argv = invoke_claude.build_argv("claude", model="m")
+        self.assertNotIn("--settings", argv)
+        self.assertNotIn("--strict-mcp-config", argv)
+        self.assertNotIn("--max-budget-usd", argv)
+
+    def test_streaming_route_calls_on_event(self):
+        import os
+        import sys
+        import tempfile
+        script = (
+            "import sys\n"
+            "sys.stdin.read()\n"
+            "print('{\"type\":\"assistant\",\"message\":{\"content\":"
+            "[{\"type\":\"tool_use\",\"id\":\"t\",\"name\":\"mcp__archive__x\","
+            "\"input\":{}}]}}')\n"
+            "print('garbage')\n"
+            "print('{\"type\":\"result\",\"subtype\":\"success\","
+            "\"result\":\"done\",\"num_turns\":2}')\n")
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "fake.py")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(script)
+            seen = []
+            proc = invoke_claude._run_streaming(
+                [sys.executable, path], "prompt", timeout=30, cwd=None,
+                on_event=seen.append)
+        self.assertEqual(proc.returncode, 0)
+        self.assertEqual([e["type"] for e in seen], ["assistant", "result"])
+        events, final, _texts, err = invoke_claude.parse_stream_events(
+            proc.stdout.splitlines())
+        self.assertEqual(final, "done")
+        self.assertIsNone(err)
+        self.assertEqual(invoke_claude.extract_meta(events)["tool_calls"], 1)
+
+    def test_streaming_route_times_out(self):
+        import subprocess
+        import sys
+        with self.assertRaises(subprocess.TimeoutExpired):
+            invoke_claude._run_streaming(
+                [sys.executable, "-c", "import time; time.sleep(5)"],
+                "", timeout=0.3, cwd=None, on_event=lambda ev: None)

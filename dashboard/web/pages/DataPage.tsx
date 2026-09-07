@@ -84,18 +84,82 @@ type AdviceRow = {
   streak: number;
   createdAt: string | null;
 };
+type GoldenRow = {
+  id: number;
+  agentId: string | null;
+  kind: string | null;
+  status: string | null;
+  question: string | null;
+  answer: string | null;
+  sourceLink: string | null;
+  note: string | null;
+  createdAt: string | null;
+};
+
+type TaskRow = {
+  key: string;
+  kind: "action" | "homework" | "reminder";
+  id: number;
+  task: string | null;
+  owner: string | null;
+  due: string | null;
+  status: string | null;
+  stage: string | null;
+};
 
 const TABS = [
   { id: "rules", label: "ルール記憶" },
   { id: "dictionary", label: "名前辞書" },
+  { id: "tasks", label: "追跡タスク" },
   { id: "reminders", label: "リマインダー" },
   { id: "capabilities", label: "能力リクエスト" },
   { id: "personas", label: "Webhook人格" },
   { id: "sheets", label: "シート登録簿" },
   { id: "learning", label: "学びと実験" },
+  { id: "llm", label: "LLM呼び出し" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
+
+type LlmDaily = {
+  day: string;
+  calls: number;
+  failed: number;
+  costUsd: number;
+  avgMs: number | null;
+  maxMs: number | null;
+  cacheReadTokens: number;
+  outputTokens: number;
+};
+type LlmPurpose = {
+  agentId: string | null;
+  purpose: string | null;
+  calls: number;
+  failed: number;
+  costUsd: number;
+  avgMs: number | null;
+};
+type LlmCall = {
+  id: number;
+  agentId: string | null;
+  purpose: string | null;
+  model: string | null;
+  ok: number | null;
+  error: string | null;
+  durationMs: number | null;
+  numTurns: number | null;
+  costUsd: number | null;
+  toolCalls: number | null;
+  denials: number | null;
+  createdAt: string | null;
+};
+
+function usd(n: number | null | undefined): string {
+  return n === null || n === undefined ? "—" : `$${n.toFixed(3)}`;
+}
+function sec(ms: number | null | undefined): string {
+  return ms === null || ms === undefined ? "—" : `${(ms / 1000).toFixed(1)}s`;
+}
 
 /** scope は `global` / `channel:<id>` / `user:<id>` の形で入っている。 */
 function scopeLabel(scope: string): string {
@@ -113,9 +177,13 @@ export function DataPage() {
   const { data: reminders } = useFetch<{ items: Reminder[] }>(
     tab === "reminders" ? "/data/reminders" : null,
   );
+  const { data: tasks } = useFetch<{ items: TaskRow[] }>(tab === "tasks" ? "/data/tasks" : null);
   const { data: dict } = useFetch<Dictionary>(tab === "dictionary" ? "/data/dictionary" : null);
-  const { data: learning } = useFetch<{ shadow: ShadowRow[]; advice: AdviceRow[] }>(
+  const { data: learning } = useFetch<{ shadow: ShadowRow[]; advice: AdviceRow[]; golden: GoldenRow[] }>(
     tab === "learning" ? "/data/observations" : null,
+  );
+  const { data: llm } = useFetch<{ daily: LlmDaily[]; byPurpose: LlmPurpose[]; recent: LlmCall[] }>(
+    tab === "llm" ? "/data/llm" : null,
   );
 
   const c = summary?.counters;
@@ -265,9 +333,114 @@ export function DataPage() {
           </div>
         )}
 
+        {tab === "llm" && (
+          <div className="pb-2">
+            <div className="eyebrow px-4 pb-1 pt-3">
+              日別（claude CLI の起動 1回＝1行。コストは CLI が申告する定価換算・14日）
+            </div>
+            <ul>
+              {(llm?.daily ?? []).length === 0 ? (
+                <Empty>まだ記録がありません（再起動後の呼び出しから貯まります）</Empty>
+              ) : (
+                llm?.daily.map((d) => (
+                  <li
+                    key={d.day}
+                    className="tnum flex items-baseline gap-3 border-t border-hairline px-4 py-2 text-xs first:border-t-0"
+                  >
+                    <span className="w-24 shrink-0 font-medium">{d.day}</span>
+                    <span className="w-16 shrink-0">{d.calls} 回</span>
+                    <span className={`w-16 shrink-0 ${d.failed > 0 ? "text-danger" : "text-faint"}`}>
+                      失敗 {d.failed}
+                    </span>
+                    <span className="w-20 shrink-0">{usd(d.costUsd)}</span>
+                    <span className="w-24 shrink-0 text-muted">平均 {sec(d.avgMs)}</span>
+                    <span className="w-24 shrink-0 text-muted">最大 {sec(d.maxMs)}</span>
+                    <span className="min-w-0 flex-1 text-faint">
+                      cache読 {d.cacheReadTokens.toLocaleString()} / 出力 {d.outputTokens.toLocaleString()} tok
+                    </span>
+                  </li>
+                ))
+              )}
+            </ul>
+            <div className="eyebrow px-4 pb-1 pt-4">用途別（直近7日・コスト順）</div>
+            <ul>
+              {(llm?.byPurpose ?? []).length === 0 ? (
+                <Empty>まだ記録がありません</Empty>
+              ) : (
+                llm?.byPurpose.map((p) => (
+                  <li
+                    key={`${p.agentId}-${p.purpose}`}
+                    className="tnum flex items-baseline gap-3 border-t border-hairline px-4 py-2 text-xs first:border-t-0"
+                  >
+                    <span className="w-20 shrink-0 text-muted">{agentLabel(p.agentId ?? "?")}</span>
+                    <span className="w-28 shrink-0 font-medium">{p.purpose ?? "other"}</span>
+                    <span className="w-16 shrink-0">{p.calls} 回</span>
+                    <span className={`w-16 shrink-0 ${p.failed > 0 ? "text-danger" : "text-faint"}`}>
+                      失敗 {p.failed}
+                    </span>
+                    <span className="w-20 shrink-0">{usd(p.costUsd)}</span>
+                    <span className="min-w-0 flex-1 text-muted">平均 {sec(p.avgMs)}</span>
+                  </li>
+                ))
+              )}
+            </ul>
+            <div className="eyebrow px-4 pb-1 pt-4">直近の呼び出し（失敗は理由つき）</div>
+            <ul>
+              {(llm?.recent ?? []).length === 0 ? (
+                <Empty>まだ記録がありません</Empty>
+              ) : (
+                llm?.recent.map((r) => (
+                  <li key={r.id} className="border-t border-hairline px-4 py-2 text-xs first:border-t-0">
+                    <div className="tnum flex items-baseline gap-3">
+                      <span className="w-24 shrink-0 text-faint">{jstStamp(r.createdAt)}</span>
+                      <span className="w-20 shrink-0 text-muted">{agentLabel(r.agentId ?? "?")}</span>
+                      <span className="w-28 shrink-0 font-medium">{r.purpose ?? "other"}</span>
+                      <Chip tone={r.ok ? "neutral" : "danger"}>{r.ok ? "ok" : "失敗"}</Chip>
+                      <span className="w-16 shrink-0">{sec(r.durationMs)}</span>
+                      <span className="w-20 shrink-0">{usd(r.costUsd)}</span>
+                      <span className="min-w-0 flex-1 text-faint">
+                        {r.model ?? ""} · {r.numTurns ?? 0}ターン · ツール {r.toolCalls ?? 0}
+                        {r.denials ? ` · 拒否 ${r.denials}` : ""}
+                      </span>
+                    </div>
+                    {r.error && <div className="mt-1 pl-24 text-2xs text-danger">{r.error}</div>}
+                  </li>
+                ))
+              )}
+            </ul>
+          </div>
+        )}
+
         {tab === "learning" && (
           <div className="pb-2">
             <div className="eyebrow px-4 pb-1 pt-3">
+              模範Q&A（回帰テストの物差し）。candidate=採用待ち / curated=採用 /
+              active=👍自動捕獲。採用・不採用は `python -m core.golden_curate` で番号指定
+            </div>
+            <ul>
+              {(learning?.golden ?? []).length === 0 ? (
+                <Empty>模範Q&Aはまだありません</Empty>
+              ) : (
+                learning?.golden.map((g) => (
+                  <li key={g.id} className="border-t border-hairline px-4 py-2 text-xs first:border-t-0">
+                    <div className="flex items-baseline gap-2.5">
+                      <span className="tnum w-8 shrink-0 text-2xs text-faint">#{g.id}</span>
+                      <Chip
+                        tone={
+                          g.status === "curated" ? "info" : g.status === "candidate" ? "warn" : "neutral"
+                        }
+                      >
+                        {g.status}
+                      </Chip>
+                      <span className="min-w-0 flex-1 font-medium">{g.question}</span>
+                      {g.note && <span className="shrink-0 text-faint">{g.note}</span>}
+                    </div>
+                    <div className="mt-1 pl-10 text-muted">{g.answer}</div>
+                  </li>
+                ))
+              )}
+            </ul>
+            <div className="eyebrow px-4 pb-1 pt-4">
               いま効いている自己改善メモ（週次蒸留・回答時に常時注入／3週連続で
               恒久ルールへ格上げ提案）
             </div>
@@ -332,6 +505,35 @@ export function DataPage() {
                     </div>
                     <div className="mt-1 text-muted">「{row.trigger ?? ""}」</div>
                     <div className="mt-1">→ {row.detail ?? ""}</div>
+                  </li>
+                ))
+              )}
+            </ul>
+          </div>
+        )}
+
+        {tab === "tasks" && (
+          <div className="pb-2">
+            <div className="eyebrow px-4 pb-1 pt-3">
+              追跡中のタスク（A=議事録TODO / H=宿題 / R=リマインダー）。
+              変更は Discord で「H27 を完了に」「A6 を 9/12 に」のように話しかける
+            </div>
+            <ul>
+              {(tasks?.items ?? []).length === 0 ? (
+                <Empty>追跡中のタスクはありません</Empty>
+              ) : (
+                tasks?.items.map((t) => (
+                  <li key={t.key} className="border-t border-hairline px-4 py-2 text-xs first:border-t-0">
+                    <div className="flex items-baseline gap-2.5">
+                      <span className="tnum w-10 shrink-0 font-medium text-accent-deep">{t.key}</span>
+                      <Chip tone={t.status === "stale" ? "warn" : "info"}>
+                        {{ action: "議事録", homework: "宿題", reminder: "リマインド" }[t.kind]}
+                      </Chip>
+                      <span className="tnum w-24 shrink-0 text-muted">{t.due ?? "未定"}</span>
+                      <span className="min-w-0 flex-1">{t.task}</span>
+                      {t.owner && <span className="shrink-0 text-faint">{t.owner}</span>}
+                      <span className="shrink-0 text-2xs text-faint">{t.stage}</span>
+                    </div>
                   </li>
                 ))
               )}

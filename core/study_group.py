@@ -93,7 +93,8 @@ def find_shareable(db_path, *, model, invoke_fn=None):
     if len(rows) < MIN_RULES:
         return []
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
-        p, model=model, timeout=TIMEOUT_SEC).text)
+        p, model=model, timeout=TIMEOUT_SEC,
+        purpose="study").text)
     return parse_picks(fn(build_prompt(rows)), {r["id"]: r for r in rows})
 
 

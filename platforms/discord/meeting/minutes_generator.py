@@ -81,6 +81,7 @@ def _run_claude(prompt, model):
         model=model,
         timeout=CLAUDE_TIMEOUT_SEC,
         cwd=os.path.dirname(os.path.abspath(__file__)),
+        purpose="minutes_bot",
     ).text
 
 async def generate_minutes_async(transcript, start_time, end_time, participants):

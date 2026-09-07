@@ -157,7 +157,7 @@ def summarize(persona, video_id, user_text=""):
     title = fetch_title(video_id)
     prompt = build_prompt(persona, title, minutes, user_text,
                           trim_transcript(transcript))
-    body = search.run_claude(prompt)
+    body = search.run_claude(prompt, purpose="youtube")
     header = (f"🎬 **{title}**（約{minutes}分）" if title
               else f"🎬 動画の要約（約{minutes}分）")
     return f"{header}\n\n{body}"

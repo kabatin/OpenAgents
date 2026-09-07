@@ -169,7 +169,8 @@ def score(messages, *, agent_name, model=SCREEN_MODEL_DEFAULT,
     """採点: 判定dict or None（静観）。invoke_fnはテスト差し替え口。"""
     prompt = build_score_prompt(messages, agent_name, persona)
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
-        p, model=model, timeout=JUDGE_TIMEOUT_SEC).text)
+        p, model=model, timeout=JUDGE_TIMEOUT_SEC,
+        purpose="attention").text)
     try:
         return parse_score_response(fn(prompt), {m["id"] for m in messages})
     except Exception as e:
@@ -247,7 +248,8 @@ def recheck(db_path, item, *, agent_name, model=SCREEN_MODEL_DEFAULT,
     later = [{**m, "reactions": rx.get(m["id"]) or ()} for m in later]
     prompt = build_recheck_prompt(item, later, agent_name, persona)
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
-        p, model=model, timeout=JUDGE_TIMEOUT_SEC).text)
+        p, model=model, timeout=JUDGE_TIMEOUT_SEC,
+        purpose="attention").text)
     try:
         return parse_recheck_response(fn(prompt), item["say"])
     except Exception as e:

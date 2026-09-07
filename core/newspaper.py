@@ -132,7 +132,8 @@ def edit(db_path, week_label, *, model, invoke_fn=None, now=None):
     if len(material) < MIN_MATERIAL:
         return None
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
-        p, model=model, timeout=TIMEOUT_SEC).text)
+        p, model=model, timeout=TIMEOUT_SEC,
+        purpose="newspaper").text)
     return parse_headlines(fn(build_headline_prompt(material, week_label)))
 
 
