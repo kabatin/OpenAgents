@@ -349,10 +349,19 @@ def _kill_tree(proc):
         proc.kill()
 
 
+# 実装ジョブの実行は POSIX 専用。無音検知に select（Windows ではソケットにしか
+# 使えない）、プロセスツリーの停止に killpg を使うため。他のBOTは Windows でも動く
+POSIX_ONLY = not hasattr(os, "killpg")
+
+
 def stream_claude(prompt, cwd, on_event, *, model=MODEL,
                   timeout=BUILD_TIMEOUT_SEC, idle_timeout=IDLE_TIMEOUT_SEC):
     """claude -p を stream-json で起動し、行ごとに on_event(ev) を呼ぶ（IO）。
-    無音が idle_timeout を超えたら中断（ハング保険）。dict(ok/final_text/error/n)。"""
+    無音が idle_timeout を超えたら中断（ハング保険）。dict(ok/final_text/error/n)。
+    macOS / Linux 専用（理由は POSIX_ONLY のコメント）。"""
+    if POSIX_ONLY:
+        return {"ok": False, "final_text": "", "n": 0,
+                "error": "実装ジョブは macOS / Linux でのみ実行できます"}
     argv = claude_argv(_claude_bin(), model)
     proc = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.PIPE,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,

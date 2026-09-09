@@ -472,6 +472,8 @@ class PermissionSafetyTest(unittest.TestCase):
         self.assertEqual(argv[argv.index("--setting-sources") + 1], "")
 
 
+@unittest.skipIf(dev_pipeline.POSIX_ONLY,
+                 "実装ジョブの実行経路は POSIX 専用（select / killpg）")
 class IdleDiagnosticsTest(unittest.TestCase):
     def test_idle_error_reports_event_count(self):
         import sys
