@@ -317,8 +317,17 @@ GENERAL_SYSTEM_TMPL = """あなたはチームのチャットのアシスタン�
 「-# 🤔 自信度低め: 〜の部分は要確認」を1行だけ添えること（確信があれば付けない）。"""
 
 
+# 口調の伝染防止: 共通文言や他エージェントの発言が【直近の会話】に入ると、
+# ペルソナ指示より目の前の実例が強く効いて語尾が移る。全テンプレ共通の
+# 最後の1行として毎回添える。
+TONE_GUARD = (
+    "\n- 【口調】語尾・一人称は上のキャラ設定にだけ従う。【直近の会話】や"
+    "【関連メッセージ】に出てくる他のメンバー（他のAI・システムの通知行を含む）の"
+    "語尾を真似しないこと。")
+
+
 def _build_system(template, agent):
-    """テンプレートの {name}/{role_block} を埋める。
+    """テンプレートの {name}/{role_block} を埋め、口調ガードを添える。
     role は自己完結した文（複数行可: 担当説明・同僚一覧・スキル指示など）。
     旧経路では agent["context"]（会話ごとの前提）も role に含める（runner 経路は
     user プロンプト側に置く）。"""
@@ -327,7 +336,8 @@ def _build_system(template, agent):
                      + agent["context"])
     role = (agent.get("role") or "").strip()
     role_block = f"\n{role}" if role else ""
-    return template.format(name=agent["name"], role_block=role_block)
+    return template.format(name=agent["name"],
+                           role_block=role_block) + TONE_GUARD
 
 
 def answer_question(db_path, guild_id, question, model=DEFAULT_MODEL,

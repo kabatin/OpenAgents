@@ -115,6 +115,7 @@ def build_reference_block(entries, guild_id):
     if not entries:
         return ""
     lines = [_format_entry(e, i, guild_id) for i, e in enumerate(entries, 1)]
-    return ("【参照メッセージ（利用者がリンク/IDで指定した投稿。投稿者名・"
+    return ("【参照メッセージ（利用者がリプライした投稿・リンク/IDで指定した投稿。"
+            "[1] がリプライ先なら「この投稿の話」として扱う。投稿者名・"
             "ユーザーID・本文・投稿chをここから正確に引ける）】\n"
             + "\n".join(lines))

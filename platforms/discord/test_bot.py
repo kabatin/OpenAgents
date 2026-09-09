@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """bot.py / agent_runtime の純粋ヘルパーのユニットテスト。"""
 
+import asyncio
 import os
 import unittest
+from types import SimpleNamespace
+
+from core import msgref
 
 from platforms.discord import agent_runtime
 from platforms.discord import bot
@@ -351,3 +355,75 @@ class NameCallTest(unittest.TestCase):
         self.assertFalse(bot.name_call_allowed_here(10, {"10"}, set()))
         self.assertFalse(bot.name_call_allowed_here(20, set(), {"20"}))
         self.assertTrue(bot.name_call_allowed_here(30, {"10"}, {"20"}))
+
+
+
+class ReferenceBlockTest(unittest.TestCase):
+    """リプライ先を参照ブロックの先頭に入れる。これが無いと、通知や長文に
+    リプライして「これ対応して」と頼まれても何の話か分からず聞き返してしまう。"""
+
+    def setUp(self):
+        # 実物は archive.db を引くので、空の一時DBに向ける（全件 Discord 取得へ）
+        import tempfile
+        from core import db as core_db
+        fd, self.db_path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        core_db.init_db(self.db_path)
+        self._orig_db = bot.DB_PATH
+        bot.DB_PATH = self.db_path
+
+    def tearDown(self):
+        bot.DB_PATH = self._orig_db
+        os.unlink(self.db_path)
+
+    @staticmethod
+    def _msg(content="これ対応して", ref=None, channel_id=200):
+        from types import SimpleNamespace as NS
+        return NS(clean_content=content, reference=ref,
+                  channel=NS(id=channel_id))
+
+    def _collect(self, message):
+        """実物の _collect_reference_block を、取得だけ差し替えて動かす。
+        DBには何も無い前提なので、参照は全て _fetch_ref_message へ落ちる。"""
+        from types import SimpleNamespace as NS
+        seen = []
+
+        async def fetch(channel_id, mid, origin):
+            seen.append((channel_id, mid))
+            return msgref.make_entry(
+                message_id=mid, channel_id=channel_id, channel="ch",
+                author=f"人{mid}", author_id=mid, content=f"本文{mid}",
+                created_at="2026-09-08T00:00:00+00:00", deleted=False)
+
+        fake = NS(_fetch_ref_message=fetch)
+        block = asyncio.run(
+            bot.AgentClient._collect_reference_block(fake, message))
+        return seen, block
+
+    def test_reply_goes_first(self):
+        seen, block = self._collect(
+            self._msg(ref=SimpleNamespace(message_id=555, channel_id=300)))
+        self.assertEqual(seen, [(300, 555)])
+        self.assertIn("リプライした投稿", block)
+
+    def test_reply_channel_falls_back_to_current(self):
+        seen, _ = self._collect(
+            self._msg(ref=SimpleNamespace(message_id=555, channel_id=None)))
+        self.assertEqual(seen, [(200, 555)])
+
+    def test_reply_comes_before_body_link_and_dedupes(self):
+        link = f"https://discord.com/channels/{bot.GUILD_ID}/300/777"
+        seen, _ = self._collect(self._msg(
+            content=f"{link} これ",
+            ref=SimpleNamespace(message_id=555, channel_id=300)))
+        self.assertEqual(seen, [(300, 555), (300, 777)])
+        # 本文のリンクがリプライ先と同じなら1件に畳む
+        seen2, _ = self._collect(self._msg(
+            content=f"https://discord.com/channels/{bot.GUILD_ID}/300/555 これ",
+            ref=SimpleNamespace(message_id=555, channel_id=300)))
+        self.assertEqual(seen2, [(300, 555)])
+
+    def test_no_reply_and_no_link_returns_none(self):
+        seen, block = self._collect(self._msg())
+        self.assertEqual(seen, [])
+        self.assertIsNone(block)

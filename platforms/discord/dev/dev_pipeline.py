@@ -27,7 +27,10 @@ MODEL = "claude-opus-4-8"          # 本体改修は最も慎重なOpus
 BUILD_TIMEOUT_SEC = 1800
 # ハング保険。--include-partial-messages で長考中もstreamは流れるが、長いツール実行
 # （テスト一式など）中は無音になる。180秒では書き終わり間際の無音で誤発動した（起票#7）。
-IDLE_TIMEOUT_SEC = 600
+# 起動直後から1イベントも来ないまま無音で落ちることがある（原因は環境側で
+# 特定しづらい）。余裕を広げ、無音で切るときは「何イベント受けて最後は何だったか」
+# と子プロセスの様子を必ず残す
+IDLE_TIMEOUT_SEC = 900
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = subprocess.run(
@@ -280,14 +283,26 @@ def worktree_usable(wt):
     return r.returncode == 0 and r.stdout.strip() == "true"
 
 
+# ホーム配下の deny は「秘密のある場所だけ」を名指しする。
+# `Read(~/**)` で丸ごと拒否すると、作業ツリーがホーム配下にある構成では
+# 自分の作業場所ごと読めなくなる（差分ゼロで失敗する）。
+# さらに macOS の TCC 対象（~/Documents ~/Desktop ~/Downloads）を deny に
+# 書くと、claude がそのパスを解決する際に許可ダイアログを要求し、画面を出せない
+# 常駐プロセスでは**永久に固まる**。ここには TCC 対象を書かない。
+HOME_DENY_READ = ["Read(~/.ssh/**)", "Read(~/.aws/**)", "Read(~/.gnupg/**)",
+                  "Read(~/.claude/**)", "Read(~/Library/**)"]
+# TCC 対象で deny に書けないパスは、Bash 側の名指し拒否（dev_gate）で守る
+TCC_PATHS = ("~/documents", "~/desktop", "~/downloads")
+
+
 def dev_settings():
     """claude --settings 用。Bashを事前承認（acceptEditsはBashを自動承認しないため）、
     secret類のReadを禁止、dev_gateをWrite/Edit/BashのPreToolUseに仕込む（多層防御）。"""
     return json.dumps({
         "permissions": {
             "allow": ["Bash"],
-            "deny": [
-                "Read(~/**)", "Read(**/config.json)", "Read(**/.env)",
+            "deny": HOME_DENY_READ + [
+                "Read(**/config.json)", "Read(**/.env)",
                 "Read(**/*.db)", "Read(**/auth*.json)"]},
         "hooks": {"PreToolUse": [
             {"matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
@@ -304,9 +319,24 @@ def claude_argv(bin_path, model=MODEL):
     return [bin_path, "-p", "--model", model,
             "--output-format", "stream-json", "--verbose",
             "--include-partial-messages",
+            # リポジトリの settings.local.json を読み込まない（対話用に緩めた
+            # Bash 許可ルールが実装ジョブへ漏れ込むのを防ぐ）
+            "--setting-sources", "",
             "--tools", "Read,Write,Edit,MultiEdit,Grep,Glob,Bash",
             "--permission-mode", "acceptEdits",
             "--settings", dev_settings()]
+
+
+def _proc_state(pid):
+    """無音で切るときの子プロセスの様子（生きているか・CPUを使っているか）。
+    1イベントも来ない失敗の原因切り分け用。ps が無いOSでは理由を返すだけ。"""
+    try:
+        out = subprocess.run(
+            ["ps", "-o", "stat=,etime=,%cpu=,rss=,command=", "-p", str(pid)],
+            capture_output=True, text=True, timeout=5).stdout.strip()
+    except Exception as e:  # noqa: BLE001 - 診断が本流を止めない
+        return f"ps失敗({e})"
+    return out[:200] or "既に終了"
 
 
 def _kill_tree(proc):
@@ -337,6 +367,7 @@ def stream_claude(prompt, cwd, on_event, *, model=MODEL,
         target=lambda: stderr_chunks.append(proc.stderr.read()), daemon=True)
     stderr_reader.start()
     final_text, error, n = "", None, 0
+    last_type = None            # 無音で落ちた時に「どこまで進んだか」を残す
     deadline = time.monotonic() + timeout
     try:
         while True:
@@ -350,11 +381,14 @@ def stream_claude(prompt, cwd, on_event, *, model=MODEL,
             if not rlist:
                 # wait は壁時計残りで頭打ちされるため、超過理由を正しく区別する
                 # （残りがidleより短い時のタイムアウトは「無音」ではなく壁時計超過）
+                state = _proc_state(proc.pid)
                 _kill_tree(proc)
                 if time.monotonic() >= deadline:
                     error = f"実装が{timeout}秒を超えたため中断しました"
                 else:
-                    error = f"応答が{idle_timeout}秒無く中断しました"
+                    error = (f"応答が{idle_timeout}秒無く中断しました"
+                             f"（受信イベント{n}件・最後は{last_type or 'なし'}"
+                             f"・子プロセス {state}）")
                 break
             line = proc.stdout.readline()
             if line == "":                      # EOF
@@ -369,6 +403,7 @@ def stream_claude(prompt, cwd, on_event, *, model=MODEL,
             if not isinstance(ev, dict):
                 continue
             n += 1
+            last_type = ev.get("type") or last_type
             on_event(ev)
             if ev.get("type") == "result":
                 res = ev.get("result")

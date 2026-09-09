@@ -440,3 +440,53 @@ class VerifyPassTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PermissionSafetyTest(unittest.TestCase):
+    """ホーム配下の deny は秘密の場所だけを名指しする。
+    丸ごと拒否すると作業ツリーごと読めなくなり、macOS の TCC 対象を書くと
+    画面を出せない常駐プロセスが許可待ちで永久に固まる。"""
+
+    def _deny(self):
+        import json as _json
+        return _json.loads(dev_pipeline.dev_settings())["permissions"]["deny"]
+
+    def test_home_wide_read_deny_removed(self):
+        self.assertNotIn("Read(~/**)", self._deny())
+        self.assertIn("Read(~/.ssh/**)", self._deny())
+
+    def test_no_tcc_paths_in_deny(self):
+        deny = " ".join(self._deny()).lower()
+        for p in dev_pipeline.TCC_PATHS:
+            self.assertNotIn(p.lstrip("~/"), deny)
+
+    def test_tcc_paths_are_denied_in_bash_instead(self):
+        from platforms.discord.dev import dev_gate
+        for p in dev_pipeline.TCC_PATHS:
+            self.assertIn(p, dev_gate.BASH_SECRET_HINTS)
+        for name in (".ssh", "id_rsa", ".aws", ".gnupg"):
+            self.assertIn(name, dev_gate.BASH_SECRET_HINTS)
+
+    def test_argv_ignores_repo_settings(self):
+        argv = dev_pipeline.claude_argv("/bin/claude")
+        self.assertEqual(argv[argv.index("--setting-sources") + 1], "")
+
+
+class IdleDiagnosticsTest(unittest.TestCase):
+    def test_idle_error_reports_event_count(self):
+        import sys
+        import time as _t
+        # 何も出力せず眠る子プロセス → 無音タイムアウトの文言を検査
+        argv = [sys.executable, "-c", "import time; time.sleep(30)"]
+        orig = dev_pipeline.claude_argv
+        dev_pipeline.claude_argv = lambda *a, **k: argv
+        try:
+            t0 = _t.monotonic()
+            run = dev_pipeline.stream_claude("x", None, lambda ev: None,
+                                             timeout=20, idle_timeout=2)
+        finally:
+            dev_pipeline.claude_argv = orig
+        self.assertLess(_t.monotonic() - t0, 15)
+        self.assertIn("受信イベント0件", run["error"])
+        self.assertIn("最後はなし", run["error"])
+        self.assertIn("子プロセス", run["error"])

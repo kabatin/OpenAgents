@@ -142,6 +142,12 @@ class BuildReferenceBlockTest(unittest.TestCase):
             [self._entry(content="")], guild_id=1)
         self.assertIn("本文なし", block)
 
+    def test_header_explains_reply(self):
+        # リプライ先を先頭に置くため、[1] の読み方を見出しに書く
+        block = msgref.build_reference_block([self._entry()], guild_id=1)
+        self.assertIn("リプライした投稿", block)
+        self.assertIn("[1]", block)
+
 
 if __name__ == "__main__":
     unittest.main()

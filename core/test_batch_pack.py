@@ -230,8 +230,10 @@ class AutoDiscoverTest(TestBase):
                                    task=f"毎週の集計作業{i}", owners="<@1>",
                                    due_date="2026-08-10", urgent=False,
                                    created_at="2026-07-25T10:00")
+        # discover は「直近45日」の記録だけを材料にする。now を固定しないと
+        # 実時間の経過で材料が窓から外れ、ある日から落ちるテストになる
         ideas = auto_discover.discover(
-            self.db_path, model="x",
+            self.db_path, model="x", now=datetime(2026, 8, 1, 12, 0),
             invoke_fn=lambda p: '{"ideas": [{"title": "集計の自動化", '
                                 '"desc": "毎週の集計を自動投稿にする"}]}')
         self.assertEqual(len(ideas), 1)

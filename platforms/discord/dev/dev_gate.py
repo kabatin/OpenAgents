@@ -29,7 +29,14 @@ WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 # Bashコマンド中にこれらの秘密ファイル名が現れたら拒否（catやgit経由の秘密読取事故を防ぐ）。
 # Read禁止は Read ツールにしか効かないため、Bashはここで塞ぐ（多層防御）。
 # "config.js" は config.json のほか `config.js*` のようなglob回避も拾う
-BASH_SECRET_HINTS = ("config.js", ".env", "archive.db", "auth.json", "auth_")
+# Read の deny をホーム全体から「秘密の場所だけ」に絞ったので、Bash 側の
+# 名指し拒否を厚くする（多層防御。Read ツールの deny は Bash には効かない）
+BASH_SECRET_HINTS = ("config.js", ".env", "archive.db", "auth.json", "auth_",
+                     ".ssh", "id_rsa", "id_ed25519", ".aws", ".gnupg",
+                     "credentials", "keychain",
+                     # macOS の TCC 対象。claude の deny ルールに書くと常駐
+                     # プロセスが固まるため、ここで名指しして守る
+                     "~/documents", "~/desktop", "~/downloads")
 
 # 外向き通信・持ち込み系（起票文経由のプロンプト注入による exfil / 外部コード持ち込み
 # 対策）。正規の実装作業に外部通信は不要（依存が要るなら要約で申告する規約）。
@@ -108,10 +115,34 @@ def _deny(reason):
     sys.exit(0)
 
 
+# 標準入力の待ち時間の上限。CLI が起動時にフックを一度呼ぶとき、入力を渡さず
+# 閉じもしないことがあり、json.load(sys.stdin) が永久に待って claude ごと
+# 固まる。実際の判定時はJSONが即座に来るので、来なければ静かに抜ける。
+STDIN_WAIT_SEC = 10
+
+
+def _read_payload():
+    """標準入力の JSON を待ち時間つきで読む。何も来なければ None。
+    select が使えないOS（Windows のパイプ等）では従来どおり読み切る。"""
+    try:
+        import select
+        rlist, _, _ = select.select([sys.stdin], [], [], STDIN_WAIT_SEC)
+        if not rlist:
+            return None
+    except OSError:
+        pass
+    raw = sys.stdin.read()
+    if not raw.strip():
+        return None
+    return json.loads(raw)
+
+
 def main():
     # 安全弁は fail-closed: 解釈・判定に失敗したら「拒否」に倒す
     try:
-        payload = json.load(sys.stdin)
+        payload = _read_payload()
+        if payload is None:
+            sys.exit(0)   # 判定対象が来ていない（起動時の空呼び出し等）
         tool_name = payload.get("tool_name", "")
         tool_input = payload.get("tool_input", {}) or {}
         cwd = payload.get("cwd") or os.getcwd()

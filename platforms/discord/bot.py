@@ -804,9 +804,12 @@ class AgentClient(ToolLoopMixin, SkillHooksMixin, MarkerActionsMixin,
             if not uid or peer is None:
                 return
             await asyncio.sleep(3)   # 画像投稿が流れてから声をかける
+            # role は複数行の自己紹介文なので、先頭の1文だけを肩書きとして使う
+            # （固定長で切ると文の途中で切れて意味が崩れる）
+            role = (peer.get("role") or "専門").split("。")[0][:30]
             await message.channel.send(
-                f"<@{uid}> いまの「{what[:40]}」、"
-                f"{peer.get('role', '専門')[:20]}の観点で気になるところはありますか？"
+                f"<@{uid}> いまの「{what[:40]}」について、"
+                f"{role}の観点で気になるところはありますか？"
                 "（一言で大丈夫です）",
                 allowed_mentions=discord.AllowedMentions(
                     users=True, everyone=False, roles=False))
@@ -836,10 +839,19 @@ class AgentClient(ToolLoopMixin, SkillHooksMixin, MarkerActionsMixin,
             print(f"[{self.agent['id']}] self review failed: {e}")
 
     async def _collect_reference_block(self, message):
-        """本文中の Discord メッセージリンク/ID を解決して参照ブロックを返す。
-        まず アーカイブDB（全会話を保存済み）から引き、無い分だけ Discord から
-        best-effort で取得する。1件も参照が無ければ None。"""
+        """本文中の Discord メッセージリンク/ID と**リプライ先**を解決して参照
+        ブロックを返す。まず アーカイブDB（全会話を保存済み）から引き、無い分だけ
+        Discord から best-effort で取得する。1件も参照が無ければ None。
+
+        リプライ先が入っていないと、通知や長文にリプライして「これ対応して」と
+        頼まれても何の話か分からず聞き返してしまう。リプライは「この投稿の話」
+        という最も強い文脈なので先頭に置く。"""
         refs = msgref.extract_refs(message.clean_content or "", GUILD_ID)
+        ref = message.reference
+        if ref is not None and ref.message_id:
+            head = (ref.channel_id or message.channel.id, ref.message_id)
+            refs = [head] + [r for r in refs if r[1] != head[1]]
+            refs = refs[:msgref.MAX_REFS]
         if not refs:
             return None
         with db.connect(DB_PATH) as conn:
