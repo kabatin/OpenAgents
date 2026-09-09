@@ -7,6 +7,12 @@
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-09-09
+
+v0.2.0 の運用で見つかった不具合の修正。リプライした投稿が回答の文脈に
+入っていなかった件と、開発BOTが権限まわりで自分の作業場所を読めない・
+無音のまま固まる件が中心。
+
 ### 修正
 
 - **リプライ先が回答の文脈に入っていなかった** — 通知や長文にリプライして
@@ -235,7 +241,8 @@ macOS・Windows・Linux で緑。
 - 添付読解・Web検索などツールを使う機能は Claude Code 選択時のみ
 - ドキュメントは日本語が正（英語は README のみ）
 
-[Unreleased]: https://github.com/kabatin/OpenAgents/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/kabatin/OpenAgents/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/kabatin/OpenAgents/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/kabatin/OpenAgents/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/kabatin/OpenAgents/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/kabatin/OpenAgents/compare/v0.1.0...v0.1.1
