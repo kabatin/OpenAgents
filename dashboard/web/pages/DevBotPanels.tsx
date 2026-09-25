@@ -44,6 +44,9 @@ function ja(status: string): string {
   return STATUS_JA[status] ?? status;
 }
 
+const ROADMAP_SHOWN = 40;
+const JOBS_SHOWN = 10;
+
 /** 開発BOTのページにだけ出す固有パネル（監視対象・起票ロードマップ・開発ジョブ）。 */
 export function DevBotPanels() {
   const { data: settings } = useFetch<SettingsView>("/settings");
@@ -97,7 +100,7 @@ export function DevBotPanels() {
             ))}
         </div>
         <ul>
-          {(roadmap ?? []).slice(0, 40).map((r) => (
+          {(roadmap ?? []).slice(0, ROADMAP_SHOWN).map((r) => (
             <li
               key={r.id}
               className="flex items-baseline gap-2.5 border-t border-hairline px-4 py-2 text-xs first:border-t-0"
@@ -108,6 +111,11 @@ export function DevBotPanels() {
               <Chip tone={STATUS_TONE[r.status] ?? "neutral"}>{ja(r.status)}</Chip>
             </li>
           ))}
+          {(roadmap?.length ?? 0) > ROADMAP_SHOWN && (
+            <li className="border-t border-hairline px-4 py-2 text-2xs text-muted">
+              他 {(roadmap?.length ?? 0) - ROADMAP_SHOWN} 件（新しい順に{ROADMAP_SHOWN}件だけ表示しています）
+            </li>
+          )}
         </ul>
       </Card>
 
@@ -116,7 +124,7 @@ export function DevBotPanels() {
           <Empty>ジョブはありません</Empty>
         ) : (
           <ul>
-            {dev?.jobs.slice(0, 10).map((j) => (
+            {dev?.jobs.slice(0, JOBS_SHOWN).map((j) => (
               <li
                 key={j.id}
                 className="flex items-baseline gap-2.5 border-t border-hairline px-4 py-2 text-xs first:border-t-0"
@@ -129,6 +137,11 @@ export function DevBotPanels() {
                 <Chip tone={STATUS_TONE[j.status] ?? "neutral"}>{ja(j.status)}</Chip>
               </li>
             ))}
+            {(dev?.jobs.length ?? 0) > JOBS_SHOWN && (
+              <li className="border-t border-hairline px-4 py-2 text-2xs text-muted">
+                他 {(dev?.jobs.length ?? 0) - JOBS_SHOWN} 件（新しい順に{JOBS_SHOWN}件だけ表示しています）
+              </li>
+            )}
           </ul>
         )}
       </Card>

@@ -99,6 +99,24 @@ const LLM: Setting[] = [
     default: "claude-sonnet-5",
   },
   {
+    path: "llm.effort",
+    label: "考える深さ",
+    desc:
+      "Claude Code に渡す思考の深さ（--effort）。深いほど丁寧ですが遅く・高くなります。" +
+      "検索語の抽出など軽い下ごしらえは、ここに関わらず浅く回します。" +
+      "古い claude CLI で --effort が通らないときは「指定しない」にしてください。",
+    kind: "enum",
+    default: "xhigh",
+    options: [
+      { value: "xhigh", label: "とても深く（既定）" },
+      { value: "high", label: "深く" },
+      { value: "medium", label: "ふつう" },
+      { value: "low", label: "浅く" },
+      { value: "max", label: "最大" },
+      { value: "", label: "指定しない（CLI の既定）" },
+    ],
+  },
+  {
     path: "llm.timeout_sec",
     label: "応答を待つ時間",
     desc: "AIの返事を何秒待つか。長い資料を読ませるときは長めにします。",
@@ -175,14 +193,14 @@ const DEV_BOT: Setting[] = [
   {
     path: "dev_bot.model",
     label: "実装に使うモデル",
-    desc: "起票を実装するときに開発BOTが使う Claude のモデル名。空なら既定（claude-opus-4-8）。変更は次のジョブから。",
+    desc: "起票を実装するときに開発BOTが使う Claude のモデル名。空なら既定（claude-opus-5-5）。変更は次のジョブから。",
     kind: "string",
-    default: "claude-opus-4-8",
+    default: "claude-opus-5-5",
   },
   {
     path: "dev_bot.verify_model",
     label: "検証に使うモデル",
-    desc: "実装後に別のコンテキストで起票と差分を照合するモデル名。空にすると検証を省きます。",
+    desc: "実装後に別のコンテキストで起票と差分を照合するモデル名。空にすると検証を省きます。実装と別のモデルにしておくと、同じ思い込みを見逃しにくくなります。",
     kind: "string",
     default: "claude-sonnet-5",
   },

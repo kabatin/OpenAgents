@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 
-import { Button, Card, Chip, Empty, StatusDot } from "../components/ui.tsx";
+import { Async, Button, Card, Chip, Empty, Loading, StatusDot } from "../components/ui.tsx";
 import { api, useFetch } from "../lib/api.ts";
-import { bytes, relTime, since, STATUS_TONE } from "../lib/format.ts";
+import { bytes, jstStamp, relTime, since, STATUS_TONE } from "../lib/format.ts";
 import type { LogLine, RestartResult, ServiceStatus } from "../lib/types.ts";
 
 type LogInventory = {
@@ -19,7 +19,7 @@ const LEVEL_STYLE: Record<LogLine["level"], string> = {
 };
 
 function LogViewer() {
-  const { data: inventory } = useFetch<LogInventory>("/ops/logs");
+  const { data: inventory, error: inventoryError } = useFetch<LogInventory>("/ops/logs");
   const [target, setTarget] = useState("archivebot:out");
   const [lines, setLines] = useState<LogLine[]>([]);
   const [hideNoise, setHideNoise] = useState(true);
@@ -64,8 +64,15 @@ function LogViewer() {
           <select
             className="input max-w-[280px] py-1 text-2xs"
             value={target}
+            aria-label="表示するログ"
+            disabled={inventory === null}
             onChange={(e) => setTarget(e.target.value)}
           >
+            {inventory === null && (
+              <option value={target}>
+                {inventoryError === null ? "読み込んでいます…" : "一覧を取得できませんでした"}
+              </option>
+            )}
             {inventory?.items.map((i) => (
               <option key={i.id} value={i.id}>
                 {i.label}
@@ -92,7 +99,8 @@ function LogViewer() {
       </div>
       <div
         ref={boxRef}
-        className="h-[420px] overflow-auto bg-[#FCFCFA] px-4 py-2 font-mono text-[11px] leading-[1.7]"
+        style={{ height: "min(58vh, 620px)" }}
+        className="overflow-auto bg-[#FCFCFA] px-4 py-2 font-mono text-[11px] leading-[1.7]"
       >
         {shown.length === 0 ? (
           <Empty>行がありません</Empty>
@@ -118,6 +126,16 @@ function ServiceRow({ service }: { service: ServiceStatus }) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [confirming, setConfirming] = useState(false);
+
+  // Esc で確認を取り消す（押してしまった時の逃げ道）
+  useEffect(() => {
+    if (!confirming) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setConfirming(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [confirming]);
 
   const restart = async () => {
     setBusy(true);
@@ -194,11 +212,88 @@ function ServiceRow({ service }: { service: ServiceStatus }) {
   );
 }
 
-export function OpsPage({ services }: { services: ServiceStatus[] }) {
-  const { data: inventory } = useFetch<LogInventory>("/ops/logs");
-  const { data: subloops } = useFetch<{ loop: string; scope: string; lastRunAt: string | null }[]>(
-    "/ops/subloops",
+type SubLoop = { loop: string; scope: string; lastRunAt: string | null };
+type SubLoopView = { items: SubLoop[]; idNames: Record<string, string> };
+
+/** 同じループの行をまとめる。attention は1チャンネル1行で数十行になるため。 */
+function groupLoops(items: SubLoop[]): { loop: string; rows: SubLoop[]; lastRunAt: string | null }[] {
+  const map = new Map<string, SubLoop[]>();
+  for (const it of items) {
+    const arr = map.get(it.loop) ?? [];
+    arr.push(it);
+    map.set(it.loop, arr);
+  }
+  return [...map.entries()]
+    .map(([loop, rows]) => ({
+      loop,
+      rows: [...rows].sort((a, b) => (b.lastRunAt ?? "").localeCompare(a.lastRunAt ?? "")),
+      lastRunAt: rows.reduce<string | null>(
+        (max, r) => ((r.lastRunAt ?? "") > (max ?? "") ? r.lastRunAt : max),
+        null,
+      ),
+    }))
+    .sort((a, b) => (b.lastRunAt ?? "").localeCompare(a.lastRunAt ?? ""));
+}
+
+/** 1つのループ。対象が多いものは畳んでおき、押したときだけ内訳を出す。 */
+function LoopGroup({
+  group,
+  idNames,
+}: {
+  group: { loop: string; rows: SubLoop[]; lastRunAt: string | null };
+  idNames: Record<string, string>;
+}) {
+  const [open, setOpen] = useState(false);
+  const many = group.rows.length > 1;
+  const label = (scope: string): string => (idNames ?? {})[scope] ?? scope;
+
+  return (
+    <li className="border-t border-hairline first:border-t-0">
+      <div className="flex items-center gap-3 px-4 py-1.5 text-xs">
+        {many ? (
+          <button
+            type="button"
+            aria-expanded={open}
+            onClick={() => setOpen((o) => !o)}
+            className="focus-ring flex min-w-0 flex-1 items-center gap-2 rounded text-left"
+          >
+            <span className={`text-2xs text-muted transition-transform ${open ? "rotate-90" : ""}`}>
+              ▸
+            </span>
+            <span className="font-medium">{group.loop}</span>
+            <Chip>{group.rows.length}件</Chip>
+          </button>
+        ) : (
+          <span className="flex min-w-0 flex-1 items-center gap-2">
+            <span className="w-3" />
+            <span className="font-medium">{group.loop}</span>
+            <span className="min-w-0 truncate text-2xs text-muted">{label(group.rows[0]?.scope ?? "")}</span>
+          </span>
+        )}
+        <span className="tnum shrink-0 text-2xs text-muted">{jstStamp(group.lastRunAt)}</span>
+      </div>
+
+      {open && (
+        <ul className="bg-canvas/60 pb-1">
+          {group.rows.map((r) => (
+            <li
+              key={r.scope}
+              className="flex items-center gap-3 px-4 py-1 pl-10 text-2xs"
+            >
+              <span className="min-w-0 flex-1 truncate text-muted">{label(r.scope)}</span>
+              <span className="tnum shrink-0 text-muted">{jstStamp(r.lastRunAt)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </li>
   );
+}
+
+export function OpsPage({ services }: { services: ServiceStatus[] }) {
+  const inventoryQ = useFetch<LogInventory>("/ops/logs");
+  const subloopsQ = useFetch<SubLoopView>("/ops/subloops");
+  const inventory = inventoryQ.data;
 
   return (
     <div className="space-y-6">
@@ -211,7 +306,7 @@ export function OpsPage({ services }: { services: ServiceStatus[] }) {
 
       <Card title="常駐プロセス">
         {services.length === 0 ? (
-          <Empty>読み込んでいます…</Empty>
+          <Loading rows={4} />
         ) : (
           services.map((s) => <ServiceRow key={s.id} service={s} />)
         )}
@@ -221,9 +316,11 @@ export function OpsPage({ services }: { services: ServiceStatus[] }) {
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card title="ログファイル" desc={inventory?.note}>
+          <Async q={inventoryQ} empty="ログファイルがありません" rows={5}>
+            {(inv) => (
           <ul>
-            {inventory?.items.map((i) => {
-              const over = (i.sizeBytes ?? 0) > (inventory.thresholdBytes ?? Infinity);
+            {inv.items.map((i) => {
+              const over = (i.sizeBytes ?? 0) > (inv.thresholdBytes ?? Infinity);
               return (
                 <li
                   key={i.id}
@@ -238,27 +335,23 @@ export function OpsPage({ services }: { services: ServiceStatus[] }) {
               );
             })}
           </ul>
+            )}
+          </Async>
         </Card>
 
-        <Card title="サブループの最終実行" desc="観察ループ以外の細かい進行状況（チェックポイント）">
-          {(subloops?.length ?? 0) === 0 ? (
-            <Empty>記録がありません</Empty>
-          ) : (
-            <ul>
-              {subloops?.map((s) => (
-                <li
-                  key={`${s.loop}:${s.scope}`}
-                  className="flex items-center gap-3 border-t border-hairline px-4 py-1.5 text-xs first:border-t-0"
-                >
-                  <span className="w-24 shrink-0 font-medium">{s.loop}</span>
-                  <span className="min-w-0 flex-1 truncate font-mono text-2xs text-faint">
-                    {s.scope}
-                  </span>
-                  <span className="tnum shrink-0 text-2xs text-muted">{s.lastRunAt ?? "—"}</span>
-                </li>
-              ))}
-            </ul>
-          )}
+        <Card
+          title="サブループの最終実行"
+          desc="観察ループ以外の細かい進行状況（チェックポイント）。対象が多いものは畳んであります"
+        >
+          <Async q={subloopsQ} empty="記録がありません" rows={6}>
+            {(v) => (
+              <ul>
+                {groupLoops(v.items ?? []).map((g) => (
+                  <LoopGroup key={g.loop} group={g} idNames={v.idNames ?? {}} />
+                ))}
+              </ul>
+            )}
+          </Async>
         </Card>
       </div>
     </div>

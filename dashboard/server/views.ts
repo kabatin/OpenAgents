@@ -20,8 +20,29 @@ import { getPath, type Json } from "./config/objpath.ts";
 import { readConfig, readMeetingConfig } from "./config/store.ts";
 import { CONFIG_OWNERS, ownerLabel, pendingFor, type ConfigOwner } from "./config/apply.ts";
 import { configMtimeMs } from "./config/store.ts";
-import { lastRuns, todayQuota } from "./db/queries.ts";
+import { lastRuns, resolveDiscordIds, todayQuota } from "./db/queries.ts";
 import { allServiceStatus, type ServiceStatus } from "./ops/status.ts";
+
+/** 解決済み設定から、Discordの生IDらしき文字列を拾い集める（配列の中身も見る）。 */
+function collectIds(groups: ResolvedGroup[]): string[] {
+  const out: string[] = [];
+  const visit = (value: unknown): void => {
+    if (typeof value === "string" || typeof value === "number") {
+      // `<@123…>` のようなメンション表記からも数字を取り出す
+      for (const m of String(value).matchAll(/\d{17,20}/g)) out.push(m[0]);
+      return;
+    }
+    if (Array.isArray(value)) for (const v of value) visit(v);
+  };
+  const walk = (settings: ResolvedGroup["settings"]): void => {
+    for (const s of settings) {
+      if (s.secret !== true) visit(s.current.value);
+      if (s.children !== undefined) walk(s.children);
+    }
+  };
+  for (const g of groups) walk(g.settings);
+  return out;
+}
 
 export type AgentSummary = {
   id: string;
@@ -143,6 +164,8 @@ export type AgentDetail = {
   summary: AgentSummary | null;
   groups: ResolvedGroup[];
   secrets: Record<string, string>;
+  /** Discordの生ID → 表示名（`#チャンネル名` / ユーザー名）。引けたものだけ。 */
+  idNames: Record<string, string>;
 };
 
 export async function agentDetail(id: string): Promise<AgentDetail | null> {
@@ -159,19 +182,22 @@ export async function agentDetail(id: string): Promise<AgentDetail | null> {
       secrets: {
         "dev_bot.token": maskSecret(getPath(config, "dev_bot.token")),
       },
+      idNames: resolveDiscordIds(collectIds(groups)),
     };
   }
   const idx = agentIndex(config, id);
   if (idx < 0) return null;
   const agent = agentsOf(config)[idx] as AgentRecord;
   const summaries = await agentSummaries(config);
+  const groups = resolveGroups(agentGroups(), agent, config);
   return {
     id,
     name: String(agent["name"] ?? id),
     service: "archivebot",
     summary: summaries.find((s) => s.id === id) ?? null,
-    groups: resolveGroups(agentGroups(), agent, config),
+    groups,
     secrets: { token: maskSecret(agent["token"]) },
+    idNames: resolveDiscordIds(collectIds(groups)),
   };
 }
 
@@ -182,6 +208,8 @@ export type SettingsView = {
   meetingBot: ResolvedGroup[];
   meetingUserMapping: Record<string, string>;
   secrets: Record<string, string>;
+  /** Discordの生ID → 表示名。設定値と話者マッピングの両方を解決する。 */
+  idNames: Record<string, string>;
   monitorTargets: {
     name: string;
     launchdLabel: string;
@@ -216,12 +244,22 @@ export async function settingsView(): Promise<SettingsView> {
       }))
     : [];
 
+  const global = resolveGroups(GLOBAL_GROUPS, config, config);
+  const devBot = resolveGroups(DEV_BOT_GROUPS, config, config);
+  const meetingBot = resolveGroups(MEETING_BOT_GROUPS, meeting, meeting);
+  const userMapping = (meeting["user_mapping"] ?? {}) as Record<string, string>;
   return {
     agents: roster,
-    global: resolveGroups(GLOBAL_GROUPS, config, config),
-    devBot: resolveGroups(DEV_BOT_GROUPS, config, config),
-    meetingBot: resolveGroups(MEETING_BOT_GROUPS, meeting, meeting),
-    meetingUserMapping: (meeting["user_mapping"] ?? {}) as Record<string, string>,
+    global,
+    devBot,
+    meetingBot,
+    meetingUserMapping: userMapping,
+    idNames: resolveDiscordIds([
+      ...collectIds(global),
+      ...collectIds(devBot),
+      ...collectIds(meetingBot),
+      ...Object.values(userMapping).flatMap((v) => [...String(v).matchAll(/\d{17,20}/g)].map((m) => m[0])),
+    ]),
     secrets: {
       "dev_bot.token": maskSecret(getPath(config, "dev_bot.token")),
     },
@@ -309,15 +347,19 @@ export type Overview = {
   agents: AgentSummary[];
   services: ServiceStatus[];
   pending: PendingView[];
+  /** タイムラインからDiscordの該当投稿へ飛ぶためのサーバーID。 */
+  guildId: string | null;
 };
 
 export async function overview(stallAfterSec: number): Promise<Overview> {
   const config = await readConfig();
   const services = await allServiceStatus(stallAfterSec);
+  const guildId = displayValue(getPath(config, "guild_id"));
   return {
     agents: await agentSummaries(config),
     services,
     pending: await pendingChanges(services),
+    guildId: typeof guildId === "string" && guildId !== "" ? guildId : null,
   };
 }
 

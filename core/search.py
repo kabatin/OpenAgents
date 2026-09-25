@@ -29,6 +29,9 @@ from core.attachments import (
 
 #: 設定を渡されなかったときのモデル（利用者が config.llm.model を書けばそちら）
 DEFAULT_MODEL = llm.BUILTIN_PROVIDERS["claude"]["default_model"]
+# 検索語を出すだけの下ごしらえ（runner 経路＝Claude Code 専用）。ここに上位
+# モデルを使っても回答は良くならず、入力単価の差がそのまま乗る。
+KEYWORDS_MODEL = "claude-haiku-4-5"
 CLAUDE_TIMEOUT_SEC = llm.LONG_TIMEOUT_SEC
 
 # エージェント定義: {"name": 表示名, "persona_files": [パス...], "role": 担当説明}

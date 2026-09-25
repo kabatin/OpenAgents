@@ -1,12 +1,12 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { Avatar } from "../components/Avatar.tsx";
 import { SettingRow, type SaveFn } from "../components/SettingRow.tsx";
-import { Card, Chip, Empty, ErrorNote, Metric } from "../components/ui.tsx";
+import { Card, Chip, Empty, ErrorNote, Loading, Metric } from "../components/ui.tsx";
 import { api, useFetch } from "../lib/api.ts";
 import { jstStamp } from "../lib/format.ts";
-import type { AgentDetail } from "../lib/types.ts";
+import type { AgentDetail, ResolvedSetting } from "../lib/types.ts";
 import { DevBotPanels } from "./DevBotPanels.tsx";
 
 export function AgentPage({ onChanged }: { onChanged: () => void }) {
@@ -14,6 +14,14 @@ export function AgentPage({ onChanged }: { onChanged: () => void }) {
   const { data, error, reload } = useFetch<AgentDetail>(`/agents/${id}`);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [filter, setFilter] = useState("");
+
+  // 保存の合図は出しっぱなしにしない（どの保存の結果か分からなくなるため）
+  useEffect(() => {
+    if (savedAt === null) return;
+    const t = setTimeout(() => setSavedAt(null), 6000);
+    return () => clearTimeout(t);
+  }, [savedAt]);
 
   const save: SaveFn = useCallback(
     async (path, value) => {
@@ -32,10 +40,17 @@ export function AgentPage({ onChanged }: { onChanged: () => void }) {
     [id, reload, onChanged],
   );
 
-  if (error !== null) return <ErrorNote message={error} />;
-  if (data === null) return <Empty>読み込んでいます…</Empty>;
+  if (error !== null) return <ErrorNote message={error} onRetry={reload} />;
+  if (data === null) return <Loading rows={6} />;
 
   const s = data.summary;
+  const needle = filter.trim().toLowerCase();
+  const groups =
+    needle === ""
+      ? data.groups
+      : data.groups
+          .map((g) => ({ ...g, settings: g.settings.filter((x) => matches(x, needle)) }))
+          .filter((g) => g.settings.length > 0);
 
   return (
     <div className="space-y-6">
@@ -88,19 +103,82 @@ export function AgentPage({ onChanged }: { onChanged: () => void }) {
 
       {data.service === "devbot" && <DevBotPanels />}
 
-      {data.groups.map((g) => (
-        <Card key={g.id} title={g.label} desc={g.desc} right={<GroupCount group={g} />}>
-          {g.settings.length === 0 ? (
-            <Empty>設定はありません</Empty>
-          ) : (
-            <div>
-              {g.settings.map((setting) => (
-                <SettingRow key={setting.path} setting={setting} onSave={save} />
-              ))}
-            </div>
-          )}
+      <SettingFilter value={filter} onChange={setFilter} total={countSettings(data.groups)} />
+
+      {groups.length === 0 ? (
+        <Card>
+          <Empty>「{filter}」に一致する設定はありません</Empty>
         </Card>
-      ))}
+      ) : (
+        groups.map((g) => (
+          <Card key={g.id} title={g.label} desc={g.desc} right={<GroupCount group={g} />}>
+            {g.settings.length === 0 ? (
+              <Empty>設定はありません</Empty>
+            ) : (
+              <div>
+                {g.settings.map((setting) => (
+                  <SettingRow
+                    key={setting.path}
+                    setting={setting}
+                    onSave={save}
+                    idNames={data.idNames ?? {}}
+                  />
+                ))}
+              </div>
+            )}
+          </Card>
+        ))
+      )}
+    </div>
+  );
+}
+
+/** ラベル（子設定を含む）に検索語を含む設定だけを残す。 */
+function matches(s: ResolvedSetting, needle: string): boolean {
+  if (s.label.toLowerCase().includes(needle)) return true;
+  if ((s.desc ?? "").toLowerCase().includes(needle)) return true;
+  return (s.children ?? []).some((c) => matches(c, needle));
+}
+
+function countSettings(groups: AgentDetail["groups"]): number {
+  return groups.reduce((n, g) => n + g.settings.length, 0);
+}
+
+/**
+ * 設定の絞り込み。1エージェントに60件以上並ぶので、
+ * 目的の設定を総当たりで探させない。
+ */
+function SettingFilter({
+  value,
+  onChange,
+  total,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  total: number;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        className="input max-w-[320px]"
+        type="search"
+        value={value}
+        placeholder={`設定を絞り込む（全${total}件）`}
+        aria-label="設定を絞り込む"
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") onChange("");
+        }}
+      />
+      {value !== "" && (
+        <button
+          type="button"
+          className="focus-ring rounded-md border border-hairline px-2.5 py-1.5 text-2xs text-muted hover:bg-canvas"
+          onClick={() => onChange("")}
+        >
+          絞り込みを解除
+        </button>
+      )}
     </div>
   );
 }

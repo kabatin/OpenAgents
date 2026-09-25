@@ -12,8 +12,11 @@ export default {
         surface: "#FFFFFF",
         hairline: "#E8E6E1",
         ink: "#17181A",
-        muted: "#77746D",
-        faint: "#A8A5A0",
+        // 本文以外の文字も白/キャンバス地でAA（4.5:1）を満たす濃さにする。
+        // 以前の faint(#A8A5A0) は 2.45:1 しかなく、「本日の枠」等の見出しラベルが
+        // 明るい場所で読めなかった。ink > muted > faint の段差は保つ。
+        muted: "#5F5C56",
+        faint: "#767269",
         accent: {
           DEFAULT: "#0E7A68", // spoke（自発発言）の緑
           soft: "#E6F2EF",

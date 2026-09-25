@@ -89,14 +89,22 @@ export function TriToggle({
         disabled ? "opacity-40" : ""
       }`}
     >
-      {opts.map((o) => (
+      {opts.map((o, i) => (
         <button
           key={o.v}
           type="button"
           role="radio"
           aria-checked={value === o.v}
+          // ARIAのradioグループは「選択中だけがTab停止、左右キーで移動」が作法
+          tabIndex={value === o.v ? 0 : -1}
           disabled={disabled}
           onClick={() => onChange(o.v)}
+          onKeyDown={(e) => {
+            if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+            e.preventDefault();
+            const next = opts[(i + (e.key === "ArrowRight" ? 1 : opts.length - 1)) % opts.length];
+            if (next !== undefined) onChange(next.v);
+          }}
           className={`focus-ring rounded-[5px] px-2.5 py-[3px] text-2xs font-semibold transition-all duration-150
             ${value === o.v ? o.on : "text-muted hover:text-ink"}
             ${disabled ? "cursor-not-allowed" : "cursor-pointer"}`}
@@ -180,15 +188,89 @@ export function Button({
 }
 
 export function Empty({ children }: { children: ReactNode }) {
-  return <div className="px-4 py-10 text-center text-xs text-faint">{children}</div>;
+  return <div className="px-4 py-10 text-center text-xs text-muted">{children}</div>;
 }
 
-export function ErrorNote({ message }: { message: string }) {
+/**
+ * 読み込み中のプレースホルダ。
+ * 「まだ来ていない」と「0件だった」は別物なので、必ず描き分ける
+ * （空表示で代用すると、画面が「ありません」と嘘をつく）。
+ */
+export function Loading({ rows = 3, label = "読み込んでいます…" }: { rows?: number; label?: string }) {
   return (
-    <div className="rounded-md border border-danger/25 bg-danger-soft px-3 py-2 text-xs text-danger">
-      {message}
+    <div className="px-4 py-3" role="status" aria-live="polite">
+      <span className="sr-only">{label}</span>
+      <div className="space-y-2">
+        {Array.from({ length: rows }, (_, i) => (
+          <div key={i} className="h-3 animate-pulse rounded bg-[#EDEBE7]" style={{ width: `${92 - i * 14}%` }} />
+        ))}
+      </div>
     </div>
   );
+}
+
+export function ErrorNote({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-md border border-danger/25 bg-danger-soft px-3 py-2 text-xs text-danger">
+      <span className="min-w-0 flex-1">{message}</span>
+      {onRetry !== undefined && (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="focus-ring shrink-0 rounded-md border border-danger/30 bg-surface px-2.5 py-1 text-2xs font-semibold text-danger hover:bg-danger-soft"
+        >
+          再試行
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** useFetch の戻り値そのもの。Async に丸ごと渡せるようにしておく。 */
+export type Query<T> = {
+  data: T | null;
+  error: string | null;
+  loading: boolean;
+  reload: () => void;
+};
+
+/**
+ * 「0件」の位置に置いて、読み込み中・失敗・本当に0件を描き分ける。
+ * 既存の `{list.length === 0 ? <Empty/> : list.map(...)}` の <Empty> を
+ * これに差し替えるだけで、画面が「ありません」と嘘をつかなくなる。
+ */
+export function ListState({ q, empty }: { q: Query<unknown>; empty: string }) {
+  if (q.error !== null) {
+    return (
+      <div className="p-3">
+        <ErrorNote message={q.error} onRetry={q.reload} />
+      </div>
+    );
+  }
+  if (q.loading || q.data === null) return <Loading />;
+  return <Empty>{empty}</Empty>;
+}
+
+/**
+ * 取得状態の描き分けを1箇所に集約する。
+ * 読み込み中 → エラー（再試行つき）→ 空 → 本体 の順で判定する。
+ */
+export function Async<T>({
+  q,
+  empty,
+  rows,
+  children,
+}: {
+  q: Query<T>;
+  empty?: ReactNode;
+  rows?: number;
+  children: (data: T) => ReactNode;
+}) {
+  if (q.error !== null) return <div className="p-3"><ErrorNote message={q.error} onRetry={q.reload} /></div>;
+  if (q.loading && q.data === null) return <Loading rows={rows} />;
+  if (q.data === null) return <Empty>{empty ?? "データがありません"}</Empty>;
+  if (Array.isArray(q.data) && q.data.length === 0) return <Empty>{empty ?? "データがありません"}</Empty>;
+  return <>{children(q.data)}</>;
 }
 
 export function Metric({

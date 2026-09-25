@@ -52,7 +52,7 @@ function Nav({
   };
 
   return (
-    <header className="sticky top-0 z-20 border-b border-hairline bg-surface/90 backdrop-blur">
+    <header className="border-b border-hairline bg-surface/90 backdrop-blur">
       <div className="mx-auto flex max-w-[1180px] items-center gap-1 px-6 py-2.5">
         <NavLink to="/" className="focus-ring mr-4 flex items-baseline gap-2 rounded">
           <span className="text-[15px] font-semibold tracking-tight">AIエージェント管理</span>
@@ -102,7 +102,8 @@ export default function App() {
   // まだ設定が無ければ、他の画面は見せずにセットアップへ連れていく。
   // 「空っぽの管理画面」を見せても、何をすればいいか分からない
   const { data: setupState, reload: reloadSetup } = useFetch<SetupState>("/setup/state");
-  const { data: initial, reload } = useFetch<Overview>("/overview");
+  const { data: initial, error: overviewError, loading: overviewLoading, reload } =
+    useFetch<Overview>("/overview");
   const [services, setServices] = useState<ServiceStatus[]>([]);
   const [pending, setPending] = useState<PendingView[]>([]);
   const [quota, setQuota] = useState<QuotaRow[]>([]);
@@ -155,8 +156,13 @@ export default function App() {
 
   return (
     <div className="min-h-screen">
-      <Nav services={liveServices} agents={navAgents} connected={connected} />
-      <PendingBar pending={livePending} onApplied={onChanged} />
+      {/* ナビと未適用バーは1つの塊として固定する。
+          別々に sticky top-0 にすると、変更がある間だけバーがナビを覆って
+          リンクが押せなくなる（設定直後＝一番移動したい時に操作不能になる）。 */}
+      <div className="sticky top-0 z-30">
+        <Nav services={liveServices} agents={navAgents} connected={connected} />
+        <PendingBar pending={livePending} onApplied={onChanged} />
+      </div>
       <ScrollToTop />
       {/* 末尾に余白を置いて、最後のカードが画面の底に貼り付かないようにする */}
       <main className="mx-auto max-w-[1180px] px-6 pb-24 pt-7">
@@ -164,7 +170,16 @@ export default function App() {
           <Route
             path="/"
             element={
-              <OverviewPage agents={agents} services={liveServices} activity={activity} />
+              <OverviewPage
+                agents={agents}
+                services={liveServices}
+                activity={activity}
+                guildId={initial?.guildId ?? null}
+                loading={overviewLoading && initial === null}
+                error={overviewError}
+                onRetry={reload}
+                connected={connected}
+              />
             }
           />
           <Route path="/agents/:id" element={<AgentPage onChanged={onChanged} />} />

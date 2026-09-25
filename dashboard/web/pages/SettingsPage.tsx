@@ -1,8 +1,8 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { AgentRoster } from "../components/AgentRoster.tsx";
 import { SettingRow, type SaveFn } from "../components/SettingRow.tsx";
-import { Button, Card, Chip, Empty, ErrorNote } from "../components/ui.tsx";
+import { Button, Card, Chip, Empty, ErrorNote, Loading } from "../components/ui.tsx";
 import { api, useFetch } from "../lib/api.ts";
 import type { SettingsView } from "../lib/types.ts";
 
@@ -94,9 +94,11 @@ function DangerZone() {
 /** 議事録の話者名マッピング。新メンバーが入ったらここで追加する。 */
 function UserMapping({
   mapping,
+  idNames,
   onSaved,
 }: {
   mapping: Record<string, string>;
+  idNames: Record<string, string>;
   onSaved: () => void;
 }) {
   const [draft, setDraft] = useState(mapping);
@@ -104,8 +106,30 @@ function UserMapping({
   const [newMention, setNewMention] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(mapping);
+
+  // 未保存のまま画面を閉じると編集が黙って消えるので、離脱前に確認する
+  useEffect(() => {
+    if (!dirty) return;
+    const onLeave = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", onLeave);
+    return () => window.removeEventListener("beforeunload", onLeave);
+  }, [dirty]);
+
+  const addEntry = (): void => {
+    if (newName.trim() === "" || newMention.trim() === "") return;
+    setDraft({ ...draft, [newName.trim()]: newMention.trim() });
+    setNewName("");
+    setNewMention("");
+  };
+
+  /** `<@123…>` を「誰か」に読み替える（IDのままでは照合できない）。 */
+  const who = (mention: string): string | null => {
+    const m = /\d{17,20}/.exec(mention);
+    return m === null ? null : ((idNames ?? {})[m[0]] ?? null);
+  };
 
   const commit = async (next: Record<string, string>) => {
     setBusy(true);
@@ -137,26 +161,41 @@ function UserMapping({
               <tr key={name} className="border-b border-hairline last:border-b-0">
                 <td className="px-3 py-1.5 font-mono text-2xs">{name}</td>
                 <td className="px-3 py-1.5">
-                  <input
-                    className="input py-1 text-2xs"
-                    value={mention}
-                    disabled={busy}
-                    onChange={(e) => setDraft({ ...draft, [name]: e.target.value })}
-                  />
+                  <div className="flex items-center gap-2">
+                    <input
+                      className="input py-1 text-2xs"
+                      aria-label={`${name} の議事録での表記`}
+                      value={mention}
+                      disabled={busy}
+                      onChange={(e) => setDraft({ ...draft, [name]: e.target.value })}
+                    />
+                    <span className="shrink-0 text-2xs text-muted">{who(mention) ?? "—"}</span>
+                  </div>
                 </td>
                 <td className="px-2">
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => {
-                      const next = { ...draft };
-                      delete next[name];
-                      setDraft(next);
-                    }}
-                    className="focus-ring rounded px-1.5 py-0.5 text-2xs text-faint hover:text-danger"
-                  >
-                    削除
-                  </button>
+                  {removing === name ? (
+                    <span className="flex items-center gap-1">
+                      <Button
+                        variant="danger"
+                        disabled={busy}
+                        onClick={() => {
+                          const next = { ...draft };
+                          delete next[name];
+                          setDraft(next);
+                          setRemoving(null);
+                        }}
+                      >
+                        削除する
+                      </Button>
+                      <Button disabled={busy} onClick={() => setRemoving(null)}>
+                        やめる
+                      </Button>
+                    </span>
+                  ) : (
+                    <Button variant="danger" disabled={busy} onClick={() => setRemoving(name)}>
+                      削除
+                    </Button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -164,26 +203,38 @@ function UserMapping({
         </table>
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
+      <p className="mt-3 text-2xs text-muted">
+        議事録での表記は <span className="font-mono">{"<@ユーザーID>"}</span> の形で入れます。
+        IDは Discord でその人を右クリック →「ユーザーIDをコピー」で取れます
+        （開発者モードが必要）。入力すると右に誰かを表示します。
+      </p>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
         <input
           className="input max-w-[200px] py-1 text-2xs"
           placeholder="新しいユーザー名"
+          aria-label="新しいユーザー名"
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") addEntry();
+          }}
         />
         <input
           className="input max-w-[220px] py-1 text-2xs"
           placeholder="<@123456789>"
+          aria-label="議事録での表記"
           value={newMention}
           onChange={(e) => setNewMention(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") addEntry();
+          }}
         />
+        {who(newMention) !== null && (
+          <span className="text-2xs text-accent-deep">{who(newMention)}</span>
+        )}
         <Button
           disabled={newName.trim() === "" || newMention.trim() === ""}
-          onClick={() => {
-            setDraft({ ...draft, [newName.trim()]: newMention.trim() });
-            setNewName("");
-            setNewMention("");
-          }}
+          onClick={addEntry}
         >
           追加
         </Button>
@@ -221,8 +272,8 @@ export function SettingsPage({ onChanged }: { onChanged: () => void }) {
     [reload, onChanged],
   );
 
-  if (error !== null) return <ErrorNote message={error} />;
-  if (data === null) return <Empty>読み込んでいます…</Empty>;
+  if (error !== null) return <ErrorNote message={error} onRetry={reload} />;
+  if (data === null) return <Loading rows={6} />;
 
   const saveGlobal = saveFor("global");
   const saveMeeting = saveFor("meeting");
@@ -244,7 +295,7 @@ export function SettingsPage({ onChanged }: { onChanged: () => void }) {
       {data.global.map((g) => (
         <Card key={g.id} title={g.label} desc={g.desc}>
           {g.settings.map((s) => (
-            <SettingRow key={s.path} setting={s} onSave={saveGlobal} />
+            <SettingRow key={s.path} setting={s} onSave={saveGlobal} idNames={data.idNames ?? {}} />
           ))}
         </Card>
       ))}
@@ -252,7 +303,7 @@ export function SettingsPage({ onChanged }: { onChanged: () => void }) {
       {data.devBot.map((g) => (
         <Card key={g.id} title={g.label} desc={g.desc}>
           {g.settings.map((s) => (
-            <SettingRow key={s.path} setting={s} onSave={saveGlobal} />
+            <SettingRow key={s.path} setting={s} onSave={saveGlobal} idNames={data.idNames ?? {}} />
           ))}
         </Card>
       ))}
@@ -262,7 +313,7 @@ export function SettingsPage({ onChanged }: { onChanged: () => void }) {
           {g.settings
             .filter((s) => s.kind !== "info")
             .map((s) => (
-              <SettingRow key={s.path} setting={s} onSave={saveMeeting} />
+              <SettingRow key={s.path} setting={s} onSave={saveMeeting} idNames={data.idNames ?? {}} />
             ))}
           <div className="border-t border-hairline">
             <div className="px-4 pt-3">
@@ -273,6 +324,7 @@ export function SettingsPage({ onChanged }: { onChanged: () => void }) {
             </div>
             <UserMapping
               mapping={data.meetingUserMapping}
+              idNames={data.idNames ?? {}}
               onSaved={() => {
                 reload();
                 onChanged();

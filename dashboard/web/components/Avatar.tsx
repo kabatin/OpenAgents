@@ -1,6 +1,16 @@
 import { useState } from "react";
 
 import { STATUS_TONE } from "../lib/format.ts";
+
+/** アバターの状態ドットの説明（英語の内部値をそのまま出さない）。 */
+const STATUS_JA: Record<string, string> = {
+  ok: "稼働中",
+  down: "停止",
+  disconnected: "接続が切れています",
+  stalled: "無音（応答が止まっています）",
+  idle: "待機中",
+  unknown: "不明",
+};
 import type { HealthStatus } from "../lib/types.ts";
 
 /** アイコンが取れない場合の背景色。エージェントごとに固定で、毎回同じ色になる。 */
@@ -64,7 +74,8 @@ export function Avatar({
         <span
           className={`absolute -bottom-0.5 -right-0.5 rounded-full border-2 border-surface
             ${size === "lg" ? "h-3.5 w-3.5" : "h-2.5 w-2.5"} ${STATUS_TONE[status].dot}`}
-          title={status}
+          title={STATUS_JA[status]}
+          aria-hidden="true"
         />
       )}
     </span>

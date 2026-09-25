@@ -123,6 +123,69 @@ export function kindLabel(k: string): string {
 }
 
 /**
+ * Discordの該当投稿へのジャンプURL。
+ * 「タイムラインで妙な発言を見つけたら、その場で現物を開く」ための導線。
+ * 必要なIDが揃わないときは null（リンクにしない）。
+ */
+export function discordUrl(
+  guildId: string | null,
+  channelId: number | null,
+  messageId: number | null,
+): string | null {
+  if (guildId === null || channelId === null || messageId === null) return null;
+  return `https://discord.com/channels/${guildId}/${channelId}/${messageId}`;
+}
+
+/**
+ * 画面に出る内部ステータスの日本語化。
+ * `curated` / `drafted` / `overdue` のような英語の内部値をそのまま人間に見せない。
+ * 知らない値は素通しする（勝手な訳を当てない）。
+ */
+const JA: Record<string, string> = {
+  // ゴールデン（模範Q&A）
+  candidate: "採用待ち",
+  curated: "採用",
+  active: "自動捕獲",
+  rejected: "不採用",
+  invalid: "無効",
+  shadow: "シャドー",
+  // 納期追跡の声かけ段階
+  before: "期日前",
+  overdue: "期日超過",
+  none: "声かけ前",
+  stale: "停滞",
+  open: "対応中",
+  done: "完了",
+  // LLM呼び出しの用途
+  answer: "回答",
+  keywords: "キーワード抽出",
+  screen: "一次判定",
+  decide: "二次判定",
+  summary: "要約",
+  self_review: "自己採点",
+  distill: "蒸留",
+  audit: "自己点検",
+  skeptic: "発言前の監査",
+  attention: "自発介入",
+  rescue: "救援",
+  briefing: "ブリーフィング",
+  homework: "宿題",
+  other: "その他",
+};
+
+export function ja(value: string | null | undefined): string {
+  if (value === null || value === undefined || value === "") return "—";
+  return JA[value] ?? value;
+}
+
+/** 日付だけの値（`2026-09-24`）を `09/24` に。時刻つきは jstStamp を使う。 */
+export function jstDate(raw: string | null | undefined): string {
+  if (raw === null || raw === undefined || raw === "") return "—";
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(raw);
+  return m === null ? raw : `${m[2]}/${m[3]}`;
+}
+
+/**
  * エージェントIDを表示名にする。
  *
  * **固定の対応表は持たない。** エージェントは利用者が自由に増やせるので、

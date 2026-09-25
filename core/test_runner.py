@@ -150,6 +150,56 @@ class RunnerAnswerBranchTest(unittest.TestCase):
         self.assertIn("Web検索", call["system"])  # スキル告知がsystemに載る
 
 
+    def test_keywords_use_light_model_and_low_effort(self):
+        # 検索語出しは下ごしらえ。回答本文と同じ重いモデル・深い思考にしない
+        seen = {}
+
+        def fake_extract(question, model=None, history="", claude_fn=None,
+                         syn_note=""):
+            seen["model"] = model
+            claude_fn("検索語を出して")
+            return ["kw"]
+        with patch.object(search, "extract_keywords", fake_extract), \
+                patch.object(search, "search_messages", return_value=[]):
+            runner_answer.answer_question(_TMP_DB, "1", "質問",
+                                          model="claude-opus-5-5")
+        self.assertEqual(seen["model"], search.KEYWORDS_MODEL)
+        kw_call = next(c for c in self.calls if c.get("purpose") == "keywords")
+        self.assertEqual(kw_call["model"], search.KEYWORDS_MODEL)
+        self.assertEqual(kw_call["effort"], "low")
+        # 回答本文は渡したモデルのまま（effort は設定に任せる＝指定しない）
+        answer_call = self.calls[-1]
+        self.assertEqual(answer_call["model"], "claude-opus-5-5")
+        self.assertNotIn("effort", answer_call)
+
+
+class EffortTest(unittest.TestCase):
+    """--effort（思考の深さ）。既定は xhigh、設定 llm.effort で変えられ、
+    空文字なら付けない（古い CLI で通らないときの逃げ道）。"""
+
+    def _argv(self, **kw):
+        return invoke_claude.build_argv("/bin/claude", model="m", **kw)
+
+    def test_default_effort_in_argv(self):
+        argv = self._argv()
+        self.assertEqual(argv[argv.index("--effort") + 1],
+                         invoke_claude.DEFAULT_EFFORT)
+
+    def test_explicit_and_empty_effort(self):
+        argv = self._argv(effort="low")
+        self.assertEqual(argv[argv.index("--effort") + 1], "low")
+        self.assertNotIn("--effort", self._argv(effort=""))
+
+    def test_configured_effort(self):
+        ce = invoke_claude.configured_effort
+        self.assertEqual(ce({}), invoke_claude.DEFAULT_EFFORT)
+        self.assertEqual(ce({"llm": {"effort": "medium"}}), "medium")
+        self.assertEqual(ce({"llm": {"effort": ""}}), "")
+        # 知らない値は既定へ倒す（CLI に渡して全呼び出しを落とさない）
+        self.assertEqual(ce({"llm": {"effort": "でたらめ"}}),
+                         invoke_claude.DEFAULT_EFFORT)
+
+
 class RunnerAnswerBuildPromptTest(unittest.TestCase):
     def test_all_blocks(self):
         p = runner_answer.build_prompt(

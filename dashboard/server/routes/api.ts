@@ -25,6 +25,7 @@ import {
   llmRecent,
   observationShadow,
   recentActivity,
+  resolveDiscordIds,
   roadmapItems,
   rules,
   subLoops,
@@ -175,7 +176,11 @@ api.get("/ops/logs/:id", async (c) => {
   }
 });
 
-api.get("/ops/subloops", (c) => c.json(subLoops()));
+api.get("/ops/subloops", (c) => {
+  // scope は生のチャンネルID/ユーザーIDなので、引けるものは名前にして返す
+  const items = subLoops();
+  return c.json({ items, idNames: resolveDiscordIds(items.map((i) => i.scope)) });
+});
 
 api.get("/activity", (c) => {
   const limit = Number(c.req.query("limit") ?? 50);

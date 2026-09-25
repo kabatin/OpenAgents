@@ -22,7 +22,7 @@ import time
 
 from core import paths
 
-MODEL = "claude-opus-4-8"          # 本体改修は最も慎重なOpus
+MODEL = "claude-opus-5-5"          # 本体改修は最も慎重なOpus
 # 30分。Opusの実装は12分超が普通にある（起票#7は900秒の壁時計をほぼ使い切った）
 BUILD_TIMEOUT_SEC = 1800
 # ハング保険。--include-partial-messages で長考中もstreamは流れるが、長いツール実行

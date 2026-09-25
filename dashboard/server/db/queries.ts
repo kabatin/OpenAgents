@@ -38,6 +38,45 @@ export function todayQuota(agentIds: string[]): QuotaRow[] {
   }, agentIds.map((agentId) => ({ agentId, used: 0, dbOverride: null })));
 }
 
+/**
+ * Discordの生ID（17〜20桁）を人間が読める名前に解決する。
+ *
+ * 設定画面には `1522544734021619764` のような数字がそのまま並んでいて、
+ * それがどのチャンネルなのか画面からは分からなかった。channels / users は
+ * アーカイブ側が持っているので、引けるものだけ名前にして返す。
+ * 引けなかったIDは結果に入れない（呼び出し側が生IDのまま出す）。
+ */
+export function resolveDiscordIds(ids: string[]): Record<string, string> {
+  const wanted = [...new Set(ids.filter((v) => /^\d{17,20}$/.test(v)))];
+  if (wanted.length === 0) return {};
+  return safeQuery((conn) => {
+    const out: Record<string, string> = {};
+    const marks = wanted.map(() => "?").join(",");
+    // IDは必ず TEXT のまま取り出す。数値で受けると19桁が丸められ
+    // （1522544734021619764 → …619700）、呼び出し側のキーと一致しなくなる。
+    const channels = conn
+      .prepare<string[], { id: string; name: string | null }>(
+        `SELECT CAST(id AS TEXT) AS id, name FROM channels WHERE CAST(id AS TEXT) IN (${marks})`,
+      )
+      .all(...wanted);
+    for (const c of channels) {
+      if (c.name !== null && c.name !== "") out[c.id] = `#${c.name}`;
+    }
+    const users = conn
+      .prepare<string[], { id: string; display_name: string | null; name: string | null }>(
+        `SELECT CAST(id AS TEXT) AS id, display_name, name FROM users
+          WHERE CAST(id AS TEXT) IN (${marks})`,
+      )
+      .all(...wanted);
+    for (const u of users) {
+      const label = u.display_name ?? u.name;
+      // チャンネルが先に当たっていたらそちらを優先する（IDは衝突しない前提だが念のため）
+      if (label !== null && label !== "" && out[u.id] === undefined) out[u.id] = label;
+    }
+    return out;
+  }, {});
+}
+
 export type LastRunRow = { agentId: string; lastRunAt: string | null };
 
 /** メイン観察ループの最終実行時刻。名前空間つきのキー（`minutes:agent1` 等）は除く。 */
@@ -192,6 +231,8 @@ export type RuleRow = {
   id: number;
   agentId: string;
   scope: string;
+  /** scope に含まれるIDを解決した表示名（`#チャンネル名` / ユーザー名）。 */
+  scopeName?: string | null;
   ruleText: string;
   createdBy: string | null;
   active: number;
@@ -200,7 +241,7 @@ export type RuleRow = {
 };
 
 export function rules(): RuleRow[] {
-  return safeQuery(
+  const rows = safeQuery(
     (conn) =>
       conn
         .prepare<[], RuleRow>(
@@ -210,8 +251,12 @@ export function rules(): RuleRow[] {
              FROM rules ORDER BY active DESC, id DESC`,
         )
         .all(),
-    [],
+    [] as RuleRow[],
   );
+  // scope は `channel:<id>` / `user:<id>`。IDのままだと「どのチャンネルのルールか」が
+  // 画面から消えてしまうので、引ける名前をここで付ける。
+  const names = resolveDiscordIds(rows.map((r) => r.scope.split(":")[1] ?? ""));
+  return rows.map((r) => ({ ...r, scopeName: names[r.scope.split(":")[1] ?? ""] ?? null }));
 }
 
 export type CapabilityRow = {

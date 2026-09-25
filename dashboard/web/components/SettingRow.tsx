@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useId, useState } from "react";
 
 import { hourLabel, weekdayLabel } from "../lib/format.ts";
 import type { ResolvedSetting } from "../lib/types.ts";
@@ -6,8 +6,20 @@ import { Button, Chip, Toggle, TriToggle, type TriValue } from "./ui.tsx";
 
 export type SaveFn = (path: string, value: unknown) => Promise<void>;
 
+export type IdNames = Record<string, string>;
+
+/**
+ * Discordの生ID（17〜20桁）を名前に置き換える。
+ * `1522544734021619764` のままでは、それがどのチャンネルか画面から分からない。
+ * 引けなかったIDは生のまま残す（嘘の名前を出さない）。
+ */
+export function withIdNames(text: string, idNames: IdNames | undefined): string {
+  if (idNames === undefined) return text;
+  return text.replace(/\d{17,20}/g, (id) => idNames[id] ?? id);
+}
+
 /** 行の右端に出す「今どうなっているか」の短い要約。畳んだままでも状態が分かる。 */
-function summarize(s: ResolvedSetting): string | null {
+function summarize(s: ResolvedSetting, idNames?: IdNames): string | null {
   const v = s.current.value;
   switch (s.kind) {
     case "weekday":
@@ -21,12 +33,20 @@ function summarize(s: ResolvedSetting): string | null {
     case "enum":
       return s.options?.find((o) => o.value === v)?.label ?? null;
     case "stringList":
-    case "intList":
-      return Array.isArray(v) ? (v.length === 0 ? "未設定" : `${v.length}件`) : null;
+    case "intList": {
+      if (!Array.isArray(v)) return null;
+      if (v.length === 0) return "未設定";
+      const named = v.map((x) => withIdNames(String(x), idNames));
+      const joined = named.join(" / ");
+      // 名前に解決できたなら中身を見せる（「2件」だけでは何が入っているか分からない）
+      return joined.length <= 40 ? joined : `${v.length}件: ${joined.slice(0, 40)}…`;
+    }
     case "string":
-    case "text":
+    case "text": {
       if (typeof v !== "string" || v.length === 0) return "未設定";
-      return v.length > 22 ? `${v.slice(0, 22)}…` : v;
+      const shown = withIdNames(v, idNames);
+      return shown.length > 26 ? `${shown.slice(0, 26)}…` : shown;
+    }
     default:
       return null;
   }
@@ -45,10 +65,12 @@ function ValueEditor({
   setting,
   onSave,
   busy,
+  idNames,
 }: {
   setting: ResolvedSetting;
   onSave: SaveFn;
   busy: boolean;
+  idNames?: IdNames;
 }) {
   const [draft, setDraft] = useState<string>(() => {
     const v = setting.current.value;
@@ -74,17 +96,18 @@ function ValueEditor({
     } else if (value === "") {
       value = null;
     }
-    await onSave(setting.path, value);
-    setDirty(false);
+    try {
+      await onSave(setting.path, value);
+      setDirty(false);
+    } catch {
+      // エラー本文は SettingRow が出す。dirty は落とさず「保存」を残す。
+    }
   };
 
   if (setting.readonly === true) {
     const v = setting.current.value;
-    return (
-      <span className="tnum text-xs text-muted">
-        {Array.isArray(v) ? v.join(" / ") : v === null ? "—" : String(v)}
-      </span>
-    );
+    const text = Array.isArray(v) ? v.join(" / ") : v === null ? "—" : String(v);
+    return <span className="tnum text-xs text-muted">{withIdNames(text, idNames)}</span>;
   }
 
   if (setting.kind === "enum") {
@@ -95,7 +118,7 @@ function ValueEditor({
         value={String(setting.current.value ?? "")}
         onChange={(e) => {
           const opt = setting.options?.find((o) => String(o.value ?? "") === e.target.value);
-          void onSave(setting.path, opt?.value ?? null);
+          void onSave(setting.path, opt?.value ?? null).catch(() => undefined);
         }}
       >
         {setting.options?.map((o) => (
@@ -139,7 +162,7 @@ function ValueEditor({
         className="input max-w-[120px]"
         disabled={busy}
         value={String(setting.current.value ?? 0)}
-        onChange={(e) => void onSave(setting.path, Number(e.target.value))}
+        onChange={(e) => void onSave(setting.path, Number(e.target.value)).catch(() => undefined)}
       >
         {[0, 1, 2, 3, 4, 5, 6].map((d) => (
           <option key={d} value={d}>
@@ -156,7 +179,7 @@ function ValueEditor({
         className="input max-w-[110px]"
         disabled={busy}
         value={String(setting.current.value ?? 0)}
-        onChange={(e) => void onSave(setting.path, Number(e.target.value))}
+        onChange={(e) => void onSave(setting.path, Number(e.target.value)).catch(() => undefined)}
       >
         {Array.from({ length: 24 }, (_, h) => (
           <option key={h} value={h}>
@@ -200,14 +223,26 @@ export function SettingRow({
   setting,
   onSave,
   depth = 0,
+  idNames,
 }: {
   setting: ResolvedSetting;
   onSave: SaveFn;
   depth?: number;
+  idNames?: IdNames;
 }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const detailId = useId();
+
+  // セレクトやトグルは押した瞬間に保存される。成功の手応えが何も無いと
+  // 「効いたのか」が分からないので、短く合図を出す。
+  useEffect(() => {
+    if (!saved) return;
+    const t = setTimeout(() => setSaved(false), 2500);
+    return () => clearTimeout(t);
+  }, [saved]);
 
   const blocked = setting.blockedBy.length > 0;
   const hasDetail =
@@ -216,13 +251,22 @@ export function SettingRow({
     blocked ||
     !["bool", "tri"].includes(setting.kind);
 
+  /** トグル等の即時保存用。エラーは行内に出るので、ここでは握って終わる。 */
+  const saveQuiet = (path: string, value: unknown): void => {
+    void save(path, value).catch(() => undefined);
+  };
+
   const save: SaveFn = async (path, value) => {
     setBusy(true);
     setError(null);
     try {
       await onSave(path, value);
+      setSaved(true);
     } catch (e) {
       setError((e as Error).message);
+      // 握りつぶすと ValueEditor が「保存できた」と誤解して dirty を下ろし、
+      // 「保存」ボタンが消えて再保存できなくなる（入力値は画面に残ったまま）。
+      throw e;
     } finally {
       setBusy(false);
     }
@@ -235,48 +279,72 @@ export function SettingRow({
         ? setting.current.value === true
         : false;
 
-  const digest = childDigest(setting) ?? summarize(setting);
+  const digest = childDigest(setting) ?? summarize(setting, idNames);
+
+  // 行の見出し部分の中身（開閉ボタンにも、開けない行の素の表示にも同じものを使う）
+  const head = (
+    <>
+      <span
+        className={`w-3 shrink-0 text-xs text-muted transition-transform duration-150 ${
+          hasDetail ? "" : "opacity-0"
+        } ${open ? "rotate-90" : ""}`}
+        aria-hidden="true"
+      >
+        ▸
+      </span>
+
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span
+            className={`truncate text-sm ${isOn || setting.kind === "tri" ? "font-medium" : ""} ${
+              blocked ? "text-muted" : ""
+            }`}
+          >
+            {setting.label}
+          </span>
+          {setting.current.explicit === false && setting.kind !== "info" && <Chip>既定値</Chip>}
+          {blocked && <Chip tone="warn">前提が未設定</Chip>}
+        </div>
+        {!open && digest !== null && digest !== "—" && (
+          <div className="tnum mt-0.5 truncate text-2xs text-muted">{digest}</div>
+        )}
+      </div>
+    </>
+  );
 
   return (
     <div className={depth > 0 ? "border-t border-hairline/60" : "border-t border-hairline"}>
       <div
-        className={`row-hover flex items-center gap-3 px-4 py-2.5 ${hasDetail ? "cursor-pointer" : ""}`}
+        className="row-hover flex items-center gap-3 px-4 py-2.5"
         style={{ paddingLeft: `${16 + depth * 18}px` }}
-        onClick={hasDetail ? () => setOpen((o) => !o) : undefined}
       >
-        <span
-          className={`w-3 shrink-0 text-2xs text-faint transition-transform duration-150 ${
-            hasDetail ? "" : "opacity-0"
-          } ${open ? "rotate-90" : ""}`}
-        >
-          ▸
-        </span>
+        {/* 開閉は本物のボタンにする（div+onClick だとキーボードで到達できない）。
+            トグル類はボタンの外に置く＝入れ子ボタンを作らない。 */}
+        {hasDetail ? (
+          <button
+            type="button"
+            aria-expanded={open}
+            aria-controls={detailId}
+            onClick={() => setOpen((o) => !o)}
+            className="focus-ring flex min-w-0 flex-1 items-center gap-3 rounded text-left"
+          >
+            {head}
+          </button>
+        ) : (
+          <div className="flex min-w-0 flex-1 items-center gap-3">{head}</div>
+        )}
 
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span
-              className={`truncate text-sm ${isOn || setting.kind === "tri" ? "font-medium" : ""} ${
-                blocked ? "text-muted" : ""
-              }`}
-            >
-              {setting.label}
+        <div className="flex shrink-0 items-center gap-3">
+          {saved && error === null && (
+            <span className="text-2xs font-medium text-accent-deep" role="status">
+              保存しました
             </span>
-            {setting.current.explicit === false && setting.kind !== "info" && (
-              <Chip>既定値</Chip>
-            )}
-            {blocked && <Chip tone="warn">前提が未設定</Chip>}
-          </div>
-          {!open && digest !== null && digest !== "—" && (
-            <div className="tnum mt-0.5 truncate text-2xs text-faint">{digest}</div>
           )}
-        </div>
-
-        <div className="flex shrink-0 items-center gap-3" onClick={(e) => e.stopPropagation()}>
           {setting.kind === "tri" && (
             <TriToggle
               value={(setting.current.value as TriValue) ?? "off"}
               disabled={busy || setting.readonly === true}
-              onChange={(v) => void save(setting.path, v)}
+              onChange={(v) => saveQuiet(setting.path, v)}
             />
           )}
           {setting.kind === "bool" && (
@@ -284,7 +352,7 @@ export function SettingRow({
               label={setting.label}
               checked={setting.current.value === true}
               disabled={busy || setting.readonly === true}
-              onChange={(v) => void save(setting.path, v)}
+              onChange={(v) => saveQuiet(setting.path, v)}
             />
           )}
           {setting.kind === "info" && <span className="text-2xs text-faint">表示のみ</span>}
@@ -293,6 +361,7 @@ export function SettingRow({
 
       {open && (
         <div
+          id={detailId}
           className="space-y-3 bg-canvas/60 px-4 pb-4 pt-1"
           style={{ paddingLeft: `${47 + depth * 18}px` }}
         >
@@ -312,7 +381,7 @@ export function SettingRow({
 
           {!["bool", "tri", "info"].includes(setting.kind) && (
             <div className="max-w-[520px]">
-              <ValueEditor setting={setting} onSave={save} busy={busy} />
+              <ValueEditor setting={setting} onSave={save} busy={busy} idNames={idNames} />
             </div>
           )}
 
@@ -326,7 +395,7 @@ export function SettingRow({
             >
               {setting.children?.map((child, i) => (
                 <div key={child.path} className={i === 0 ? "-mt-px" : ""}>
-                  <SettingRow setting={child} onSave={onSave} depth={depth + 1} />
+                  <SettingRow setting={child} onSave={onSave} depth={depth + 1} idNames={idNames} />
                 </div>
               ))}
             </div>

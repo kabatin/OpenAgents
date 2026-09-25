@@ -1,8 +1,8 @@
 import { useState } from "react";
 
-import { Card, Chip, Empty, Metric } from "../components/ui.tsx";
+import { Card, Chip, ListState, Metric } from "../components/ui.tsx";
 import { useFetch } from "../lib/api.ts";
-import { agentLabel, jstStamp, since } from "../lib/format.ts";
+import { agentLabel, ja, jstDate, jstStamp, since } from "../lib/format.ts";
 
 type Summary = {
   counters: {
@@ -22,6 +22,7 @@ type Rule = {
   id: number;
   agentId: string;
   scope: string;
+  scopeName?: string | null;
   ruleText: string;
   createdBy: string | null;
   active: number;
@@ -107,6 +108,18 @@ type TaskRow = {
   stage: string | null;
 };
 
+/** 1タブに出す最大件数。超えた分は件数だけ出す（黙って切らない）。 */
+const LIST_MAX = 60;
+
+function MoreRow({ total, shown }: { total: number; shown: number }) {
+  if (total <= shown) return null;
+  return (
+    <li className="border-t border-hairline px-4 py-2 text-2xs text-muted">
+      他 {total - shown} 件（新しい順に{shown}件だけ表示しています）
+    </li>
+  );
+}
+
 const TABS = [
   { id: "rules", label: "ルール記憶" },
   { id: "dictionary", label: "名前辞書" },
@@ -171,20 +184,31 @@ function scopeLabel(scope: string): string {
 
 export function DataPage() {
   const [tab, setTab] = useState<TabId>("rules");
-  const { data: summary } = useFetch<Summary>("/data/summary");
-  const { data: rules } = useFetch<Rule[]>(tab === "rules" ? "/data/rules" : null);
-  const { data: caps } = useFetch<Capability[]>(tab === "capabilities" ? "/data/capabilities" : null);
-  const { data: reminders } = useFetch<{ items: Reminder[] }>(
+  // 読み込み中・失敗・本当に0件 を描き分けるため、data だけでなく状態ごと持つ
+  // （data だけを見ると、読み込み中や API の失敗を「0件」と断定表示してしまう）
+  const summaryQ = useFetch<Summary>("/data/summary");
+  const rulesQ = useFetch<Rule[]>(tab === "rules" ? "/data/rules" : null);
+  const capsQ = useFetch<Capability[]>(tab === "capabilities" ? "/data/capabilities" : null);
+  const remindersQ = useFetch<{ items: Reminder[] }>(
     tab === "reminders" ? "/data/reminders" : null,
   );
-  const { data: tasks } = useFetch<{ items: TaskRow[] }>(tab === "tasks" ? "/data/tasks" : null);
-  const { data: dict } = useFetch<Dictionary>(tab === "dictionary" ? "/data/dictionary" : null);
-  const { data: learning } = useFetch<{ shadow: ShadowRow[]; advice: AdviceRow[]; golden: GoldenRow[] }>(
+  const tasksQ = useFetch<{ items: TaskRow[] }>(tab === "tasks" ? "/data/tasks" : null);
+  const dictQ = useFetch<Dictionary>(tab === "dictionary" ? "/data/dictionary" : null);
+  const learningQ = useFetch<{ shadow: ShadowRow[]; advice: AdviceRow[]; golden: GoldenRow[] }>(
     tab === "learning" ? "/data/observations" : null,
   );
-  const { data: llm } = useFetch<{ daily: LlmDaily[]; byPurpose: LlmPurpose[]; recent: LlmCall[] }>(
+  const llmQ = useFetch<{ daily: LlmDaily[]; byPurpose: LlmPurpose[]; recent: LlmCall[] }>(
     tab === "llm" ? "/data/llm" : null,
   );
+
+  const summary = summaryQ.data;
+  const rules = rulesQ.data;
+  const caps = capsQ.data;
+  const reminders = remindersQ.data;
+  const tasks = tasksQ.data;
+  const dict = dictQ.data;
+  const learning = learningQ.data;
+  const llm = llmQ.data;
 
   const c = summary?.counters;
 
@@ -233,11 +257,13 @@ export function DataPage() {
         </Card>
       )}
 
-      <div className="flex flex-wrap gap-1 border-b border-hairline">
+      <div className="flex flex-wrap gap-1 border-b border-hairline" role="tablist">
         {TABS.map((t) => (
           <button
             key={t.id}
             type="button"
+            role="tab"
+            aria-selected={tab === t.id}
             onClick={() => setTab(t.id)}
             className={`focus-ring -mb-px border-b-2 px-3 py-2 text-[13px] transition-colors duration-100
               ${
@@ -255,24 +281,25 @@ export function DataPage() {
         {tab === "rules" && (
           <ul>
             {(rules ?? []).length === 0 ? (
-              <Empty>ルールはありません</Empty>
+              <ListState q={rulesQ} empty="ルールはありません。Discordで「今後は〜して」と話しかけると覚えます" />
             ) : (
-              rules?.map((r) => (
+              rules?.slice(0, LIST_MAX).map((r) => (
                 <li key={r.id} className="border-t border-hairline px-4 py-2.5 first:border-t-0">
                   <div className="flex items-baseline gap-2.5">
                     <span className="tnum w-8 shrink-0 text-2xs text-faint">#{r.id}</span>
                     <Chip tone={r.scope === "global" ? "info" : "neutral"}>
-                      {scopeLabel(r.scope)}
+                      {r.scopeName == null ? scopeLabel(r.scope) : `${scopeLabel(r.scope)}: ${r.scopeName}`}
                     </Chip>
                     <span className={`min-w-0 flex-1 text-xs ${r.active ? "" : "text-faint line-through"}`}>
                       {r.ruleText}
                     </span>
-                    {r.expiresAt !== null && <Chip tone="warn">{r.expiresAt} まで</Chip>}
+                    {r.expiresAt !== null && <Chip tone="warn">{jstDate(r.expiresAt)} まで</Chip>}
                     {r.active === 0 && <Chip>無効</Chip>}
                   </div>
                 </li>
               ))
             )}
+            <MoreRow total={rules?.length ?? 0} shown={LIST_MAX} />
           </ul>
         )}
 
@@ -287,7 +314,7 @@ export function DataPage() {
             </div>
             <ul>
               {(dict?.terms ?? []).length === 0 ? (
-                <Empty>登録された固有名詞はありません</Empty>
+                <ListState q={dictQ} empty="固有名詞は登録されていません。Discordで「〜は〜のことだと覚えて」と話しかけると増えます" />
               ) : (
                 dict?.terms.map((t) => (
                   <li
@@ -313,7 +340,7 @@ export function DataPage() {
             </div>
             <ul>
               {(dict?.glossary ?? []).length === 0 ? (
-                <Empty>登録された単語はありません</Empty>
+                <ListState q={dictQ} empty="単語帳は空です。Discordで「〜は〜の誤記」と指摘すると登録されます" />
               ) : (
                 dict?.glossary.map((g) => (
                   <li
@@ -340,14 +367,14 @@ export function DataPage() {
             </div>
             <ul>
               {(llm?.daily ?? []).length === 0 ? (
-                <Empty>まだ記録がありません（再起動後の呼び出しから貯まります）</Empty>
+                <ListState q={llmQ} empty="まだ記録がありません（再起動後の呼び出しから貯まります）" />
               ) : (
                 llm?.daily.map((d) => (
                   <li
                     key={d.day}
                     className="tnum flex items-baseline gap-3 border-t border-hairline px-4 py-2 text-xs first:border-t-0"
                   >
-                    <span className="w-24 shrink-0 font-medium">{d.day}</span>
+                    <span className="w-24 shrink-0 font-medium">{jstDate(d.day)}</span>
                     <span className="w-16 shrink-0">{d.calls} 回</span>
                     <span className={`w-16 shrink-0 ${d.failed > 0 ? "text-danger" : "text-faint"}`}>
                       失敗 {d.failed}
@@ -365,7 +392,7 @@ export function DataPage() {
             <div className="eyebrow px-4 pb-1 pt-4">用途別（直近7日・コスト順）</div>
             <ul>
               {(llm?.byPurpose ?? []).length === 0 ? (
-                <Empty>まだ記録がありません</Empty>
+                <ListState q={llmQ} empty="まだ記録がありません" />
               ) : (
                 llm?.byPurpose.map((p) => (
                   <li
@@ -373,7 +400,7 @@ export function DataPage() {
                     className="tnum flex items-baseline gap-3 border-t border-hairline px-4 py-2 text-xs first:border-t-0"
                   >
                     <span className="w-20 shrink-0 text-muted">{agentLabel(p.agentId ?? "?")}</span>
-                    <span className="w-28 shrink-0 font-medium">{p.purpose ?? "other"}</span>
+                    <span className="w-28 shrink-0 font-medium">{ja(p.purpose ?? "other")}</span>
                     <span className="w-16 shrink-0">{p.calls} 回</span>
                     <span className={`w-16 shrink-0 ${p.failed > 0 ? "text-danger" : "text-faint"}`}>
                       失敗 {p.failed}
@@ -387,7 +414,7 @@ export function DataPage() {
             <div className="eyebrow px-4 pb-1 pt-4">直近の呼び出し（失敗は理由つき）</div>
             <ul>
               {(llm?.recent ?? []).length === 0 ? (
-                <Empty>まだ記録がありません</Empty>
+                <ListState q={llmQ} empty="まだ記録がありません" />
               ) : (
                 llm?.recent.map((r) => (
                   <li key={r.id} className="border-t border-hairline px-4 py-2 text-xs first:border-t-0">
@@ -419,7 +446,7 @@ export function DataPage() {
             </div>
             <ul>
               {(learning?.golden ?? []).length === 0 ? (
-                <Empty>模範Q&Aはまだありません</Empty>
+                <ListState q={learningQ} empty="模範Q&Aはまだありません。python -m core.golden_curate --propose で候補を作れます" />
               ) : (
                 learning?.golden.map((g) => (
                   <li key={g.id} className="border-t border-hairline px-4 py-2 text-xs first:border-t-0">
@@ -430,7 +457,7 @@ export function DataPage() {
                           g.status === "curated" ? "info" : g.status === "candidate" ? "warn" : "neutral"
                         }
                       >
-                        {g.status}
+                        {ja(g.status)}
                       </Chip>
                       <span className="min-w-0 flex-1 font-medium">{g.question}</span>
                       {g.note && <span className="shrink-0 text-faint">{g.note}</span>}
@@ -446,7 +473,7 @@ export function DataPage() {
             </div>
             <ul>
               {(learning?.advice ?? []).length === 0 ? (
-                <Empty>蒸留された助言はまだありません</Empty>
+                <ListState q={learningQ} empty="蒸留された助言はまだありません" />
               ) : (
                 learning?.advice.map((a) => (
                   <li
@@ -475,7 +502,7 @@ export function DataPage() {
             </p>
             <ul>
               {(learning?.shadow ?? []).length === 0 ? (
-                <Empty>まだ記録はありません（一言添えたくなる場面がなかった）</Empty>
+                <ListState q={learningQ} empty="まだ記録はありません（一言添えたくなる場面がなかった）" />
               ) : (
                 learning?.shadow.map((row, i) => (
                   <li
@@ -520,19 +547,19 @@ export function DataPage() {
             </div>
             <ul>
               {(tasks?.items ?? []).length === 0 ? (
-                <Empty>追跡中のタスクはありません</Empty>
+                <ListState q={tasksQ} empty="追跡中のタスクはありません。議事録に期日つきのTODOが載ると自動で追跡します" />
               ) : (
                 tasks?.items.map((t) => (
                   <li key={t.key} className="border-t border-hairline px-4 py-2 text-xs first:border-t-0">
                     <div className="flex items-baseline gap-2.5">
                       <span className="tnum w-10 shrink-0 font-medium text-accent-deep">{t.key}</span>
-                      <Chip tone={t.status === "stale" ? "warn" : "info"}>
+                      <Chip tone={t.status === "stale" ? "warn" : "neutral"}>
                         {{ action: "議事録", homework: "宿題", reminder: "リマインド" }[t.kind]}
                       </Chip>
-                      <span className="tnum w-24 shrink-0 text-muted">{t.due ?? "未定"}</span>
+                      <span className="tnum w-24 shrink-0 text-muted">{t.due === null ? "未定" : jstDate(t.due)}</span>
                       <span className="min-w-0 flex-1">{t.task}</span>
                       {t.owner && <span className="shrink-0 text-faint">{t.owner}</span>}
-                      <span className="shrink-0 text-2xs text-faint">{t.stage}</span>
+                      <span className="shrink-0 text-2xs text-muted">{ja(t.stage)}</span>
                     </div>
                   </li>
                 ))
@@ -544,7 +571,7 @@ export function DataPage() {
         {tab === "reminders" && (
           <ul>
             {(reminders?.items ?? []).filter((r) => r.status === "active").length === 0 ? (
-              <Empty>動いているリマインダーはありません</Empty>
+              <ListState q={remindersQ} empty="動いているリマインダーはありません。Discordで「明日10時に〜」と頼むと登録されます" />
             ) : (
               reminders?.items
                 .filter((r) => r.status === "active")
@@ -569,9 +596,9 @@ export function DataPage() {
         {tab === "capabilities" && (
           <ul>
             {(caps ?? []).length === 0 ? (
-              <Empty>能力リクエストはありません</Empty>
+              <ListState q={capsQ} empty="能力リクエストはありません。できないことを頼まれたとき、エージェント自身が起票します" />
             ) : (
-              caps?.map((r) => (
+              caps?.slice(0, LIST_MAX).map((r) => (
                 <li
                   key={r.id}
                   className="flex items-baseline gap-2.5 border-t border-hairline px-4 py-2.5 text-xs first:border-t-0"
@@ -589,13 +616,14 @@ export function DataPage() {
                 </li>
               ))
             )}
+            <MoreRow total={caps?.length ?? 0} shown={LIST_MAX} />
           </ul>
         )}
 
         {tab === "personas" && (
           <ul>
             {(c?.webhookAgents ?? []).length === 0 ? (
-              <Empty>Webhook人格はいません</Empty>
+              <ListState q={summaryQ} empty="Webhook人格はいません。AI人事の採用か manage_agents で追加します" />
             ) : (
               c?.webhookAgents.map((a) => (
                 <li
@@ -618,7 +646,7 @@ export function DataPage() {
         {tab === "sheets" && (
           <ul>
             {(c?.sheetRegistry ?? []).length === 0 ? (
-              <Empty>登録されたシートはありません</Empty>
+              <ListState q={summaryQ} empty="登録されたシートはありません（シート連携を入れたときに使います）" />
             ) : (
               c?.sheetRegistry.map((s) => (
                 <li

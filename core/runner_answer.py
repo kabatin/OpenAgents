@@ -202,10 +202,12 @@ def answer_question(db_path, guild_id, question, model=search.DEFAULT_MODEL,
     else:
         from core import glossary
         syn = glossary.synonyms_note(glossary.load_pairs(db_path))
+        # 下ごしらえ（検索語出し）は軽いモデル・浅い思考で十分
         keywords = search.extract_keywords(
-            question, model=model, history=convo,
+            question, model=search.KEYWORDS_MODEL, history=convo,
             claude_fn=lambda p: invoke_claude.invoke(
-                p, model=model, timeout=120, purpose="keywords").text,
+                p, model=search.KEYWORDS_MODEL, timeout=120,
+                purpose="keywords", effort="low").text,
             syn_note=syn)
         rows = (search.search_messages(db_path, keywords, limit=search_limit,
                                        exclude_channel_id=exclude_channel_id,

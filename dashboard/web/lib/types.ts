@@ -89,6 +89,7 @@ export type Overview = {
   agents: AgentSummary[];
   services: ServiceStatus[];
   pending: PendingView[];
+  guildId: string | null;
 };
 
 export type AgentDetail = {
@@ -98,6 +99,8 @@ export type AgentDetail = {
   summary: AgentSummary | null;
   groups: ResolvedGroup[];
   secrets: Record<string, string>;
+  /** Discordの生ID → 表示名（`#チャンネル名` / ユーザー名）。引けたものだけ。 */
+  idNames: Record<string, string>;
 };
 
 export type SettingsView = {
@@ -107,6 +110,7 @@ export type SettingsView = {
   meetingBot: ResolvedGroup[];
   meetingUserMapping: Record<string, string>;
   secrets: Record<string, string>;
+  idNames: Record<string, string>;
   monitorTargets: {
     name: string;
     launchdLabel: string;

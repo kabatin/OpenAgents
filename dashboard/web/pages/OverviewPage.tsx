@@ -1,12 +1,13 @@
 import { Link } from "react-router-dom";
 
 import { Avatar } from "../components/Avatar.tsx";
-import { Card, Chip, Empty, Metric, StatusDot } from "../components/ui.tsx";
+import { Card, Chip, Empty, ErrorNote, Loading, Metric, StatusDot } from "../components/ui.tsx";
 import { useFetch } from "../lib/api.ts";
 import {
   actionLabel,
   agentLabel,
   bytes,
+  discordUrl,
   jstStamp,
   kindLabel,
   relTime,
@@ -112,14 +113,25 @@ export function OverviewPage({
   agents,
   services,
   activity,
+  guildId,
+  loading,
+  error,
+  onRetry,
+  connected,
 }: {
   agents: AgentSummary[];
   services: ServiceStatus[];
   activity: ActivityRow[];
+  guildId: string | null;
+  loading: boolean;
+  error: string | null;
+  onRetry: () => void;
+  connected: boolean;
 }) {
   // 表示名は設定から来る（固定の対応表を持たない）
   const agentNames = Object.fromEntries(agents.map((a) => [a.id, a.name]));
-  const { data: initialActivity } = useFetch<ActivityRow[]>("/activity?limit=40");
+  const activityQ = useFetch<ActivityRow[]>("/activity?limit=40");
+  const initialActivity = activityQ.data;
   const rows = [...activity, ...(initialActivity ?? [])]
     .filter((r, i, arr) => arr.findIndex((x) => x.id === r.id) === i)
     .sort((a, b) => b.id - a.id)
@@ -135,8 +147,23 @@ export function OverviewPage({
     (s) => (s.logSizeBytes ?? 0) > 40 * 1024 * 1024,
   );
 
+  if (error !== null) {
+    return (
+      <div className="space-y-4">
+        <ErrorNote message={`全体の状況を取得できませんでした: ${error}`} onRetry={onRetry} />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
+      {/* SSEが切れている間は「今の状態」を保証できない。黙って古い値を出さない */}
+      {!connected && !loading && (
+        <div className="rounded-lg border border-warn/25 bg-warn-soft px-4 py-2.5 text-xs text-warn">
+          サーバーとの接続が切れています。下の状態は最後に受け取った時点のもので、今の状態とは違う可能性があります。
+        </div>
+      )}
+
       {problems.length > 0 && (
         <div className="rounded-lg border border-danger/25 bg-danger-soft px-4 py-3">
           <div className="text-xs font-semibold text-danger">要対応</div>
@@ -157,11 +184,17 @@ export function OverviewPage({
             会話エージェントは全員1つのプロセスで動いています（再起動は全員同時）
           </span>
         </div>
-        <div className="grid gap-3 md:grid-cols-2">
-          {agents.map((a) => (
-            <AgentCard key={a.id} agent={a} service={serviceFor(a)} />
-          ))}
-        </div>
+        {loading && agents.length === 0 ? (
+          <div className="card"><Loading rows={4} /></div>
+        ) : agents.length === 0 ? (
+          <Card><Empty>エージェントが登録されていません</Empty></Card>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2">
+            {agents.map((a) => (
+              <AgentCard key={a.id} agent={a} service={serviceFor(a)} />
+            ))}
+          </div>
+        )}
       </section>
 
       {/* minmax(0,…) が無いと fr トラックの min-width:auto で長いログ行が列を押し広げる */}
@@ -203,6 +236,21 @@ export function OverviewPage({
                       <span className="text-faint"> — {r.detail}</span>
                     )}
                   </span>
+                  {(() => {
+                    const url = discordUrl(guildId, r.channelId, r.postedMessageId);
+                    if (url === null) return null;
+                    return (
+                      <a
+                        href={url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="focus-ring shrink-0 rounded px-1 text-2xs text-muted underline decoration-dotted hover:text-accent-deep"
+                        title="Discordで該当の投稿を開く"
+                      >
+                        開く
+                      </a>
+                    );
+                  })()}
                 </li>
               ))}
             </ul>
@@ -211,6 +259,8 @@ export function OverviewPage({
 
         <div className="space-y-6">
           <Card title="プロセス">
+            {loading && services.length === 0 && <Loading rows={3} />}
+            {!loading && services.length === 0 && <Empty>プロセスの情報を取得できていません</Empty>}
             <ul>
               {services.map((s) => (
                 <li

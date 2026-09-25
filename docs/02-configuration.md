@@ -42,9 +42,14 @@
 "llm": {
   "provider": "claude",         // claude / codex / 自分で定義した名前
   "model": "claude-sonnet-5",   // 空ならツールの既定
+  "effort": "xhigh",            // 考える深さ（Claude Code のみ）。"" で指定しない
   "timeout_sec": 180
 }
 ```
+
+`effort` は Claude Code に渡す思考の深さ（`--effort`：low / medium / high /
+xhigh / max）。深いほど丁寧ですが遅く・高くなります。検索語の抽出のような
+軽い下ごしらえは、この設定に関わらず軽いモデル（Haiku）・浅い思考で回します。
 
 詳しくは [04-llm-providers.md](04-llm-providers.md)。
 

@@ -29,6 +29,11 @@ from core import config as app_config
 from core import llm
 
 DEFAULT_MODEL = llm.BUILTIN_PROVIDERS["claude"]["default_model"]
+# 思考の深さ（--effort）。モデルによって CLI 側の既定が浅い（Opus 5.5 は
+# medium）ので、明示しないと浅いまま回る。設定 llm.effort で変えられる。
+# 解釈しないモデル（Haiku 4.5 など）には CLI が黙って無視するので分岐は不要。
+DEFAULT_EFFORT = "xhigh"
+EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
 # Web検索・URL取得を伴う回答は5分を超えることがあるため10分
 DEFAULT_TIMEOUT_SEC = llm.LONG_TIMEOUT_SEC
 
@@ -170,16 +175,20 @@ def extract_meta(events):
 
 
 def build_argv(claude_bin, *, model, system=None, allowed_tools=(),
-               allow=(), mcp_config=None, resume=None, max_budget_usd=None):
+               allow=(), mcp_config=None, resume=None, max_budget_usd=None,
+               effort=DEFAULT_EFFORT):
     """claude CLI の引数列を組み立てる（純粋関数・テスト対象）。
     resume: 継続する会話セッションid（cwdスコープ＝同じcwdでの起動が必要）。
     mcp_config: MCPサーバ設定（JSON文字列 or パス）。指定時は --strict-mcp-config を
         付けてユーザー設定のMCPを混ぜない。組込ツールが空でも settings の allow
         （mcp__サーバ__ツール）を出さないと MCP ツールが全部 denied になる。
-    max_budget_usd: 1起動の上限額（ツールループの安全弁）。"""
+    max_budget_usd: 1起動の上限額（ツールループの安全弁）。
+    effort: 思考の深さ（low/medium/high/xhigh/max）。空なら付けない（CLIの既定）。"""
     argv = [claude_bin, "-p", "--model", model,
             "--output-format", "stream-json", "--verbose",
             "--setting-sources", SETTING_SOURCES]
+    if effort:
+        argv += ["--effort", effort]
     if EXCLUDE_DYNAMIC_SECTIONS:
         argv.append("--exclude-dynamic-system-prompt-sections")
     if resume:
@@ -304,6 +313,17 @@ def _config():
     return _CACHED_CONFIG
 
 
+def configured_effort(cfg=None):
+    """設定 llm.effort を解釈する（純粋関数・テスト対象）。
+    未設定・不正値は DEFAULT_EFFORT、空文字は「付けない」（古い CLI で
+    --effort が通らないときの逃げ道）。"""
+    config = cfg if cfg is not None else _config()
+    raw = (config.get("llm") or {}).get("effort", DEFAULT_EFFORT)
+    if raw == "":
+        return ""
+    return raw if raw in EFFORT_LEVELS else DEFAULT_EFFORT
+
+
 def _record(base, meta=None, *, ok, error=None, started):
     """1起動1回の計測記録。RECORDER 未設定なら何もしない。失敗は本流に影響させない。"""
     if RECORDER is None:
@@ -324,7 +344,8 @@ def _record(base, meta=None, *, ok, error=None, started):
 
 def invoke(prompt, *, model=DEFAULT_MODEL, system=None, allowed_tools=(),
            allow=(), timeout=DEFAULT_TIMEOUT_SEC, cwd=None, mcp_config=None,
-           resume=None, purpose="other", on_event=None, max_budget_usd=None):
+           resume=None, purpose="other", on_event=None, max_budget_usd=None,
+           effort=None):
     """claude CLI を1回ヘッドレス起動して InvokeResult を返す。
 
     prompt: 本文（ARG_MAX/クォート回避のため stdin 経由で渡す）
@@ -339,6 +360,8 @@ def invoke(prompt, *, model=DEFAULT_MODEL, system=None, allowed_tools=(),
     purpose: 計測用の用途ラベル（answer / keywords / screen / decide / summary …）
     on_event: stream-json イベントごとの進捗コールバック（指定時は行読み経路）
     max_budget_usd: 1起動の上限額（--max-budget-usd）
+    effort: 思考の深さ（--effort）。None なら設定 llm.effort（既定 xhigh）。
+        検索語出しのような軽い下ごしらえでは呼び出し側が "low" に下げる。
     失敗時は RuntimeError を送出する（計測には失敗として記録される）。
     """
     unavailable = check_available()
@@ -348,7 +371,8 @@ def invoke(prompt, *, model=DEFAULT_MODEL, system=None, allowed_tools=(),
     argv = build_argv(claude_bin, model=model, system=system,
                       allowed_tools=allowed_tools, allow=allow,
                       mcp_config=mcp_config, resume=resume,
-                      max_budget_usd=max_budget_usd)
+                      max_budget_usd=max_budget_usd,
+                      effort=configured_effort() if effort is None else effort)
     base = {"purpose": purpose, "model": model}
     started = time.monotonic()
     try:

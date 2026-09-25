@@ -27,8 +27,13 @@
   .row-hover {
     @apply transition-colors duration-100 hover:bg-canvas;
   }
+  /* outline-none を常時当てると、focus-visible が効かない文脈でフォーカスが
+     完全に見えなくなる。既定の輪郭は残し、リングを出すときだけ差し替える。 */
   .focus-ring {
-    @apply outline-none ring-offset-2 ring-offset-surface focus-visible:ring-2 focus-visible:ring-accent/60;
+    @apply ring-offset-2 ring-offset-surface;
+  }
+  .focus-ring:focus-visible {
+    @apply outline-none ring-2 ring-accent/60;
   }
   .chip {
     @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-2xs font-medium;
