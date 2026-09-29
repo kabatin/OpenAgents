@@ -69,6 +69,14 @@ class DecideTest(unittest.TestCase):
     def test_denies_absolute_outside(self):
         self.assertIsNotNone(self._d("Write", "/etc/passwd"))
 
+    def test_denies_other_drive_without_raising(self):
+        # Windows で作業場所と別ドライブのパスは relpath が ValueError を出す。
+        # 例外で落ちず、作業場所の外として拒否すること（どのOSでも再現できるよう差し替える）
+        from unittest import mock
+        with mock.patch.object(dev_gate.os.path, "relpath",
+                               side_effect=ValueError("path is on mount 'D:'")):
+            self.assertIsNotNone(self._d("Write", "core/reminders.py"))
+
     # --- Bash: 秘密アクセスは拒否、通常コマンドは許可 ---
     def _bash(self, cmd):
         return dev_gate.decide("Bash", {"command": cmd}, self.cwd)

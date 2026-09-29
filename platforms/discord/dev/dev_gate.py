@@ -114,7 +114,11 @@ def decide(tool_name, tool_input, cwd, *, allowed_subdirs=ALLOWED_SUBDIRS):
             return (f"{sub}/ は開発BOT自身のコード（承認ゲート・安全弁）のため"
                     "書き込めません。改修が必要なら最終要約で申告してください")
     root = os.path.realpath(cwd)
-    rel = os.path.relpath(abspath, root)
+    try:
+        rel = os.path.relpath(abspath, root)
+    except ValueError:
+        # Windows で別ドライブのパス（D:\\ など）。作業場所の外なので拒否
+        rel = ".."
     parts = rel.replace("\\", "/").split("/")
     if rel.startswith("..") or parts[0] not in allowed_subdirs:
         return (f"{'/ '.join(allowed_subdirs)}/ 配下以外への書き込みは禁止です"
