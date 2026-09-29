@@ -118,10 +118,11 @@ export type ActivityRow = {
   agentId: string;
   kind: string;
   action: string;
-  channelId: number | null;
+  /** Discord の ID は19桁で JS の number に収まらない（丸められて別の投稿を指す）ので文字列で返す */
+  channelId: string | null;
   channelName: string | null;
   detail: string | null;
-  postedMessageId: number | null;
+  postedMessageId: string | null;
 };
 
 /**
@@ -142,10 +143,10 @@ export function recentActivity(opts: { limit?: number; sinceId?: number; include
                   p.agent_id          AS agentId,
                   p.kind              AS kind,
                   p.action            AS action,
-                  p.channel_id        AS channelId,
+                  CAST(p.channel_id AS TEXT)        AS channelId,
                   c.name              AS channelName,
                   p.detail            AS detail,
-                  p.posted_message_id AS postedMessageId
+                  CAST(p.posted_message_id AS TEXT) AS postedMessageId
              FROM proactive_log p
              LEFT JOIN channels c ON c.id = p.channel_id
             WHERE p.id > ? ${silentClause}
@@ -162,7 +163,7 @@ export type Counters = {
   capabilityRequests: { status: string; count: number }[];
   roadmap: { status: string; count: number }[];
   feedback: { agentId: string; up: number; down: number }[];
-  webhookAgents: { id: string; name: string; status: string; homeChannelId: number | null }[];
+  webhookAgents: { id: string; name: string; status: string; homeChannelId: string | null }[];
   sheetRegistry: { alias: string; title: string | null; mode: string; active: number }[];
   messages: number;
   channels: number;
@@ -211,8 +212,8 @@ export function counters(): Counters {
         )
         .all(),
       webhookAgents: conn
-        .prepare<[], { id: string; name: string; status: string; homeChannelId: number | null }>(
-          `SELECT id, name, status, home_channel_id AS homeChannelId
+        .prepare<[], { id: string; name: string; status: string; homeChannelId: string | null }>(
+          `SELECT id, name, status, CAST(home_channel_id AS TEXT) AS homeChannelId
              FROM agents ORDER BY status, id`,
         )
         .all(),
@@ -389,8 +390,9 @@ export type ObservationRow = {
   trigger: string | null;
   detail: string | null;
   createdAt: string | null;
-  channelId: number | null;
-  triggerMessageId: number | null;
+  /** Discord の ID は19桁で JS の number に収まらない（丸められて別の投稿を指す）ので文字列で返す */
+  channelId: string | null;
+  triggerMessageId: string | null;
 };
 
 /**
@@ -409,8 +411,8 @@ export function observationShadow(limit = 100): ObservationRow[] {
                   u.display_name AS author,
                   SUBSTR(m.content, 1, 160) AS trigger,
                   p.detail AS detail, p.created_at AS createdAt,
-                  p.channel_id AS channelId,
-                  p.trigger_message_id AS triggerMessageId
+                  CAST(p.channel_id AS TEXT) AS channelId,
+                  CAST(p.trigger_message_id AS TEXT) AS triggerMessageId
              FROM proactive_log p
              LEFT JOIN channels c ON c.id = p.channel_id
              LEFT JOIN messages m ON m.id = p.trigger_message_id
@@ -650,7 +652,8 @@ export type TaskRow = {
   due: string | null;
   status: string | null;
   stage: string | null;
-  channelId: number | null;
+  /** Discord の ID は19桁で JS の number に収まらない（丸められて別の投稿を指す）ので文字列で返す */
+  channelId: string | null;
 };
 
 /** 議事録TODO・宿題を1つの形で（リマインダーは reminders.json 側で合流）。 */
@@ -660,7 +663,7 @@ export function tasksUnified(): TaskRow[] {
       conn
         .prepare<[], TaskRow>(
           `SELECT 'A' || id AS key, 'action' AS kind, id, task, owners AS owner,
-                  due_date AS due, status, nudge_stage AS stage, channel_id AS channelId
+                  due_date AS due, status, nudge_stage AS stage, CAST(channel_id AS TEXT) AS channelId
              FROM action_items WHERE status IN ('open','stale')
            UNION ALL
            SELECT 'H' || id, 'homework', id, task, owner, follow_up_date, status, status,

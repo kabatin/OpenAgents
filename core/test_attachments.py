@@ -155,3 +155,21 @@ class DownloadTest(unittest.TestCase):
 
     def test_cleanup_none_is_noop(self):
         attachments.cleanup(None)  # 例外にならないこと
+
+
+class ImageSizeNoteTest(unittest.TestCase):
+    """生成画像の実寸を添える。キャプションは生成前に書かれるので、
+    「4Kで仕上げた」と書いても実寸が違うことがある。"""
+
+    def test_reports_actual_pixels(self):
+        import tempfile
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "x.png")
+            Image.new("RGB", (1024, 1536)).save(p)
+            self.assertEqual(attachments.image_size_note(p),
+                             "-# 仕上がり: 1024×1536px")
+
+    def test_unreadable_file_gives_nothing(self):
+        # 寸法が読めないときは黙る（嘘の数字を出さない）
+        self.assertIsNone(attachments.image_size_note("/nonexistent/x.png"))

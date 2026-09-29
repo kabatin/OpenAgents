@@ -55,11 +55,25 @@ def collect(db_path, now=None):
                WHERE updated_at >= ? ORDER BY id""", (since,)).fetchall()
         counts = db.roadmap_counts(conn)
         watching = len(db.watching_canaries(conn))
+        waiting = _waiting(conn)
     deployed = [j[0] for j in jobs if j[1] == "deployed"]
     rejected = [j[0] for j in jobs if j[1] in ("rejected", "superseded")]
     failed = [j[0] for j in jobs if j[1] in ("failed", "interrupted")]
     return {"deployed": deployed, "rejected": rejected, "failed": failed,
-            "roadmap": counts, "watching": watching}
+            "roadmap": counts, "watching": watching, "waiting": waiting}
+
+
+def _waiting(conn):
+    """👍待ちの一覧（放置で後ろが止まるものを週1で見せる）。"""
+    out = []
+    card = db.roadmap_proposed(conn)
+    if card is not None:
+        out.append(f"ロードマップ#{card['id']} {card['title']}")
+    for cap_id, _ in db.cap_proposals_waiting(conn):
+        out.append(f"起票#{cap_id} の着手")
+    for job in db.list_dev_jobs_by_status(conn, "built"):
+        out.append(f"起票#{job['cap_req_id']} の反映")
+    return out
 
 
 def _ids(nums):
@@ -86,6 +100,12 @@ def build_report(data):
     if total:
         lines.append(f"- 進化ロードマップ: 完了{done}/{total}件"
                      f"（未提案 残り{rm.get('pending', 0)}件）")
+    waiting = data.get("waiting") or []
+    if waiting:
+        lines.append(f"- 👍待ち: {len(waiting)}件（"
+                     + "、".join(waiting[:MAX_LISTED])
+                     + ("…" if len(waiting) > MAX_LISTED else "")
+                     + f"）。{data.get('expire_days', 7)}日たつと保留にして次へ進みます")
     if data.get("watching"):
         lines.append(f"- デプロイ後の見張り中: {data['watching']}件")
     lines.append("-# 新しい機能が欲しくなったら、いつでも起票してくださいね〜✨"

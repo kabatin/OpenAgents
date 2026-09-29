@@ -440,3 +440,35 @@ class ChannelCandidatesTest(unittest.TestCase):
                     [(702, "ch702")])
         finally:
             os.unlink(path)
+
+
+class DeadlineFlagsTest(unittest.TestCase):
+    """議事録TODOの投稿スイッチ。既定は従来どおり全部出す。"""
+
+    def test_defaults_keep_current_behavior(self):
+        self.assertEqual(action_items.deadline_flags({}),
+                         {"nudge": True, "announce": True, "stale_notice": True})
+
+    def test_each_switch_is_independent(self):
+        f = action_items.deadline_flags(
+            {"deadline": {"nudge": False, "stale_notice": False}})
+        self.assertEqual(f, {"nudge": False, "announce": True,
+                             "stale_notice": False})
+
+    def test_non_bool_values_fall_back_to_default(self):
+        # 設定の誤記で黙って止まらないようにする（"false" 文字列などは既定値）
+        f = action_items.deadline_flags({"deadline": {"nudge": "false"}})
+        self.assertTrue(f["nudge"])
+
+
+class SilentNudgeTest(ActionItemsTestBase):
+    """声かけを投稿しなくても、手放しの判定が止まらないこと。"""
+
+    def test_silent_overdue_record_still_leads_to_stale(self):
+        iid = self._seed_item(due="2026-07-01")
+        # 投稿せずに記録だけする（message_id=None）
+        action_items.record_nudge(self.db_path, iid, "overdue", None,
+                                  now=datetime(2026, 7, 2, 9, 0))
+        stale = action_items.items_needing_stale(
+            self.db_path, "agent1", datetime(2026, 7, 10, 9, 0))
+        self.assertEqual([i["id"] for i in stale], [iid])

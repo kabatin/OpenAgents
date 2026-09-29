@@ -41,5 +41,38 @@ class MergeBlockersTest(unittest.TestCase):
         self.assertEqual(deploy.merge_blockers([], ["y.py"]), [])
 
 
+
+class ProtectedChangesTest(unittest.TestCase):
+    """反映直前の最終防衛線。書き込み手段（Write/Edit/Bash）に関係なく、
+    開発BOT自身のコードに触れる差分は反映させない。"""
+
+    def test_own_code_is_caught(self):
+        got = deploy.protected_changes([
+            "platforms/discord/dev/bot.py",
+            "platforms/discord/dev/dev_pipeline.py",
+            "platforms/discord/bot.py",
+        ])
+        self.assertEqual(got, ["platforms/discord/dev/bot.py",
+                               "platforms/discord/dev/dev_pipeline.py"])
+
+    def test_new_file_in_own_dir_is_caught(self):
+        self.assertEqual(
+            deploy.protected_changes(["platforms/discord/dev/new_helper.py"]),
+            ["platforms/discord/dev/new_helper.py"])
+
+    def test_windows_separators_are_caught(self):
+        self.assertEqual(
+            deploy.protected_changes(["platforms\\discord\\dev\\bot.py"]),
+            ["platforms\\discord\\dev\\bot.py"])
+
+    def test_ordinary_changes_pass(self):
+        self.assertEqual(deploy.protected_changes([
+            "core/reminders.py", "dashboard/web/App.tsx"]), [])
+
+    def test_lookalike_dirs_pass(self):
+        # "dev" を含むだけの別ディレクトリは対象外
+        self.assertEqual(deploy.protected_changes(
+            ["platforms/discord/dev-notes/x.md"]), [])
+
 if __name__ == "__main__":
     unittest.main()

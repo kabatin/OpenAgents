@@ -16,6 +16,7 @@ from core import golden
 from core import ripple
 from core import study_group
 from core import proactive
+from core import reaction_intent
 from core import rule_distill
 from core import selfreview_distill
 from core import reminders
@@ -308,6 +309,10 @@ class ReactionHandlersMixin:
                                  if uid == author_id), None)
                 if agent_id is None:
                     return  # エージェントの投稿以外は対象外
+                msg = db.get_message(conn, payload.message_id)
+                if reaction_intent.is_approval_prompt(
+                        (msg or {}).get("content")):
+                    return  # 承認・見送りの操作は好き嫌いの評価に数えない
                 if added:
                     db.add_feedback(
                         conn, message_id=payload.message_id, agent_id=agent_id,

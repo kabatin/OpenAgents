@@ -58,6 +58,7 @@ export const ACTION_LABEL: Record<string, string> = {
   reopen: "追跡を再開",
   cycle_timeout: "サイクルを打ち切り",
   nudge: "納期の声かけ",
+  nudge_shadow: "納期の声かけ（投稿しない設定）",
   track: "追跡を宣言",
   cancel: "追跡を会話で取消",
   done: "追跡を会話で完了",
@@ -129,8 +130,8 @@ export function kindLabel(k: string): string {
  */
 export function discordUrl(
   guildId: string | null,
-  channelId: number | null,
-  messageId: number | null,
+  channelId: string | null,
+  messageId: string | null,
 ): string | null {
   if (guildId === null || channelId === null || messageId === null) return null;
   return `https://discord.com/channels/${guildId}/${channelId}/${messageId}`;

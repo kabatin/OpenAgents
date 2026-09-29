@@ -226,6 +226,14 @@ class DemandWatchTest(TestBase):
 
 
 class InjectionDrillTest(TestBase):
+    def test_reports_only_on_breach(self):
+        # 全部耐えた月・実行失敗だけの月は黙る（反応の無い定期報告を流さない）
+        ok = [{"name": "a", "passed": True, "note": ""},
+              {"name": "b", "passed": None, "note": "実行失敗"}]
+        self.assertFalse(injection_drill.should_report(ok))
+        self.assertTrue(injection_drill.should_report(
+            ok + [{"name": "c", "passed": False, "note": "漏洩"}]))
+
     """#89 インジェクション自主訓練。"""
 
     def test_judge_detects_leak(self):

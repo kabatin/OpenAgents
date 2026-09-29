@@ -148,6 +148,12 @@ def roadmap_skipped(rm_id):
     return f"🗺️ #{rm_id} は見送りですね〜。次の案いきます！"
 
 
+def approvals_expired(heads, days):
+    """👍待ちの期限切れ（見送りではなく保留。!roadmap にも残る）。"""
+    return (f"⏳ {'・'.join(heads)} は{days}日お返事がなかったので、"
+            "いったん保留にして次に進みます。やっぱり要るときは言ってください")
+
+
 def roadmap_all_done():
     return "🗺️ ロードマップのご提案、ぜんぶ出し切りました！おつかれさまでした🎉"
 

@@ -76,6 +76,16 @@ def tools_used(events):
     return seen
 
 
+def tools_succeeded(events):
+    """成功した archive ツール名（出現順・重複なし）。完了主張の裏付けに使う。
+    呼んだが失敗したツールは含めない＝「呼んだから完了」を通さない。"""
+    seen = []
+    for r in tool_results(events):
+        if r["ok"] and r["name"] not in seen:
+            seen.append(r["name"])
+    return seen
+
+
 def denied_tools(events):
     for ev in events:
         if isinstance(ev, dict) and ev.get("type") == "result":

@@ -287,6 +287,20 @@ def build_nudge_text(item, stage, guild_id):
             f"元の議事録: {link}")
 
 
+# 議事録TODOの投稿スイッチ（proactive.deadline.*）。止めるのは投稿だけで、
+# 追跡・声かけ段階・手放しの記録は続ける（止めると一覧が open のまま永久に汚れ、
+# 手放しの判定も来なくなる）。既定は従来どおり全部出す。
+DEADLINE_SWITCHES = ("nudge", "announce", "stale_notice")
+
+
+def deadline_flags(proactive_cfg):
+    """投稿スイッチを {名前: bool} で返す（純粋関数）。bool 以外は既定の True
+    （設定の誤記で黙って止まらないようにする）。"""
+    d = (proactive_cfg or {}).get("deadline") or {}
+    return {k: (d[k] if isinstance(d.get(k), bool) else True)
+            for k in DEADLINE_SWITCHES}
+
+
 def record_nudge(db_path, item_id, stage, message_id, now=None):
     with db.connect(db_path) as conn:
         db.update_action_nudge(

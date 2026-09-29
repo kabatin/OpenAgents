@@ -234,5 +234,60 @@ class FormatTest(RoadmapTestBase):
         self.assertIn("このメッセージに👍/👎", text)
 
 
+
+class ExpireTest(RoadmapTestBase):
+    """👍待ちの期限: 放置された提案が後ろを全部止めない。"""
+    import datetime as _dt
+    NOW = _dt.datetime(2026, 9, 28, 12, 0)
+
+    def _propose_card(self, at):
+        self._seed([{"id": 1}, {"id": 2}])
+        with db.connect(self.db_path) as conn:
+            db.roadmap_mark_proposed(conn, 1, 111, at)
+
+    def test_old_card_is_held_and_next_can_be_proposed(self):
+        self._propose_card("2026-09-20T12:00:00")          # 8日前
+        self.assertIsNone(roadmap.pick_next(self.db_path))  # 詰まっている
+        out = roadmap.expire_stale(self.db_path, days=7, now=self.NOW)
+        self.assertEqual([i["id"] for i in out["cards"]], [1])
+        self.assertEqual(roadmap.pick_next(self.db_path)["id"], 2)
+        with db.connect(self.db_path) as conn:
+            self.assertEqual(db.roadmap_counts(conn).get("held"), 1)
+            self.assertIsNone(db.roadmap_by_message(conn, 111))  # 古い👍は効かない
+
+    def test_recent_card_is_kept(self):
+        self._propose_card("2026-09-25T12:00:00")          # 3日前
+        out = roadmap.expire_stale(self.db_path, days=7, now=self.NOW)
+        self.assertEqual(out["cards"], [])
+        self.assertIsNone(roadmap.pick_next(self.db_path))
+
+    def test_old_cap_proposal_expires_but_cap_stays_open(self):
+        with db.connect(self.db_path) as conn:
+            db.set_proactive_state(conn, roadmap.CAPWATCH_STATE_KEY,
+                                   last_checked_message_id=0, last_run_at="t")
+            cap = db.add_capability_request(
+                conn, agent_id="agent1", description="x", context="c",
+                requested_by="u", source_msg_id=1, created_at="t")
+            nxt = db.add_capability_request(
+                conn, agent_id="agent1", description="y", context="c",
+                requested_by="u", source_msg_id=2, created_at="t")
+            db.add_cap_proposal(conn, cap_req_id=cap, message_id=222,
+                                created_at="2026-09-01T00:00:00")
+        self.assertIsNone(roadmap.watch_next_cap(self.db_path))
+        out = roadmap.expire_stale(self.db_path, days=7, now=self.NOW)
+        self.assertEqual(out["caps"], [cap])
+        self.assertEqual(roadmap.watch_next_cap(self.db_path)["id"], nxt)
+        self.assertIsNone(roadmap.decide_cap(self.db_path, 222, True))
+        with db.connect(self.db_path) as conn:
+            status = conn.execute(
+                "SELECT status FROM capability_requests WHERE id=?",
+                (cap,)).fetchone()[0]
+        self.assertEqual(status, "open")   # 見送りではない（保留）
+
+    def test_summary_shows_held(self):
+        self._propose_card("2026-09-01T00:00:00")
+        roadmap.expire_stale(self.db_path, days=7, now=self.NOW)
+        self.assertIn("保留 1", roadmap.progress_summary(self.db_path))
+
 if __name__ == "__main__":
     unittest.main()

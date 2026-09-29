@@ -10,7 +10,7 @@ type Summary = {
     capabilityRequests: { status: string; count: number }[];
     roadmap: { status: string; count: number }[];
     feedback: { agentId: string; up: number; down: number }[];
-    webhookAgents: { id: string; name: string; status: string; homeChannelId: number | null }[];
+    webhookAgents: { id: string; name: string; status: string; homeChannelId: string | null }[];
     sheetRegistry: { alias: string; title: string | null; mode: string; active: number }[];
     messages: number;
     channels: number;
@@ -74,8 +74,8 @@ type ShadowRow = {
   trigger: string | null;
   detail: string | null;
   createdAt: string | null;
-  channelId: number | null;
-  triggerMessageId: number | null;
+  channelId: string | null;
+  triggerMessageId: string | null;
 };
 
 type AdviceRow = {

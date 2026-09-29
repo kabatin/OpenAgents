@@ -810,6 +810,12 @@ def _migrate(conn):
         conn.execute("ALTER TABLE golden_set ADD COLUMN kind TEXT DEFAULT 'auto'")
         conn.execute("ALTER TABLE golden_set ADD COLUMN source_link TEXT")
         conn.execute("ALTER TABLE golden_set ADD COLUMN note TEXT")
+    jcols = [r[1] for r in conn.execute("PRAGMA table_info(dev_jobs)")]
+    if jcols and "reason_ask_message_id" not in jcols:
+        # 👎後の「理由聞き」の宛先。メモリに持つと再起動で返信が迷子になり、
+        # 却下理由が教訓帳に残らなかった
+        conn.execute(
+            "ALTER TABLE dev_jobs ADD COLUMN reason_ask_message_id INTEGER")
     if lcols and "streak" not in lcols:
         # 助言が何回連続で蒸留されたか（定着した癖の検出＝恒久ルールへの卒業）
         conn.execute(
@@ -1222,6 +1228,24 @@ def supersede_built_jobs(conn, cap_req_id, *, updated_at):
     conn.execute(
         "UPDATE dev_jobs SET status='superseded', updated_at=? "
         "WHERE cap_req_id=? AND status='built'", (updated_at, cap_req_id))
+
+
+def set_dev_job_reason_ask(conn, job_id, message_id):
+    """却下理由を聞いたメッセージを記録（返信を教訓に結びつける宛先）。"""
+    conn.execute("UPDATE dev_jobs SET reason_ask_message_id=? WHERE id=?",
+                 (message_id, job_id))
+
+
+def clear_dev_job_reason_ask(conn, job_id):
+    conn.execute("UPDATE dev_jobs SET reason_ask_message_id=NULL WHERE id=?",
+                 (job_id,))
+
+
+def dev_job_by_reason_ask(conn, message_id):
+    """理由聞きメッセージへの返信から対象ジョブを引く（無ければ None）。"""
+    return _dev_job_row(conn.execute(
+        f"SELECT {','.join(_DEV_JOB_COLS)} FROM dev_jobs "
+        "WHERE reason_ask_message_id=?", (message_id,)).fetchone())
 
 
 def add_dev_lesson(conn, *, cap_req_id, job_id, kind, text, created_at):
@@ -2044,6 +2068,23 @@ def roadmap_mark_proposed(conn, item_id, message_id, at):
     return cur.rowcount == 1
 
 
+def roadmap_hold_stale(conn, before, at):
+    """提案から before より前のまま判断が無いカードを held（保留）にする。
+    保留にした項目を返す（1枚ずつ運用なので、放置1枚で後ろが全部止まるのを防ぐ）。"""
+    rows = conn.execute(
+        f"""SELECT {','.join(_ROADMAP_COLS)} FROM roadmap_items
+            WHERE status='proposed' AND decided_at < ?""", (before,)).fetchall()
+    held = []
+    for r in rows:
+        item = _roadmap_row(r)
+        cur = conn.execute(
+            """UPDATE roadmap_items SET status='held', decided_at=?
+               WHERE id=? AND status='proposed'""", (at, item["id"]))
+        if cur.rowcount == 1:
+            held.append(item)
+    return held
+
+
 def roadmap_by_message(conn, message_id):
     """カードメッセージidから提案中の項目を引く（👍👎の対象解決）。"""
     return _roadmap_row(conn.execute(
@@ -2165,6 +2206,26 @@ def cap_proposal_pending(conn):
     return conn.execute(
         "SELECT COUNT(*) FROM cap_proposals WHERE status='proposed'"
     ).fetchone()[0] > 0
+
+
+def expire_cap_proposals(conn, before, at):
+    """before より前に出したまま判断の無い起票提案を expired にする。
+    起票自体は open のまま（見送りではなく保留）。expired にした起票idを返す。"""
+    ids = [r[0] for r in conn.execute(
+        """SELECT cap_req_id FROM cap_proposals
+           WHERE status='proposed' AND created_at < ?""", (before,))]
+    for cap_id in ids:
+        conn.execute(
+            """UPDATE cap_proposals SET status='expired', decided_at=?
+               WHERE cap_req_id=? AND status='proposed'""", (at, cap_id))
+    return ids
+
+
+def cap_proposals_waiting(conn):
+    """👍👎待ちの起票提案 [(cap_req_id, created_at)]。"""
+    return conn.execute(
+        """SELECT cap_req_id, created_at FROM cap_proposals
+           WHERE status='proposed' ORDER BY created_at""").fetchall()
 
 
 def cap_proposal_by_message(conn, message_id):

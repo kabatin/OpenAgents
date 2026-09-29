@@ -110,7 +110,6 @@ class DevBot(discord.Client):
         self._monitor_task = None
         self._running_jobs = set()      # 実装中の起票id（二重起動防止）
         self._bg = set()                # 実行中タスクの強参照（GC回収防止）
-        self._lesson_prompts = {}       # 理由聞きmsg_id -> (cap_req_id, job_id)
         self._active_job_ids = {}       # 実装中 req_id -> job_id（例外時のfailed化用）
         self._summary_msg_ids = []      # 直近の!roadmap要約msg_id（要約への👍👎対応）
 
@@ -180,6 +179,10 @@ class DevBot(discord.Client):
                     await self._canary_check()
                 except Exception as e:
                     print(f"canary check error: {e}")
+                try:
+                    await self._expire_stale_approvals()
+                except Exception as e:
+                    print(f"approval expiry error: {e}")
                 try:
                     await self._maybe_propose_cap()
                 except Exception as e:
@@ -285,11 +288,12 @@ class DevBot(discord.Client):
         content = (message.content or "").strip()
         # 👎後の「理由聞き」への返信は教訓として保存（他のハンドラより先に確定させる）
         ref_id = message.reference.message_id if message.reference else None
-        if ref_id in self._lesson_prompts:
+        asked = (await asyncio.to_thread(self._job_by_reason_ask, ref_id)
+                 if ref_id else None)
+        if asked is not None:
             if str(message.author.id) in self.admins and content:
-                req_id, job_id = self._lesson_prompts.pop(ref_id)
-                await asyncio.to_thread(self._add_lesson, req_id, job_id,
-                                        "rejected", content[:500])
+                await asyncio.to_thread(self._add_lesson, asked["cap_req_id"],
+                                        asked["id"], "rejected", content[:500])
                 await message.reply(persona.lesson_saved(),
                                     mention_author=False)
             return
@@ -512,6 +516,18 @@ class DevBot(discord.Client):
         with db.connect(DB_PATH) as conn:
             db.add_dev_lesson(conn, cap_req_id=cap_req_id, job_id=job_id,
                               kind=kind, text=text, created_at=_now_iso())
+            if kind == "rejected":
+                db.clear_dev_job_reason_ask(conn, job_id)   # 1回答えたら閉じる
+
+    @staticmethod
+    def _set_reason_ask(job_id, message_id):
+        with db.connect(DB_PATH) as conn:
+            db.set_dev_job_reason_ask(conn, job_id, message_id)
+
+    @staticmethod
+    def _job_by_reason_ask(message_id):
+        with db.connect(DB_PATH) as conn:
+            return db.dev_job_by_reason_ask(conn, message_id)
 
     async def _execute_pipeline(self, req_id, cap_req, prog, *, fresh=False):
         progress = dev_pipeline.ProgressBuffer()
@@ -715,7 +731,8 @@ class DevBot(discord.Client):
                 weekday=int(cfg.get("weekday", dev_report.WEEKDAY_DEFAULT)),
                 hour=int(cfg.get("hour", dev_report.HOUR_DEFAULT))):
             return
-        data = await asyncio.to_thread(dev_report.collect, DB_PATH)
+        data = {**await asyncio.to_thread(dev_report.collect, DB_PATH),
+                "expire_days": self._expire_days()}
         channel_id = int(cfg.get("channel_id", self.dev_channel_id))
         channel = self.get_channel(channel_id)
         if channel is None:
@@ -724,6 +741,22 @@ class DevBot(discord.Client):
         await channel.send(dev_report.build_report(data))
         await asyncio.to_thread(dev_report.mark_sent, DB_PATH)
         print("[dev report] weekly report sent")
+
+    # --- 👍待ちの期限: 放置された1件で後ろを止めない ----------------------
+    def _expire_days(self):
+        return int(self.dev_cfg.get("approval_expire_days",
+                                    roadmap.EXPIRE_DAYS_DEFAULT))
+
+    async def _expire_stale_approvals(self):
+        out = await asyncio.to_thread(
+            roadmap.expire_stale, DB_PATH, self._expire_days())
+        if not out["cards"] and not out["caps"]:
+            return
+        heads = ([f"ロードマップ#{i['id']}" for i in out["cards"]]
+                 + [f"起票#{c}" for c in out["caps"]])
+        await self._notify(persona.approvals_expired(heads, self._expire_days()))
+        if out["cards"]:
+            await self._maybe_post_card()
 
     # --- 起票の自動拾い上げ（RM#21）: 自己進化ループを2クリックで閉じる ------
     async def _maybe_propose_cap(self):
@@ -813,9 +846,7 @@ class DevBot(discord.Client):
             try:
                 ask = await channel.send(
                     persona.ask_reject_reason(job["cap_req_id"]))
-                self._lesson_prompts[ask.id] = (job["cap_req_id"], job["id"])
-                while len(self._lesson_prompts) > 20:   # 放置分は古い順に破棄
-                    self._lesson_prompts.pop(next(iter(self._lesson_prompts)))
+                await asyncio.to_thread(self._set_reason_ask, job["id"], ask.id)
             except discord.DiscordException as e:
                 print(f"理由聞き送信失敗: {e}")
 
@@ -856,6 +887,17 @@ class DevBot(discord.Client):
             await asyncio.to_thread(self._set_job_status, job["id"], "failed")
             await self._safe_edit(msg, persona.deploy_failed(
                 req_id, "worktreeのコミットに失敗（空反映を防ぐため中断）"))
+            return
+        # 開発BOT自身のコード（承認ゲート・安全弁）に触れる差分は反映しない。
+        # dev_gate は Write/Edit しか見ないので、Bash で書かれた変更もここで止める
+        guarded = await asyncio.to_thread(
+            lambda: deploy.protected_changes(deploy.branch_files(job["branch"])))
+        if guarded:
+            names = [os.path.basename(f) for f in guarded]
+            await asyncio.to_thread(self._set_job_status, job["id"], "failed")
+            await self._safe_edit(msg, persona.deploy_failed(
+                req_id, "開発BOT自身のコードに触れる変更は反映できません"
+                f"（{', '.join(names)}）。人間の開発セッションで扱ってください"))
             return
         # mainの未コミット手修正と重なるとgitがmergeを拒否する（起票#7で実証）。
         # 先に検出して明快に伝え、builtへ戻す＝解消後にもう一回👍で反映できる

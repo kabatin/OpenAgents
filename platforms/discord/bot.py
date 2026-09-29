@@ -683,7 +683,9 @@ class AgentClient(ToolLoopMixin, SkillHooksMixin, MarkerActionsMixin,
                     events = result.get("events") or []
                     hits = max(hits, tool_evidence.search_hits(events))
                     if tool_live:
-                        tools_used = tool_evidence.tools_used(events)
+                        # 完了主張の裏付けは「成功したツール」だけ。呼んだが失敗した
+                        # ものを数えると、失敗しても「やりました」が通ってしまう
+                        tools_used = tool_evidence.tools_succeeded(events)
                 answer = self._apply_honesty_check(message, answer, hits,
                                                    tools_used=tools_used)
             # 単語帳（RM#5）: 誤表記を決定論で常時修正（登録直後の回答から効く）
@@ -920,8 +922,13 @@ class AgentClient(ToolLoopMixin, SkillHooksMixin, MarkerActionsMixin,
                 path = await asyncio.to_thread(
                     imagegen.generate, prompt, self.image_gen,
                     ref_paths or None)
-            # 無言で画像だけ投稿しない: キャプション（デザイン担当が回答時に用意）を添える
-            return await channel.send(content=caption or "できました！",
+            # 無言で画像だけ投稿しない: キャプション（デザイン担当が回答時に用意）を添える。
+            # キャプションは生成前に書かれるので、実寸は実物から読んで必ず添える
+            text = caption or "できました！"
+            note = attachments.image_size_note(path)
+            if note:
+                text = f"{text}\n{note}"
+            return await channel.send(content=text,
                                       file=discord.File(path),
                                       allowed_mentions=ALLOWED_MENTIONS)
         except Exception as e:

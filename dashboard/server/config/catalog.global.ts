@@ -205,6 +205,16 @@ const DEV_BOT: Setting[] = [
     default: "claude-sonnet-5",
   },
   {
+    path: "dev_bot.approval_expire_days",
+    label: "👍待ちの期限",
+    desc: "開発BOTの提案（ロードマップのカード・起票の着手）にこの日数お返事がないと、保留にして次の提案に進みます。保留は見送りではないので、あとから頼めます。",
+    kind: "int",
+    default: 7,
+    min: 1,
+    max: 60,
+    unit: "日",
+  },
+  {
     path: "dev_bot.dev_channel_id",
     label: "開発用チャンネル",
     desc: "開発BOTが常駐して、監視の報告と開発指示の受付をするチャンネル。",

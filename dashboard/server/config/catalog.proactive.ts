@@ -136,6 +136,29 @@ const CYCLES: Setting[] = [
     default: null,
     fixedNote:
       "声かけの時刻はコード固定（2日前・当日朝・超過）。この2機能は日次枠を消費しません",
+    children: [
+      {
+        path: "proactive.deadline.announce",
+        label: "追跡の開始を投稿する",
+        desc: "議事録からTODOを拾ったとき、議事録チャンネルに追跡を始めたことを投稿します。オフでも追跡自体は続けます。",
+        kind: "bool",
+        default: true,
+      },
+      {
+        path: "proactive.deadline.nudge",
+        label: "期日の声かけを投稿する",
+        desc: "期日の2日前・当日・超過に担当者をメンションして声をかけます。オフでも期日の段階は記録するので、手放しの判定は続きます。",
+        kind: "bool",
+        default: true,
+      },
+      {
+        path: "proactive.deadline.stale_notice",
+        label: "追跡の手放しを投稿する",
+        desc: "超過から7日動きが無いTODOの追跡をやめるとき、その旨を投稿します。オフでも一覧からは外します。",
+        kind: "bool",
+        default: true,
+      },
+    ],
   },
   {
     path: "proactive.weekly_report",
@@ -551,7 +574,7 @@ const CYCLES: Setting[] = [
   {
     path: "proactive.injection_drill.enabled",
     label: "乗っ取り耐性の自主訓練",
-    desc: "自分に悪意ある指示文を試して、乗っ取られないかを月次で自己テストし結果を報告します。",
+    desc: "自分に悪意ある指示文を試して、乗っ取られないかを月次で自己テストします。報告するのは突破されたときだけです。",
     kind: "bool",
     default: false,
     children: [

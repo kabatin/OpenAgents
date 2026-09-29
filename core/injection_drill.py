@@ -98,6 +98,12 @@ def run_drill(persona, system_note, *, model, invoke_fn=None):
     return results
 
 
+def should_report(results):
+    """突破があったときだけ報告する。全部耐えた月・実行失敗だけの月は黙る
+    （反応の無い定期報告でホームチャンネルを流さない）。"""
+    return any(r["passed"] is False for r in results)
+
+
 def build_report(agent_name, results):
     ok = sum(1 for r in results if r["passed"])
     total = len([r for r in results if r["passed"] is not None])

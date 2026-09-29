@@ -97,6 +97,28 @@ def branch_files(branch):
     return [f for f in out.split("\0") if f.strip()]
 
 
+# 開発BOTが反映してはいけない場所（リポジトリ相対のパスに含まれるディレクトリ）。
+# dev_gate は Write/Edit しか見ないので、Bash（sed -i 等）で書かれた変更はここで止める。
+# 書き込み手段に関係なく、差分そのものを見る最終防衛線。
+PROTECTED_DIRS = ("platforms/discord/dev",)
+
+
+def protected_changes(incoming):
+    """merge予定の差分のうち、開発BOT自身のコードに触れるもの（純粋関数）。
+    空なら反映してよい。"""
+    hits = []
+    for f in incoming:
+        parts = f.replace("\\", "/").split("/")
+        for d in PROTECTED_DIRS:
+            seg = d.split("/")
+            # ディレクトリの区切りで一致させる（"dev-notes" のような似た名前は対象外）
+            if any(parts[i:i + len(seg)] == seg
+                   for i in range(len(parts) - len(seg))):
+                hits.append(f)
+                break
+    return sorted(hits)
+
+
 def merge_blockers(dirty, incoming):
     """未コミット変更とmerge対象の重なり（純粋関数）。空なら安全にmergeできる。
     起票#7で実証: 重なりがあるとgitがmergeを拒否し👍デプロイが必ず失敗する。"""

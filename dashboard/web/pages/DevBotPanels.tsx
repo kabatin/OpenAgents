@@ -24,6 +24,7 @@ const STATUS_TONE: Record<string, "accent" | "warn" | "info" | "neutral" | "dang
   proposed: "info",
   pending: "neutral",
   skipped: "neutral",
+  held: "warn",
   rejected: "danger",
   failed: "danger",
 };
@@ -34,6 +35,7 @@ const STATUS_JA: Record<string, string> = {
   approved: "承認済み",
   proposed: "提案中",
   skipped: "見送り",
+  held: "保留（返事なし）",
   deployed: "デプロイ済み",
   rejected: "却下",
   failed: "失敗",

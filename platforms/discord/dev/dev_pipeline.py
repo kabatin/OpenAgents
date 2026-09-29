@@ -83,7 +83,8 @@ DEFAULT_GUIDELINES = """\
   外部ネットワークアクセスと pip install は禁止（必要な依存は要約で申告）。
 - 振る舞いを変えたら対応するテストを追加/更新して緑を確認する。
 - 変更してよいのは scripts/ 配下のみ（dev_gate.py / deploy.py / gate.py /
-  settings.json / config.json / .env / *.plist / *.db への書き込みは拒否される）。
+  settings.json / config.json / .env / *.plist / *.db と、開発BOT自身のコード
+  platforms/discord/dev/ への書き込みは拒否される）。
 - 最後に「変更したファイル」と「何をどう変えたか」を3〜6行で要約する。"""
 
 

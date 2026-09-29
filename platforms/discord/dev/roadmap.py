@@ -75,6 +75,29 @@ def pick_next(db_path):
         return db.roadmap_next_pending(conn)
 
 
+# 👍待ちの期限。提案は1件ずつ出すので、放置された1件が後ろを全部止めていた。
+EXPIRE_DAYS_DEFAULT = 7
+
+
+def expire_stale(db_path, days=EXPIRE_DAYS_DEFAULT, now=None):
+    """期限切れの👍待ちを保留にする。{"cards": [項目], "caps": [起票id]}。
+    カードは held（!roadmap に保留として残る）、起票提案は expired（起票は open の
+    まま・checkpoint は進めて同じ提案を蒸し返さない）。"""
+    now = now or datetime.datetime.now()
+    before = (now - datetime.timedelta(days=days)).isoformat(timespec="seconds")
+    at = now.isoformat(timespec="seconds")
+    with db.connect(db_path) as conn:
+        cards = db.roadmap_hold_stale(conn, before, at)
+        caps = db.expire_cap_proposals(conn, before, at)
+        if caps:
+            state = db.get_proactive_state(conn, CAPWATCH_STATE_KEY)
+            last = (state or {}).get("last_checked_message_id") or 0
+            db.set_proactive_state(conn, CAPWATCH_STATE_KEY,
+                                   last_checked_message_id=max([last] + caps),
+                                   last_run_at=at)
+    return {"cards": cards, "caps": caps}
+
+
 def mark_proposed(db_path, item_id, message_id):
     with db.connect(db_path) as conn:
         return db.roadmap_mark_proposed(conn, item_id, message_id, _now_iso())
@@ -147,6 +170,7 @@ def progress_summary(db_path, guild_id=None, channel_id=None):
              f"・セッション行き {counts.get('queued_session', 0)}"
              f"・実装完了 {counts.get('done', 0)}"
              f"・見送り {counts.get('skipped', 0)}"
+             f"・保留 {counts.get('held', 0)}"
              f"・未提案 {counts.get('pending', 0)}）"]
     if proposed is not None:
         line = f"いま提案中: #{proposed['id']} {proposed['title']}"

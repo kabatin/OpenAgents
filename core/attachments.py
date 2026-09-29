@@ -40,6 +40,20 @@ class AttachmentContext(NamedTuple):
 
 # ---------------------------------------------------------------- 分類（純粋）
 
+def image_size_note(path):
+    """画像の実寸を -# 行で返す。読めなければ None（嘘の数字を出さない）。
+
+    生成画像のキャプションは生成前に書かれるため、「4Kで仕上げた」と書いても
+    実寸は違うことがある。投稿には実物から読んだ寸法を添える。"""
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            w, h = im.size
+    except Exception:
+        return None
+    return f"-# 仕上がり: {w}×{h}px"
+
+
 def classify(filename, content_type, size):
     """添付1件の種別を判定。image|pdf|text|unsupported|too_large"""
     name = (filename or "").lower()

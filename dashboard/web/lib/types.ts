@@ -125,10 +125,10 @@ export type ActivityRow = {
   agentId: string;
   kind: string;
   action: string;
-  channelId: number | null;
+  channelId: string | null;
   channelName: string | null;
   detail: string | null;
-  postedMessageId: number | null;
+  postedMessageId: string | null;
 };
 
 export type QuotaRow = { agentId: string; used: number; dbOverride: number | null };

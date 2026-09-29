@@ -271,6 +271,18 @@ def _tool_result(tid, payload, is_error=False):
 
 
 class EvidenceTest(unittest.TestCase):
+    def test_tools_succeeded_excludes_failures(self):
+        # 呼んだが失敗したツールは「やった」に数えない
+        events = [
+            _tool_use("a", "mcp__archive__save_rule"),
+            _tool_result("a", {"ok": False, "error": "管理者のみ"}, is_error=True),
+            _tool_use("b", "mcp__archive__add_reminder"),
+            _tool_result("b", {"ok": True, "evidence": "-# 登録: id=3"}),
+        ]
+        self.assertEqual(evidence.tools_used(events),
+                         ["save_rule", "add_reminder"])
+        self.assertEqual(evidence.tools_succeeded(events), ["add_reminder"])
+
     def test_reads_produce_no_notes_except_empty_search(self):
         events = [
             _tool_use("a", "mcp__archive__get_facts"),

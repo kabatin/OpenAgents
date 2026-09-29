@@ -66,5 +66,27 @@ class DevReportTest(unittest.TestCase):
         self.assertIn("静かな週でした", quiet)
 
 
+    def test_collect_lists_waiting_for_thumbs_up(self):
+        with db.connect(self.db_path) as conn:
+            db.roadmap_seed_item(conn, id=5, title="案5", description="d",
+                                 category="c", tier="quiet", route="devbot",
+                                 effect=3, cost=1, created_at="t")
+            db.roadmap_mark_proposed(conn, 5, 50, "2026-08-01T10:00:00")
+            jid = db.add_dev_job(conn, cap_req_id=12, branch="b", worktree="w",
+                                 channel_id=1, created_at="2026-08-02T10:00:00")
+            db.update_dev_job(conn, jid, updated_at="2026-08-02T12:00:00",
+                              status="built")
+        data = dev_report.collect(self.db_path, now=FRI_18)
+        text = dev_report.build_report(data)
+        self.assertIn("👍待ち", text)
+        self.assertIn("#5", text)
+        self.assertIn("起票#12", text)
+
+    def test_no_waiting_line_when_nothing_waits(self):
+        text = dev_report.build_report(
+            {"deployed": [], "rejected": [], "failed": [], "roadmap": {},
+             "watching": 0, "waiting": []})
+        self.assertNotIn("👍待ち", text)
+
 if __name__ == "__main__":
     unittest.main()

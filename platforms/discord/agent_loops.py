@@ -1021,11 +1021,12 @@ class AgentLoopsMixin:
             await asyncio.to_thread(
                 proactive.log_entry, DB_PATH, self.agent["id"],
                 kind="drill", action="breached", detail=r["name"])
-        channel = (self.get_channel(self.home_channel_id)
-                   or await self.fetch_channel(self.home_channel_id))
-        await channel.send(
-            injection_drill.build_report(self.agent["name"], results),
-            allowed_mentions=discord.AllowedMentions.none())
+        if injection_drill.should_report(results):
+            channel = (self.get_channel(self.home_channel_id)
+                       or await self.fetch_channel(self.home_channel_id))
+            await channel.send(
+                injection_drill.build_report(self.agent["name"], results),
+                allowed_mentions=discord.AllowedMentions.none())
         print(f"[{self.agent['id']}] injection drill done "
               f"(breached={len(breached)})")
 
@@ -1610,6 +1611,14 @@ class AgentLoopsMixin:
         ids = await asyncio.to_thread(
             action_items.save_items, DB_PATH, self.agent["id"], channel_id,
             batch["header_id"], items)
+        if not action_items.deadline_flags(self.proactive_cfg)["announce"]:
+            # 追跡は始めるが、追跡宣言は出さない（議事録chを静かに保つ）
+            await asyncio.to_thread(
+                proactive.log_entry, DB_PATH, self.agent["id"], kind="deadline",
+                action="track", channel_id=channel_id,
+                trigger_message_id=batch["header_id"],
+                detail=f"{len(items)}件追跡開始（宣言は投稿しない設定）")
+            return
         channel = (self.get_channel(channel_id)
                    or await self.fetch_channel(channel_id))
         text = action_items.build_confirmation(
@@ -1641,7 +1650,18 @@ class AgentLoopsMixin:
         due = await asyncio.to_thread(
             action_items.items_needing_nudge, DB_PATH, self.agent["id"],
             now.strftime("%Y-%m-%d"))
+        flags = action_items.deadline_flags(self.proactive_cfg)
         for item, stage in due:
+            if not flags["nudge"]:
+                # 声かけは投稿しないが段階は進める（超過の記録が手放し判定の起点のため）
+                await asyncio.to_thread(
+                    action_items.record_nudge, DB_PATH, item["id"], stage, None)
+                await asyncio.to_thread(
+                    proactive.log_entry, DB_PATH, self.agent["id"],
+                    kind="deadline", action="nudge_shadow",
+                    channel_id=item["channel_id"],
+                    detail=f"{stage}: {item['task'][:60]}")
+                continue
             try:
                 channel = (self.get_channel(int(item["channel_id"]))
                            or await self.fetch_channel(int(item["channel_id"])))
@@ -1669,7 +1689,19 @@ class AgentLoopsMixin:
         一覧を汚すのを止める。再開は会話（A6 を open に）か ✅。"""
         stale = await asyncio.to_thread(
             action_items.items_needing_stale, DB_PATH, self.agent["id"], now)
+        notice = action_items.deadline_flags(self.proactive_cfg)["stale_notice"]
         for item in stale:
+            if not notice:
+                # 一覧を汚さないよう手放しはするが、その旨は投稿しない
+                await asyncio.to_thread(
+                    action_items.mark_stale, DB_PATH, item["id"],
+                    self.agent["id"])
+                await asyncio.to_thread(
+                    proactive.log_entry, DB_PATH, self.agent["id"],
+                    kind="deadline", action="stale",
+                    channel_id=item["channel_id"],
+                    detail=f"{item['task'][:60]}（宣言は投稿しない設定）")
+                continue
             try:
                 channel = (self.get_channel(int(item["channel_id"]))
                            or await self.fetch_channel(int(item["channel_id"])))

@@ -92,5 +92,28 @@ class LatestDevJobTest(unittest.TestCase):
                 self.assertIsNone(db.latest_dev_job_for_cap(conn, 99))
 
 
+
+class ReasonAskPersistTest(unittest.TestCase):
+    """👎後の「理由聞き」の宛先をDBに持つ（再起動で返信が迷子にならない）。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.tmp.name, "t.db")
+        db.init_db(self.path)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_lookup_by_ask_message(self):
+        with db.connect(self.path) as conn:
+            jid = db.add_dev_job(conn, cap_req_id=7, branch="b", worktree="w",
+                                 channel_id=1, created_at="t")
+            db.set_dev_job_reason_ask(conn, jid, 999)
+            job = db.dev_job_by_reason_ask(conn, 999)
+            self.assertEqual((job["id"], job["cap_req_id"]), (jid, 7))
+            self.assertIsNone(db.dev_job_by_reason_ask(conn, 1000))
+            db.clear_dev_job_reason_ask(conn, jid)      # 1回答えたら閉じる
+            self.assertIsNone(db.dev_job_by_reason_ask(conn, 999))
+
 if __name__ == "__main__":
     unittest.main()

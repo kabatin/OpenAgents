@@ -25,6 +25,11 @@ DENY_NAMES = {"dev_gate.py", "deploy.py", "gate.py",
               "settings.json", "config.json", ".env", ".git"}
 # 拡張子で拒否（常駐定義・DB実体・秘密系）
 DENY_SUFFIXES = (".plist", ".db", ".db-wal", ".db-shm", ".pem", ".key")
+# ディレクトリごと拒否（cwd からの相対）。開発BOT自身のコードは丸ごと不可侵にする。
+# 承認ゲート（管理者の👍判定）は bot.py、書き込み許可とフックの組み立ては
+# dev_pipeline.py にあり、ファイル名で個別に塞ぐと新しいファイルを足して読み込ませる
+# 迂回が残る。開発BOTを良くする改修は人間の開発セッションで行う。
+DENY_SUBDIRS = ("platforms/discord/dev",)
 WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 # Bashコマンド中にこれらの秘密ファイル名が現れたら拒否（catやgit経由の秘密読取事故を防ぐ）。
 # Read禁止は Read ツールにしか効かないため、Bashはここで塞ぐ（多層防御）。
@@ -97,6 +102,11 @@ def decide(tool_name, tool_input, cwd, *, allowed_subdir=ALLOWED_SUBDIR):
         return f"{base} は保護対象（安全弁/設定/秘密）のため書き込めません"
     if base.lower().endswith(DENY_SUFFIXES):
         return f"{base} は保護対象の種別のため書き込めません"
+    for sub in DENY_SUBDIRS:
+        guarded = os.path.realpath(os.path.join(cwd, sub)) + os.sep
+        if (abspath + os.sep).startswith(guarded):
+            return (f"{sub}/ は開発BOT自身のコード（承認ゲート・安全弁）のため"
+                    "書き込めません。改修が必要なら最終要約で申告してください")
     allowed_root = os.path.realpath(os.path.join(cwd, allowed_subdir)) + os.sep
     if not (abspath + os.sep).startswith(allowed_root):
         return (f"{allowed_subdir}/ 配下以外への書き込みは禁止です"
