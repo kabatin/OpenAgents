@@ -20,6 +20,7 @@ import { toPatches, PatchError, parseScope } from "../server/config/patcher.ts";
 import { flatten, resolveGroups } from "../server/config/catalog.ts";
 import { agentGroups } from "../server/config/catalog.agent.ts";
 import { DEV_BOT_GROUPS, GLOBAL_GROUPS } from "../server/config/catalog.global.ts";
+import { CYCLE_CATEGORIES } from "../web/lib/categories.ts";
 
 // 本番と同じ読み方をする（素の JSON.parse は19桁IDを丸めるので使わない）
 const FIXTURE = path.join(
@@ -332,5 +333,28 @@ describe("既定の設定でセットアップが完走できる", () => {
       { path: "meeting_bot", value: { enabled: false, token: "" } },
     ]);
     expect(checkInvariants(off)).toEqual([]);
+  });
+});
+
+describe("初めての人向けの整理（level / category）", () => {
+  const cycles = agentGroups().find((g) => g.id === "proactive-cycles")?.settings ?? [];
+
+  it("自発ループはすべて分類されている（画面で小見出しにまとめるため）", () => {
+    const missing = cycles.filter((s) => s.category === undefined).map((s) => s.path);
+    expect(missing).toEqual([]);
+    expect(cycles.every((s) => CYCLE_CATEGORIES.some((c) => c.id === s.category))).toBe(true);
+  });
+
+  it("分類はどれも1件以上のループを持つ（空の小見出しを出さない）", () => {
+    for (const c of CYCLE_CATEGORIES) {
+      expect(cycles.some((s) => s.category === c.id), c.id).toBe(true);
+    }
+  });
+
+  it("エージェントと全体設定の両方に「よく使う設定」がある", () => {
+    const basic = (groups: typeof GLOBAL_GROUPS) =>
+      groups.flatMap((g) => g.settings).filter((s) => s.level === "basic");
+    expect(basic(agentGroups()).length).toBeGreaterThanOrEqual(8);
+    expect(basic(GLOBAL_GROUPS).length).toBeGreaterThanOrEqual(4);
   });
 });

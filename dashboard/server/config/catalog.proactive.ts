@@ -13,6 +13,7 @@ import { WEEKDAY_OPTIONS, type Setting, type SettingGroup } from "./types.ts";
 const COMMON: Setting[] = [
   {
     path: "proactive.enabled",
+    level: "basic",
     label: "自発的に動く",
     desc: "呼ばれなくても自分から会話を観察して発言するかどうか。すべての自発機能の親スイッチです。",
     kind: "bool",
@@ -30,6 +31,7 @@ const COMMON: Setting[] = [
   },
   {
     path: "proactive.daily_quota",
+    level: "basic",
     label: "1日に話しかけてよい回数",
     desc: "自分から発言できる上限。納期の声かけ（nudge）と追跡宣言（track）はこの枠を消費しません。",
     kind: "int",
@@ -130,6 +132,8 @@ const COMMON: Setting[] = [
 const CYCLES: Setting[] = [
   {
     path: "proactive.minutes_channel_id",
+    level: "basic",
+    category: "meetings",
     label: "議事録TODO抽出・納期の声かけ",
     desc: "議事録チャンネルを指定すると、新しい議事録からTODOと決定事項を抜き出して追跡し、期日が近づいた担当者に声をかけます。",
     kind: "string",
@@ -162,6 +166,8 @@ const CYCLES: Setting[] = [
   },
   {
     path: "proactive.weekly_report",
+    level: "basic",
+    category: "reports",
     label: "週次レポート",
     desc: "金曜の夕方に「今週こう動きました」を自分のホームチャンネルへ1回だけ投稿します。",
     kind: "bool",
@@ -179,6 +185,8 @@ const CYCLES: Setting[] = [
   },
   {
     path: "proactive.rescue",
+    level: "basic",
+    category: "conversation",
     label: "見捨てられた質問を拾う",
     desc: "24時間誰も答えていない質問を見つけて、代わりに答えます。",
     kind: "tri",
@@ -186,6 +194,7 @@ const CYCLES: Setting[] = [
   },
   {
     path: "proactive.stale_watch",
+    category: "conversation",
     label: "止まった話題の状況確認",
     desc: "動きが止まったチャンネルに「これどうなっていますか？」と様子を聞きます。",
     kind: "tri",
@@ -194,6 +203,8 @@ const CYCLES: Setting[] = [
   },
   {
     path: "proactive.homework",
+    level: "basic",
+    category: "meetings",
     label: "自己約束の追跡（宿題）",
     desc: "「〇〇やっときます」という発言を黙って拾っておき、後日「あれどうなりました？」と確認します。",
     kind: "tri",
@@ -244,6 +255,7 @@ const CYCLES: Setting[] = [
   },
   {
     path: "proactive.attention",
+    category: "conversation",
     label: "会話への自発介入（注意ループ）",
     desc: "会話が途切れたチャンネルを読み、担当や結論が決まらないまま流れた話題があれば、しばらく様子を見てから自分から口を挟みます。発言直前にその後の会話を読み直し、人間だけで解決していれば黙って取り下げます。",
     kind: "tri",
@@ -304,6 +316,7 @@ const CYCLES: Setting[] = [
   },
   {
     path: "proactive.briefing",
+    category: "reports",
     label: "朝のブリーフィング",
     desc: "毎朝1本、今日の期日・予定・重要な未読をまとめてホームチャンネルへ配信します。",
     kind: "tri",
@@ -320,6 +333,7 @@ const CYCLES: Setting[] = [
   },
   {
     path: "proactive.prep",
+    category: "meetings",
     label: "定例会議の事前パック",
     desc: "定例の1時間前に、未完了タスク・直近の決定・前回議事録リンクを議事録チャンネルへ置きます。",
     kind: "tri",
@@ -345,6 +359,7 @@ const CYCLES: Setting[] = [
   },
   {
     path: "proactive.event_planner",
+    category: "meetings",
     label: "イベントの逆算スケジュール提案",
     desc: "「イベントやります」という決定を検知して、当日から逆算した準備スケジュール案を出します。",
     kind: "tri",
@@ -352,6 +367,7 @@ const CYCLES: Setting[] = [
   },
   {
     path: "proactive.profiles.enabled",
+    category: "learning",
     label: "人物メモの蓄積",
     desc: "よく発言する人の担当や口ぶりのメモを自動で貯めます。投稿は一切しない静かな処理です。",
     kind: "bool",
@@ -371,6 +387,7 @@ const CYCLES: Setting[] = [
   },
   {
     path: "proactive.episodes",
+    category: "learning",
     label: "エピソード記憶の同期",
     desc: "決定・完了・イベントを時系列の記憶に貯めます。投稿なしの裏方処理です。",
     kind: "bool",
@@ -378,6 +395,7 @@ const CYCLES: Setting[] = [
   },
   {
     path: "proactive.rule_distill.enabled",
+    category: "learning",
     label: "ルールの棚卸し",
     desc: "貯まったルール記憶の重複や時代遅れを週1で見直し、無効化を提案します（✅で承認）。",
     kind: "bool",
@@ -402,6 +420,7 @@ const CYCLES: Setting[] = [
   },
   {
     path: "proactive.selfreview_distill.enabled",
+    category: "learning",
     label: "自己採点の蒸留",
     desc: "自分の回答への自己採点のうち低スコアの共通因子を週1で蒸留し、「心がけ」として次回以降の回答プロンプトに注入します。投稿はしない静かな処理です。",
     kind: "bool",
@@ -427,6 +446,7 @@ const CYCLES: Setting[] = [
   },
   {
     path: "proactive.pulse.enabled",
+    category: "reports",
     label: "満足度アンケート",
     desc: "月1回、1問だけのアンケートをホームチャンネルに出し、前回の集計も報告します。",
     kind: "bool",
@@ -450,6 +470,7 @@ const CYCLES: Setting[] = [
   },
   {
     path: "proactive.event_watch.enabled",
+    category: "info",
     label: "イベントの節目ウォッチ",
     desc: "逆算プランが確定したイベントについて、自分の担当分野の節目が近づいたら1回だけ知らせます。",
     kind: "bool",
@@ -457,6 +478,7 @@ const CYCLES: Setting[] = [
   },
   {
     path: "proactive.persona_review.enabled",
+    category: "selfcheck",
     label: "人格チューニングの月次提案",
     desc: "行動データから「この人格設定を直すとよい」という案と、使われていないスキルの棚卸しを報告します。",
     kind: "bool",
@@ -480,6 +502,7 @@ const CYCLES: Setting[] = [
   },
   {
     path: "proactive.auto_discover.enabled",
+    category: "learning",
     label: "自動化ネタの発掘",
     desc: "「毎回手でやっている作業」を記録から探し、自動化を提案します（👍で開発起票へ）。",
     kind: "bool",
@@ -503,6 +526,7 @@ const CYCLES: Setting[] = [
   },
   {
     path: "proactive.outreach.enabled",
+    category: "conversation",
     label: "御用聞き",
     desc: "週1で「何かお手伝いできることはありますか？」＋新しくできるようになった事を告知します。",
     kind: "bool",
@@ -527,6 +551,7 @@ const CYCLES: Setting[] = [
   },
   {
     path: "proactive.kpi.enabled",
+    category: "selfcheck",
     label: "四半期の目標宣言",
     desc: "四半期の初日に、前期の実績と今期の目標を自分で宣言します。",
     kind: "bool",
@@ -550,6 +575,7 @@ const CYCLES: Setting[] = [
   },
   {
     path: "proactive.demand_watch.enabled",
+    category: "learning",
     label: "欠員の発見と採用提案",
     desc: "「担当のいない仕事」を月次で見つけ、新しいAIの採用を提案します（管理者の👍で採用）。",
     kind: "bool",
@@ -573,6 +599,7 @@ const CYCLES: Setting[] = [
   },
   {
     path: "proactive.injection_drill.enabled",
+    category: "selfcheck",
     label: "乗っ取り耐性の自主訓練",
     desc: "自分に悪意ある指示文を試して、乗っ取られないかを月次で自己テストします。報告するのは突破されたときだけです。",
     kind: "bool",
@@ -596,6 +623,7 @@ const CYCLES: Setting[] = [
   },
   {
     path: "proactive.ab_test.enabled",
+    category: "selfcheck",
     label: "話し方のA/B実験",
     desc: "プロンプトのA/B実験を評価し、はっきり差が出たときだけ採用を1回提案します（自動採用はしません）。",
     kind: "bool",
@@ -603,6 +631,7 @@ const CYCLES: Setting[] = [
   },
   {
     path: "proactive.org_chart.enabled",
+    category: "selfcheck",
     label: "組織図の掲示",
     desc: "人間とAIの担当一覧図を月次で掲示します（前回の投稿を編集で上書きするので流れません）。",
     kind: "bool",
@@ -626,6 +655,7 @@ const CYCLES: Setting[] = [
   },
   {
     path: "proactive.persona_checkup.enabled",
+    category: "selfcheck",
     label: "人格と実態のズレ点検",
     desc: "「人格定義」と「実際の発言」のズレを全AI分まとめて点検し、直し方を提案します。",
     kind: "bool",
@@ -649,6 +679,7 @@ const CYCLES: Setting[] = [
   },
   {
     path: "proactive.self_audit.enabled",
+    category: "selfcheck",
     label: "その日の自己点検",
     desc: "夜に、その日の怪しい判断を自分で振り返って記録します。",
     kind: "bool",
@@ -657,6 +688,7 @@ const CYCLES: Setting[] = [
   },
   {
     path: "proactive.bias_check.enabled",
+    category: "selfcheck",
     label: "偏りの自己開示",
     desc: "「誰の話にはよく反応して、誰の話には反応していないか」の偏りを月次で自己申告します。",
     kind: "bool",
@@ -665,6 +697,7 @@ const CYCLES: Setting[] = [
   },
   {
     path: "proactive.prophecy.enabled",
+    category: "selfcheck",
     label: "予測と答え合わせ",
     desc: "月初に前月の自分の予測を答え合わせし、今月分の予測を封印します。",
     kind: "bool",
@@ -673,6 +706,7 @@ const CYCLES: Setting[] = [
   },
   {
     path: "proactive.study_group.enabled",
+    category: "selfcheck",
     label: "勉強会（学びの横展開）",
     desc: "個別に得た学びを他のAIへ広げるための勉強会を提案します。",
     kind: "bool",
@@ -681,6 +715,8 @@ const CYCLES: Setting[] = [
   },
   {
     path: "proactive.ripple.enabled",
+    level: "basic",
+    category: "conversation",
     label: "矛盾する過去の洗い出し",
     desc: "新しい決定が入ったとき、それと矛盾する過去の記録を横断で探して知らせます（✅で旧決定を無効化）。",
     kind: "bool",
@@ -688,6 +724,7 @@ const CYCLES: Setting[] = [
   },
   {
     path: "proactive.comeback.enabled",
+    category: "conversation",
     label: "浦島さんへのあらすじ",
     desc: "長く休んでいた人が戻ってきたら、不在中に何があったかのあらすじを1回だけ渡します。",
     kind: "bool",
@@ -707,6 +744,7 @@ const CYCLES: Setting[] = [
   },
   {
     path: "proactive.wiki.enabled",
+    category: "learning",
     label: "Wikiの自動更新",
     desc: "新しい決定が関係するWikiページだけを編み直して、既存の投稿を上書きします（新規投稿はしません）。",
     kind: "bool",
@@ -714,6 +752,7 @@ const CYCLES: Setting[] = [
   },
   {
     path: "proactive.news_watch.enabled",
+    category: "info",
     label: "業界ニュースの巡回",
     desc: "指定キーワードで業界ニュースを探し、週1で最大3件だけ報告します。",
     kind: "bool",
@@ -745,6 +784,7 @@ const CYCLES: Setting[] = [
   },
   {
     path: "proactive.newspaper.enabled",
+    category: "reports",
     label: "社内新聞の発行",
     desc: "週1でタブロイド風の社内新聞を発行します（見出し＋挿し絵）。画像生成に失敗しても記事だけは必ず出ます。",
     kind: "bool",

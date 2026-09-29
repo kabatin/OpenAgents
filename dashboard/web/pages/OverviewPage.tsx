@@ -1,13 +1,23 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { Avatar } from "../components/Avatar.tsx";
-import { Card, Chip, Empty, ErrorNote, Loading, Metric, StatusDot } from "../components/ui.tsx";
+import {
+  Card,
+  Chip,
+  Empty,
+  ErrorNote,
+  Loading,
+  Metric,
+  StatusDot,
+} from "../components/ui.tsx";
 import { useFetch } from "../lib/api.ts";
 import {
   actionLabel,
   agentLabel,
   bytes,
   discordUrl,
+  plainDiscord,
   jstStamp,
   kindLabel,
   relTime,
@@ -27,7 +37,13 @@ function QuotaBar({ used, limit }: { used: number; limit: number }) {
   );
 }
 
-function AgentCard({ agent, service }: { agent: AgentSummary; service?: ServiceStatus }) {
+function AgentCard({
+  agent,
+  service,
+}: {
+  agent: AgentSummary;
+  service?: ServiceStatus;
+}) {
   const status = service?.status ?? "unknown";
   const tone = STATUS_TONE[status];
   return (
@@ -38,12 +54,16 @@ function AgentCard({ agent, service }: { agent: AgentSummary; service?: ServiceS
       <div className="flex items-start gap-3">
         <Avatar id={agent.id} name={agent.name} size="md" status={status} />
         <div className="min-w-0 flex-1">
-          <span className="text-[15px] font-semibold tracking-tight">{agent.name}</span>
+          <span className="text-[15px] font-semibold tracking-tight">
+            {agent.name}
+          </span>
           <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted">
             {agent.role === "" ? "全般担当" : agent.role}
           </p>
         </div>
-        <span className={`chip shrink-0 ${tone.chip}`}>{service?.statusLabel ?? "不明"}</span>
+        <span className={`chip shrink-0 ${tone.chip}`}>
+          {service?.statusLabel ?? "不明"}
+        </span>
       </div>
 
       {/* 開発BOTは観察ループを持たない別プロセスなので、意味のない 0/0 は出さない */}
@@ -51,7 +71,9 @@ function AgentCard({ agent, service }: { agent: AgentSummary; service?: ServiceS
         <div className="mt-4 grid grid-cols-3 gap-3">
           <div>
             <div className="eyebrow">役割</div>
-            <div className="mt-1 text-sm font-medium leading-none">プロセス監視</div>
+            <div className="mt-1 text-sm font-medium leading-none">
+              プロセス監視
+            </div>
           </div>
           <div>
             <div className="eyebrow">プロセス</div>
@@ -70,7 +92,9 @@ function AgentCard({ agent, service }: { agent: AgentSummary; service?: ServiceS
             <div className="eyebrow">本日の枠</div>
             <div className="tnum mt-1 text-lg font-semibold leading-none">
               {agent.quota.used}
-              <span className="text-xs font-normal text-faint">/{agent.quota.limit}</span>
+              <span className="text-xs font-normal text-faint">
+                /{agent.quota.limit}
+              </span>
             </div>
             <QuotaBar used={agent.quota.used} limit={agent.quota.limit} />
           </div>
@@ -78,7 +102,9 @@ function AgentCard({ agent, service }: { agent: AgentSummary; service?: ServiceS
             <div className="eyebrow">自発ループ</div>
             <div className="tnum mt-1 text-lg font-semibold leading-none">
               {agent.cycleCount.enabled}
-              <span className="text-xs font-normal text-faint">/{agent.cycleCount.total}</span>
+              <span className="text-xs font-normal text-faint">
+                /{agent.cycleCount.total}
+              </span>
             </div>
           </div>
           <div>
@@ -94,18 +120,153 @@ function AgentCard({ agent, service }: { agent: AgentSummary; service?: ServiceS
         {agent.service === "devbot" ? (
           <>
             <Chip tone="info">承認ゲート型の自己改修</Chip>
-            {agent.proactiveEnabled ? <Chip tone="accent">週次レポート ON</Chip> : <Chip>週次レポート OFF</Chip>}
+            {agent.proactiveEnabled ? (
+              <Chip tone="accent">週次レポート ON</Chip>
+            ) : (
+              <Chip>週次レポート OFF</Chip>
+            )}
           </>
         ) : (
           <>
-            {agent.proactiveEnabled ? <Chip tone="accent">自発 ON</Chip> : <Chip>自発 OFF</Chip>}
+            {agent.proactiveEnabled ? (
+              <Chip tone="accent">自発 ON</Chip>
+            ) : (
+              <Chip>自発 OFF</Chip>
+            )}
             {agent.requireMention && <Chip>呼ばれた時だけ</Chip>}
-            {agent.skillCount > 0 && <Chip tone="info">スキル {agent.skillCount}</Chip>}
-            {agent.quota.source !== "config" && <Chip tone="plum">枠を会話で変更中</Chip>}
+            {agent.skillCount > 0 && (
+              <Chip tone="info">スキル {agent.skillCount}</Chip>
+            )}
+            {agent.quota.source !== "config" && (
+              <Chip tone="plum">枠を会話で変更中</Chip>
+            )}
           </>
         )}
       </div>
     </Link>
+  );
+}
+
+const TIMELINE_FIRST = 15;
+
+function dayOf(raw: string): string {
+  return raw.slice(0, 10);
+}
+
+/** 日付の区切り見出し（今日／昨日／M月D日）。 */
+function dayLabel(raw: string): string {
+  const today = new Date(Date.now() + 9 * 3600 * 1000)
+    .toISOString()
+    .slice(0, 10);
+  const yesterday = new Date(Date.now() + 9 * 3600 * 1000 - 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+  const d = dayOf(raw);
+  if (d === today) return "今日";
+  if (d === yesterday) return "昨日";
+  const [, m, day] = d.split("-");
+  return `${Number(m)}月${Number(day)}日`;
+}
+
+/**
+ * タイムラインの1件。畳んだ状態でも「誰が・どこで・何をしたか・中身の冒頭」が分かり、
+ * 押すと全文（記録の詳細・きっかけの発言・投稿した本文）とDiscordへのリンクが出る。
+ */
+function ActivityItem({
+  row: r,
+  guildId,
+  dayHeader,
+}: {
+  row: ActivityRow;
+  guildId: string | null;
+  dayHeader: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const url = discordUrl(guildId, r.channelId, r.postedMessageId);
+  const detail = plainDiscord(r.detail);
+  const posted = plainDiscord(r.postedExcerpt);
+  const trigger = plainDiscord(r.triggerExcerpt);
+  const preview = posted || detail;
+  const tone =
+    r.action === "spoke" || r.action.endsWith("offered")
+      ? "accent"
+      : r.action.includes("shadow")
+        ? "neutral"
+        : "info";
+  return (
+    <>
+      {dayHeader !== null && (
+        <li className="border-t border-hairline bg-canvas px-4 py-1 text-2xs font-semibold text-muted first:border-t-0">
+          {dayHeader}
+        </li>
+      )}
+      <li className="border-t border-hairline">
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((o) => !o)}
+          className="focus-ring flex w-full items-start gap-3 px-4 py-2.5 text-left text-xs hover:bg-canvas/60"
+        >
+          <span className="tnum mt-0.5 w-10 shrink-0 text-2xs text-faint">
+            {r.createdAt.slice(11, 16)}
+          </span>
+          <Avatar id={r.agentId} name={agentLabel(r.agentId)} size="sm" />
+          <span className="min-w-0 flex-1">
+            <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+              <span className="font-medium">{agentLabel(r.agentId)}</span>
+              {r.channelName !== null && (
+                <span className="text-muted">が #{r.channelName} で</span>
+              )}
+              {r.channelName === null && <span className="text-muted">が</span>}
+              <span className="text-muted">{kindLabel(r.kind)}：</span>
+              <Chip tone={tone}>{actionLabel(r.action)}</Chip>
+            </span>
+            {preview !== "" && (
+              <span
+                className={`mt-1 text-muted ${open ? "block whitespace-pre-wrap" : "line-clamp-2"}`}
+              >
+                {preview}
+              </span>
+            )}
+          </span>
+          <span
+            className={`mt-0.5 shrink-0 text-2xs text-faint transition-transform ${open ? "rotate-90" : ""}`}
+          >
+            ▸
+          </span>
+        </button>
+        {open && (
+          <div className="space-y-2 px-4 pb-3 pl-[76px] text-xs">
+            {trigger !== "" && (
+              <div>
+                <div className="eyebrow">きっかけ</div>
+                <p className="mt-0.5 whitespace-pre-wrap text-muted">
+                  {r.triggerAuthor ?? "誰か"}「{trigger}」
+                </p>
+              </div>
+            )}
+            {detail !== "" && detail !== posted && (
+              <div>
+                <div className="eyebrow">記録</div>
+                <p className="mt-0.5 whitespace-pre-wrap text-muted">
+                  {detail}
+                </p>
+              </div>
+            )}
+            {url !== null && (
+              <a
+                href={url}
+                target="_blank"
+                rel="noreferrer"
+                className="focus-ring inline-block rounded text-2xs text-accent-deep underline decoration-dotted"
+              >
+                Discordで投稿を開く
+              </a>
+            )}
+          </div>
+        )}
+      </li>
+    </>
   );
 }
 
@@ -136,12 +297,19 @@ export function OverviewPage({
     .filter((r, i, arr) => arr.findIndex((x) => x.id === r.id) === i)
     .sort((a, b) => b.id - a.id)
     .slice(0, 40);
+  const [showAll, setShowAll] = useState(false);
+  const shownRows = showAll ? rows : rows.slice(0, TIMELINE_FIRST);
 
   const serviceFor = (a: AgentSummary) =>
-    services.find((s) => s.id === (a.service === "devbot" ? "devbot" : "archivebot"));
+    services.find(
+      (s) => s.id === (a.service === "devbot" ? "devbot" : "archivebot"),
+    );
 
   const problems = services.filter(
-    (s) => s.status === "down" || s.status === "disconnected" || s.status === "stalled",
+    (s) =>
+      s.status === "down" ||
+      s.status === "disconnected" ||
+      s.status === "stalled",
   );
   const bigLogs = services.filter(
     (s) => (s.logSizeBytes ?? 0) > 40 * 1024 * 1024,
@@ -150,7 +318,10 @@ export function OverviewPage({
   if (error !== null) {
     return (
       <div className="space-y-4">
-        <ErrorNote message={`全体の状況を取得できませんでした: ${error}`} onRetry={onRetry} />
+        <ErrorNote
+          message={`全体の状況を取得できませんでした: ${error}`}
+          onRetry={onRetry}
+        />
       </div>
     );
   }
@@ -179,15 +350,21 @@ export function OverviewPage({
 
       <section>
         <div className="mb-3 flex items-baseline justify-between">
-          <h1 className="text-[17px] font-semibold tracking-tight">エージェント</h1>
+          <h1 className="text-[17px] font-semibold tracking-tight">
+            エージェント
+          </h1>
           <span className="text-2xs text-faint">
             会話エージェントは全員1つのプロセスで動いています（再起動は全員同時）
           </span>
         </div>
         {loading && agents.length === 0 ? (
-          <div className="card"><Loading rows={4} /></div>
+          <div className="card">
+            <Loading rows={4} />
+          </div>
         ) : agents.length === 0 ? (
-          <Card><Empty>エージェントが登録されていません</Empty></Card>
+          <Card>
+            <Empty>エージェントが登録されていません</Empty>
+          </Card>
         ) : (
           <div className="grid gap-3 md:grid-cols-2">
             {agents.map((a) => (
@@ -201,7 +378,7 @@ export function OverviewPage({
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
         <Card
           title="自発行動のタイムライン"
-          desc="呼ばれていないのに自分から動いた記録（「黙った」判定は除外しています）"
+          desc="呼ばれていないのに自分から動いた記録です（「黙った」判定は除外）。行を押すと、きっかけの発言と投稿した内容が見られます"
           right={<span className="text-2xs text-faint">10秒ごとに更新</span>}
         >
           {rows.length === 0 ? (
@@ -210,49 +387,32 @@ export function OverviewPage({
             /* 内側にスクロール領域を作るとホイールが吸われて本文が最下部まで
                追えなくなるので、ページ側のスクロールに一本化する */
             <ul>
-              {rows.map((r) => (
-                <li
+              {shownRows.map((r, i) => (
+                <ActivityItem
                   key={r.id}
-                  className="flex items-baseline gap-3 border-t border-hairline px-4 py-2 text-xs first:border-t-0"
-                >
-                  <span className="tnum w-11 shrink-0 text-2xs text-faint">
-                    {jstStamp(r.createdAt)}
-                  </span>
-                  <span className="flex w-[86px] shrink-0 items-center gap-1.5 self-center">
-                    <Avatar id={r.agentId} name={agentLabel(r.agentId, agentNames)} size="sm" />
-                    <span className="truncate font-medium">{agentLabel(r.agentId, agentNames)}</span>
-                  </span>
-                  <span className="shrink-0">
-                    <Chip tone={r.action === "spoke" ? "accent" : "neutral"}>
-                      {actionLabel(r.action)}
-                    </Chip>
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-muted">
-                    {kindLabel(r.kind)}
-                    {r.channelName !== null && (
-                      <span className="text-faint"> · #{r.channelName}</span>
-                    )}
-                    {r.detail !== null && r.detail !== "" && (
-                      <span className="text-faint"> — {r.detail}</span>
-                    )}
-                  </span>
-                  {(() => {
-                    const url = discordUrl(guildId, r.channelId, r.postedMessageId);
-                    if (url === null) return null;
-                    return (
-                      <a
-                        href={url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="focus-ring shrink-0 rounded px-1 text-2xs text-muted underline decoration-dotted hover:text-accent-deep"
-                        title="Discordで該当の投稿を開く"
-                      >
-                        開く
-                      </a>
-                    );
-                  })()}
-                </li>
+                  row={r}
+                  guildId={guildId}
+                  dayHeader={
+                    i === 0 ||
+                    dayOf(rows[i - 1]!.createdAt) !== dayOf(r.createdAt)
+                      ? dayLabel(r.createdAt)
+                      : null
+                  }
+                />
               ))}
+              {rows.length > TIMELINE_FIRST && (
+                <li className="border-t border-hairline">
+                  <button
+                    type="button"
+                    onClick={() => setShowAll((v) => !v)}
+                    className="focus-ring w-full px-4 py-2 text-center text-2xs text-muted hover:text-ink"
+                  >
+                    {showAll
+                      ? "最近のものだけにする"
+                      : `もっと見る（あと${rows.length - TIMELINE_FIRST}件）`}
+                  </button>
+                </li>
+              )}
             </ul>
           )}
         </Card>
@@ -260,7 +420,9 @@ export function OverviewPage({
         <div className="space-y-6">
           <Card title="プロセス">
             {loading && services.length === 0 && <Loading rows={3} />}
-            {!loading && services.length === 0 && <Empty>プロセスの情報を取得できていません</Empty>}
+            {!loading && services.length === 0 && (
+              <Empty>プロセスの情報を取得できていません</Empty>
+            )}
             <ul>
               {services.map((s) => (
                 <li
@@ -272,7 +434,9 @@ export function OverviewPage({
                   <span className="tnum shrink-0 text-2xs text-faint">
                     {s.pid === null ? "—" : `pid ${s.pid}`}
                   </span>
-                  <span className={`chip shrink-0 ${STATUS_TONE[s.status].chip}`}>
+                  <span
+                    className={`chip shrink-0 ${STATUS_TONE[s.status].chip}`}
+                  >
                     {s.statusLabel}
                   </span>
                 </li>
@@ -281,7 +445,10 @@ export function OverviewPage({
           </Card>
 
           {bigLogs.length > 0 && (
-            <Card title="ログの肥大" desc="50MBを超えると毎朝4時に1世代だけ退避されます">
+            <Card
+              title="ログの肥大"
+              desc="50MBを超えると毎朝4時に1世代だけ退避されます"
+            >
               <ul>
                 {bigLogs.map((s) => (
                   <li
@@ -323,7 +490,8 @@ export function OverviewPage({
                 value={relTime(services.find((s) => s.id === "devbot")?.heartbeatAgeSec ?? null)}
                 sub="300秒を超えると自動再起動"
                 tone={
-                  (services.find((s) => s.id === "devbot")?.heartbeatAgeSec ?? 0) > 300
+                  (services.find((s) => s.id === "devbot")?.heartbeatAgeSec ??
+                    0) > 300
                     ? "danger"
                     : "ink"
                 }

@@ -52,6 +52,21 @@ function summarize(s: ResolvedSetting, idNames?: IdNames): string | null {
   }
 }
 
+/**
+ * 既定値から変えているか。config.json に書いてあっても既定と同じ値なら「変更済み」にしない
+ * （新人が「どこをいじったのか」だけを拾えるように）。
+ */
+function isChanged(s: ResolvedSetting): boolean {
+  if (!s.current.explicit || s.kind === "info" || s.readonly === true) return false;
+  if (s.kind === "tri") {
+    const d = (s.default ?? {}) as { enabled?: boolean; shadow?: boolean };
+    const def = d.enabled === true ? (d.shadow === false ? "live" : "shadow") : "off";
+    return s.current.value !== def;
+  }
+  if (s.default === undefined) return false;
+  return JSON.stringify(s.current.value) !== JSON.stringify(s.default);
+}
+
 /** 子パラメータのうち、畳んだ状態でも見せたい要約（曜日・時刻）を組み立てる。 */
 function childDigest(s: ResolvedSetting): string | null {
   const parts = (s.children ?? [])
@@ -302,11 +317,11 @@ export function SettingRow({
           >
             {setting.label}
           </span>
-          {setting.current.explicit === false && setting.kind !== "info" && <Chip>既定値</Chip>}
+          {isChanged(setting) && <Chip tone="plum">変更済み</Chip>}
           {blocked && <Chip tone="warn">前提が未設定</Chip>}
         </div>
-        {!open && digest !== null && digest !== "—" && (
-          <div className="tnum mt-0.5 truncate text-2xs text-muted">{digest}</div>
+        {!open && setting.desc !== "" && (
+          <div className="mt-0.5 line-clamp-1 text-2xs text-muted">{setting.desc}</div>
         )}
       </div>
     </>
@@ -335,6 +350,9 @@ export function SettingRow({
         )}
 
         <div className="flex shrink-0 items-center gap-3">
+          {!open && digest !== null && digest !== "—" && (
+            <span className="tnum max-w-[220px] truncate text-2xs text-muted">{digest}</span>
+          )}
           {saved && error === null && (
             <span className="text-2xs font-medium text-accent-deep" role="status">
               保存しました

@@ -1,8 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { AgentRoster } from "../components/AgentRoster.tsx";
-import { SettingRow, type SaveFn } from "../components/SettingRow.tsx";
-import { Button, Card, Chip, Empty, ErrorNote, Loading } from "../components/ui.tsx";
+import { type SaveFn } from "../components/SettingRow.tsx";
+import { SettingsList } from "../components/SettingsList.tsx";
+import {
+  Button,
+  Card,
+  Chip,
+  Empty,
+  ErrorNote,
+  Loading,
+  PageHeader,
+  Tabs,
+} from "../components/ui.tsx";
 import { api, useFetch } from "../lib/api.ts";
 import type { SettingsView } from "../lib/types.ts";
 
@@ -252,9 +262,55 @@ function UserMapping({
   );
 }
 
+type SettingsTab =
+  | "agents"
+  | "llm"
+  | "conversation"
+  | "integrations"
+  | "devbot"
+  | "meeting"
+  | "screen"
+  | "secrets";
+
+const TAB_INFO: Record<SettingsTab, { label: string; desc: string }> = {
+  agents: {
+    label: "エージェント",
+    desc: "エージェントの追加と削除。それぞれの細かい設定は、上のメニューからそのエージェントのページへ",
+  },
+  llm: {
+    label: "使うAI",
+    desc: "回答を作るのに使うコマンドラインAIとモデル、考える深さ",
+  },
+  conversation: {
+    label: "会話と上限",
+    desc: "全エージェント共通の基本パラメータ。普段は触らなくて大丈夫です",
+  },
+  integrations: {
+    label: "外部連携",
+    desc: "integrations/ に置いた連携（スプレッドシートなど）を読み込む設定",
+  },
+  devbot: {
+    label: "開発BOT",
+    desc: "Discordから開発を指示するBOT。別プロセスなので、ここの変更は開発BOTだけを再起動します",
+  },
+  meeting: {
+    label: "議事録BOT",
+    desc: "会議の録音から議事録を作るBOT。話者名の対応表もここで直します",
+  },
+  screen: {
+    label: "この管理画面",
+    desc: "この画面を開く場所とパスワード",
+  },
+  secrets: {
+    label: "秘密情報と初期化",
+    desc: "トークンは画面からは読み出せません（編集はエディタで config.json を直します）",
+  },
+};
+
 export function SettingsPage({ onChanged }: { onChanged: () => void }) {
   const { data, error, reload } = useFetch<SettingsView>("/settings");
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [tab, setTab] = useState<SettingsTab>("agents");
 
   const saveFor = useCallback(
     (scope: string): SaveFn =>
@@ -277,78 +333,111 @@ export function SettingsPage({ onChanged }: { onChanged: () => void }) {
 
   const saveGlobal = saveFor("global");
   const saveMeeting = saveFor("meeting");
+  const idNames = data.idNames ?? {};
+  const globalGroup = (id: string) =>
+    data.global.find((g) => g.id === id)?.settings ?? [];
+  const info = TAB_INFO[tab];
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">全体設定</h1>
-        <p className="mt-1 max-w-[70ch] text-xs leading-relaxed text-muted">
-          全エージェント共通の設定です。トークンは保存できますが、保存後は読み出せません
-          （画面には ●●●● と表示されます）。
-        </p>
-      </div>
+      <PageHeader
+        title="全体設定"
+        lead="全エージェントに共通する設定と、開発BOT・議事録BOT・外部連携の設定。エージェントごとの設定は、上のメニューからそのエージェントのページへ。"
+        tipsKey="settings"
+        tips={[
+          "各タブとも、よく使う設定を先に出し、それ以外は「詳細設定」に畳んであります",
+          "変えたら画面上部の「適用」を押すと反映されます",
+        ]}
+      />
 
       {saveError !== null && <ErrorNote message={saveError} />}
 
-      <AgentRoster agents={data.agents} onChanged={onChanged} />
+      <Tabs
+        tabs={(Object.keys(TAB_INFO) as SettingsTab[]).map((id) => ({
+          id,
+          label: TAB_INFO[id].label,
+        }))}
+        value={tab}
+        onChange={setTab}
+      />
 
-      {data.global.map((g) => (
-        <Card key={g.id} title={g.label} desc={g.desc}>
-          {g.settings.map((s) => (
-            <SettingRow key={s.path} setting={s} onSave={saveGlobal} idNames={data.idNames ?? {}} />
-          ))}
+      {tab === "agents" && <AgentRoster agents={data.agents} onChanged={onChanged} />}
+
+      {(tab === "llm" || tab === "conversation" || tab === "integrations") && (
+        <Card title={info.label} desc={info.desc}>
+          <SettingsList settings={globalGroup(tab)} onSave={saveGlobal} idNames={idNames} />
         </Card>
-      ))}
+      )}
 
-      {data.devBot.map((g) => (
-        <Card key={g.id} title={g.label} desc={g.desc}>
-          {g.settings.map((s) => (
-            <SettingRow key={s.path} setting={s} onSave={saveGlobal} idNames={data.idNames ?? {}} />
-          ))}
+      {tab === "screen" && (
+        <Card title={info.label} desc={info.desc}>
+          <SettingsList
+            settings={globalGroup("dashboard")}
+            onSave={saveGlobal}
+            idNames={idNames}
+            showAll
+          />
         </Card>
-      ))}
+      )}
 
-      {data.meetingBot.map((g) => (
-        <Card key={g.id} title={g.label} desc={g.desc}>
-          {g.settings
-            .filter((s) => s.kind !== "info")
-            .map((s) => (
-              <SettingRow key={s.path} setting={s} onSave={saveMeeting} idNames={data.idNames ?? {}} />
-            ))}
-          <div className="border-t border-hairline">
-            <div className="px-4 pt-3">
-              <div className="eyebrow">話者名のマッピング（{Object.keys(data.meetingUserMapping).length}人）</div>
-              <p className="mt-1 text-xs text-muted">
-                録音した声を誰の発言として議事録に書くかの対応表です。
-              </p>
-            </div>
-            <UserMapping
-              mapping={data.meetingUserMapping}
-              idNames={data.idNames ?? {}}
-              onSaved={() => {
-                reload();
-                onChanged();
-              }}
+      {tab === "devbot" && (
+        <Card title={info.label} desc={info.desc}>
+          <SettingsList
+            settings={data.devBot.flatMap((g) => g.settings)}
+            onSave={saveGlobal}
+            idNames={idNames}
+          />
+        </Card>
+      )}
+
+      {tab === "meeting" &&
+        data.meetingBot.map((g) => (
+          <Card key={g.id} title={g.label} desc={info.desc}>
+            <SettingsList
+              settings={g.settings.filter((s) => s.kind !== "info")}
+              onSave={saveMeeting}
+              idNames={idNames}
+              showAll
             />
-          </div>
-        </Card>
-      ))}
+            <div className="border-t border-hairline">
+              <div className="px-4 pt-3">
+                <div className="eyebrow">
+                  話者名の対応表（{Object.keys(data.meetingUserMapping).length}人）
+                </div>
+                <p className="mt-1 text-xs text-muted">
+                  録音した声を誰の発言として議事録に書くかの対応表です。新しいメンバーが入ったらここに足します。
+                </p>
+              </div>
+              <UserMapping
+                mapping={data.meetingUserMapping}
+                idNames={idNames}
+                onSaved={() => {
+                  reload();
+                  onChanged();
+                }}
+              />
+            </div>
+          </Card>
+        ))}
 
-      <Card title="秘密情報" desc="config.json に平文で保存されています。編集はエディタで行ってください。">
-        <ul>
-          {Object.entries(data.secrets).map(([key, masked]) => (
-            <li
-              key={key}
-              className="flex items-center justify-between gap-3 border-t border-hairline px-4 py-2.5 text-xs first:border-t-0"
-            >
-              <span className="font-mono text-2xs text-muted">{key}</span>
-              <span className="tnum text-muted">{masked}</span>
-            </li>
-          ))}
-        </ul>
-      </Card>
-
-      <DangerZone />
+      {tab === "secrets" && (
+        <>
+          <Card title="秘密情報" desc="config.json に平文で保存されています。編集はエディタで行ってください。">
+            <ul>
+              {Object.entries(data.secrets).map(([key, masked]) => (
+                <li
+                  key={key}
+                  className="flex items-center justify-between gap-3 border-t border-hairline px-4 py-2.5 text-xs first:border-t-0"
+                >
+                  <span className="font-mono text-2xs text-muted">{key}</span>
+                  <span className="tnum text-muted">{masked}</span>
+                </li>
+              ))}
+            </ul>
+          </Card>
+          <DangerZone />
+        </>
+      )}
     </div>
   );
 }

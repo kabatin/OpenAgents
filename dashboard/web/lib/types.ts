@@ -30,6 +30,10 @@ export type ResolvedSetting = {
   secret?: boolean;
   fixedNote?: string;
   requires?: { path: string; label: string }[];
+  /** "basic" = 初めての人がまず触る「よく使う設定」。無指定は詳細設定（既定では畳む） */
+  level?: "basic";
+  /** 自発ループの分類（画面で小見出しにまとめる） */
+  category?: string;
   current: { path: string; value: unknown; explicit: boolean };
   blockedBy: string[];
   children?: ResolvedSetting[];
@@ -129,6 +133,9 @@ export type ActivityRow = {
   channelName: string | null;
   detail: string | null;
   postedMessageId: string | null;
+  triggerAuthor?: string | null;
+  triggerExcerpt?: string | null;
+  postedExcerpt?: string | null;
 };
 
 export type QuotaRow = { agentId: string; used: number; dbOverride: number | null };

@@ -88,32 +88,32 @@ export const ACTION_LABEL: Record<string, string> = {
 };
 
 export const KIND_LABEL: Record<string, string> = {
-  none: "定期観察",
+  none: "会話の見守り",
   namecall: "名前で呼ばれた",
   tool_loop: "ツールで調べた",
   tool_denied: "権限外のツール呼び出し",
   selfreview: "自己採点",
-  selfreview_distill: "自己採点の蒸留",
-  handoff: "引き継ぎ",
-  recall: "記憶の呼び出し",
-  comeback: "浦島あらすじ",
-  deadline: "期日",
+  selfreview_distill: "自己採点のまとめ",
+  handoff: "他のエージェントへの引き継ぎ",
+  recall: "過去の話の呼び出し",
+  comeback: "不在明けのまとめ",
+  deadline: "議事録TODOの期日",
   plugin: "プラグイン",
-  rescue: "見捨てられた質問",
+  rescue: "放置された質問への回答",
   drill: "乗っ取り訓練",
   info: "情報提供",
   outreach: "御用聞き",
   assist: "手助け",
   contradiction: "矛盾の指摘",
   event: "イベント",
-  fake_done: "完了の偽り",
+  fake_done: "できたフリの検出",
   news: "ニュース",
   newspaper: "社内新聞",
-  prep: "事前パック",
-  ripple: "波紋",
-  stale: "停滞",
-  homework: "宿題",
-  attention: "自発介入",
+  prep: "定例の事前パック",
+  ripple: "決定の波及チェック",
+  stale: "放置されたチャンネル",
+  homework: "宿題（「やっときます」）",
+  attention: "会話への口出し",
 };
 
 export function actionLabel(a: string): string {
@@ -154,7 +154,7 @@ const JA: Record<string, string> = {
   before: "期日前",
   overdue: "期日超過",
   none: "声かけ前",
-  stale: "停滞",
+  stale: "放置されたチャンネル",
   open: "対応中",
   done: "完了",
   // LLM呼び出しの用途
@@ -167,10 +167,10 @@ const JA: Record<string, string> = {
   distill: "蒸留",
   audit: "自己点検",
   skeptic: "発言前の監査",
-  attention: "自発介入",
+  attention: "会話への口出し",
   rescue: "救援",
   briefing: "ブリーフィング",
-  homework: "宿題",
+  homework: "宿題（「やっときます」）",
   other: "その他",
 };
 
@@ -195,4 +195,14 @@ export function jstDate(raw: string | null | undefined): string {
  */
 export function agentLabel(id: string, names?: Record<string, string>): string {
   return names?.[id] ?? (id === "devbot" ? "開発BOT" : id);
+}
+
+/** Discord の書式（-# 小文字行・メンション・太字）を一覧で読める文字にする。 */
+export function plainDiscord(text: string | null | undefined): string {
+  return (text ?? "")
+    .replace(/^-# /gm, "")
+    .replace(/<@&?\d+>/g, "@…")
+    .replace(/<#\d+>/g, "#…")
+    .replace(/\*\*/g, "")
+    .trim();
 }

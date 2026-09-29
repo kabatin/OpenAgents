@@ -11,6 +11,7 @@ import { WEEKDAY_OPTIONS, type Setting, type SettingGroup } from "./types.ts";
 const CONVERSATION: Setting[] = [
   {
     path: "guild_id",
+    level: "basic",
     label: "対象のDiscordサーバー",
     desc: "AIが動作する唯一のサーバーID。ここ以外のサーバーの発言はすべて無視されます。",
     kind: "string",
@@ -59,6 +60,7 @@ const CONVERSATION: Setting[] = [
   },
   {
     path: "admins",
+    level: "basic",
     label: "管理者のDiscordユーザーID",
     desc: "全体ルールの設定・他人のリマインダー削除・AI採用の承認ができる人。",
     kind: "stringList",
@@ -79,6 +81,7 @@ const CONVERSATION: Setting[] = [
 const LLM: Setting[] = [
   {
     path: "llm.provider",
+    level: "basic",
     label: "使うAI（LLM）",
     desc:
       "回答を作るのに使うコマンドラインAI。インストール済みのものだけ選べます。" +
@@ -93,6 +96,7 @@ const LLM: Setting[] = [
   },
   {
     path: "llm.model",
+    level: "basic",
     label: "モデル名",
     desc: "上で選んだAIに渡すモデル名。分からなければ既定のままで構いません。",
     kind: "string",
@@ -131,6 +135,7 @@ const LLM: Setting[] = [
 const INTEGRATIONS: Setting[] = [
   {
     path: "integrations.enabled",
+    level: "basic",
     label: "有効にする外部連携",
     desc:
       "integrations/ フォルダに入れた連携のうち、実際に読み込むものの名前を並べます。" +
@@ -206,6 +211,7 @@ const DEV_BOT: Setting[] = [
   },
   {
     path: "dev_bot.approval_expire_days",
+    level: "basic",
     label: "👍待ちの期限",
     desc: "開発BOTの提案（ロードマップのカード・起票の着手）にこの日数お返事がないと、保留にして次の提案に進みます。保留は見送りではないので、あとから頼めます。",
     kind: "int",
@@ -242,6 +248,7 @@ const DEV_BOT: Setting[] = [
   },
   {
     path: "dev_bot.weekly_report.enabled",
+    level: "basic",
     label: "開発の週次レポート",
     desc: "その週に実装・デプロイしたものをまとめて報告します。",
     kind: "bool",

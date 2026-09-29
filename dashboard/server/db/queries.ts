@@ -123,12 +123,18 @@ export type ActivityRow = {
   channelName: string | null;
   detail: string | null;
   postedMessageId: string | null;
+  /** きっかけになった発言（誰の・何という発言に反応したか） */
+  triggerAuthor: string | null;
+  triggerExcerpt: string | null;
+  /** 実際に投稿した本文の冒頭 */
+  postedExcerpt: string | null;
 };
 
 /**
  * 自発行動のタイムライン。
  * `action='silent'`（黙ると判断した記録）が全体の8割を占めるので、
  * 既定では除外して「実際に何かした」ものだけを見せる。
+ * 1行だけでは何が起きたか分からないので、きっかけの発言と投稿の冒頭も添える。
  */
 export function recentActivity(opts: { limit?: number; sinceId?: number; includeSilent?: boolean } = {}): ActivityRow[] {
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 500);
@@ -146,9 +152,15 @@ export function recentActivity(opts: { limit?: number; sinceId?: number; include
                   CAST(p.channel_id AS TEXT)        AS channelId,
                   c.name              AS channelName,
                   p.detail            AS detail,
-                  CAST(p.posted_message_id AS TEXT) AS postedMessageId
+                  CAST(p.posted_message_id AS TEXT) AS postedMessageId,
+                  tu.display_name              AS triggerAuthor,
+                  SUBSTR(tm.content, 1, 200)   AS triggerExcerpt,
+                  SUBSTR(pm.content, 1, 400)   AS postedExcerpt
              FROM proactive_log p
-             LEFT JOIN channels c ON c.id = p.channel_id
+             LEFT JOIN channels c  ON c.id  = p.channel_id
+             LEFT JOIN messages tm ON tm.id = p.trigger_message_id
+             LEFT JOIN users tu    ON tu.id = tm.author_id
+             LEFT JOIN messages pm ON pm.id = p.posted_message_id
             WHERE p.id > ? ${silentClause}
             ORDER BY p.id DESC
             LIMIT ?`,

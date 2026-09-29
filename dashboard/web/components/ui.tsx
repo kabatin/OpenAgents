@@ -1,16 +1,26 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import { STATUS_TONE } from "../lib/format.ts";
 import type { HealthStatus } from "../lib/types.ts";
 
-export function StatusDot({ status, pulse }: { status: HealthStatus; pulse?: boolean }) {
+export function StatusDot({
+  status,
+  pulse,
+}: {
+  status: HealthStatus;
+  pulse?: boolean;
+}) {
   const tone = STATUS_TONE[status];
   return (
     <span className="relative inline-flex h-2 w-2 shrink-0">
       {pulse && status === "ok" && (
-        <span className={`absolute inline-flex h-full w-full animate-ping rounded-full ${tone.dot} opacity-40`} />
+        <span
+          className={`absolute inline-flex h-full w-full animate-ping rounded-full ${tone.dot} opacity-40`}
+        />
       )}
-      <span className={`relative inline-flex h-2 w-2 rounded-full ${tone.dot}`} />
+      <span
+        className={`relative inline-flex h-2 w-2 rounded-full ${tone.dot}`}
+      />
     </span>
   );
 }
@@ -30,7 +40,7 @@ export function Chip({
     info: "bg-info-soft text-info",
     plum: "bg-plum-soft text-plum",
   } as const;
-  return <span className={`chip ${tones[tone]}`}>{children}</span>;
+  return <span className={`chip whitespace-nowrap ${tones[tone]}`}>{children}</span>;
 }
 
 export function Toggle({
@@ -102,7 +112,11 @@ export function TriToggle({
           onKeyDown={(e) => {
             if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
             e.preventDefault();
-            const next = opts[(i + (e.key === "ArrowRight" ? 1 : opts.length - 1)) % opts.length];
+            const next =
+              opts[
+                (i + (e.key === "ArrowRight" ? 1 : opts.length - 1)) %
+                  opts.length
+              ];
             if (next !== undefined) onChange(next.v);
           }}
           className={`focus-ring rounded-[5px] px-2.5 py-[3px] text-2xs font-semibold transition-all duration-150
@@ -136,11 +150,17 @@ export function Card({
       {(title !== undefined || right !== undefined) && (
         <header className="flex items-start justify-between gap-4 border-b border-hairline px-4 py-3">
           <div className="min-w-0">
-            {eyebrow !== undefined && <div className="eyebrow mb-1">{eyebrow}</div>}
-            {title !== undefined && (
-              <h2 className="text-[15px] font-semibold tracking-tight">{title}</h2>
+            {eyebrow !== undefined && (
+              <div className="eyebrow mb-1">{eyebrow}</div>
             )}
-            {desc !== undefined && <p className="mt-1 text-xs leading-relaxed text-muted">{desc}</p>}
+            {title !== undefined && (
+              <h2 className="text-[15px] font-semibold tracking-tight">
+                {title}
+              </h2>
+            )}
+            {desc !== undefined && (
+              <p className="mt-1 text-xs leading-relaxed text-muted">{desc}</p>
+            )}
           </div>
           {right !== undefined && <div className="shrink-0">{right}</div>}
         </header>
@@ -188,7 +208,9 @@ export function Button({
 }
 
 export function Empty({ children }: { children: ReactNode }) {
-  return <div className="px-4 py-10 text-center text-xs text-muted">{children}</div>;
+  return (
+    <div className="px-4 py-10 text-center text-xs text-muted">{children}</div>
+  );
 }
 
 /**
@@ -196,20 +218,36 @@ export function Empty({ children }: { children: ReactNode }) {
  * 「まだ来ていない」と「0件だった」は別物なので、必ず描き分ける
  * （空表示で代用すると、画面が「ありません」と嘘をつく）。
  */
-export function Loading({ rows = 3, label = "読み込んでいます…" }: { rows?: number; label?: string }) {
+export function Loading({
+  rows = 3,
+  label = "読み込んでいます…",
+}: {
+  rows?: number;
+  label?: string;
+}) {
   return (
     <div className="px-4 py-3" role="status" aria-live="polite">
       <span className="sr-only">{label}</span>
       <div className="space-y-2">
         {Array.from({ length: rows }, (_, i) => (
-          <div key={i} className="h-3 animate-pulse rounded bg-[#EDEBE7]" style={{ width: `${92 - i * 14}%` }} />
+          <div
+            key={i}
+            className="h-3 animate-pulse rounded bg-[#EDEBE7]"
+            style={{ width: `${92 - i * 14}%` }}
+          />
         ))}
       </div>
     </div>
   );
 }
 
-export function ErrorNote({ message, onRetry }: { message: string; onRetry?: () => void }) {
+export function ErrorNote({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry?: () => void;
+}) {
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-md border border-danger/25 bg-danger-soft px-3 py-2 text-xs text-danger">
       <span className="min-w-0 flex-1">{message}</span>
@@ -266,10 +304,16 @@ export function Async<T>({
   rows?: number;
   children: (data: T) => ReactNode;
 }) {
-  if (q.error !== null) return <div className="p-3"><ErrorNote message={q.error} onRetry={q.reload} /></div>;
+  if (q.error !== null)
+    return (
+      <div className="p-3">
+        <ErrorNote message={q.error} onRetry={q.reload} />
+      </div>
+    );
   if (q.loading && q.data === null) return <Loading rows={rows} />;
   if (q.data === null) return <Empty>{empty ?? "データがありません"}</Empty>;
-  if (Array.isArray(q.data) && q.data.length === 0) return <Empty>{empty ?? "データがありません"}</Empty>;
+  if (Array.isArray(q.data) && q.data.length === 0)
+    return <Empty>{empty ?? "データがありません"}</Empty>;
   return <>{children(q.data)}</>;
 }
 
@@ -293,10 +337,129 @@ export function Metric({
   return (
     <div>
       <div className="eyebrow">{label}</div>
-      <div className={`tnum mt-1 text-[22px] font-semibold leading-none tracking-tight ${tones[tone]}`}>
+      <div
+        className={`tnum mt-1 text-[22px] font-semibold leading-none tracking-tight ${tones[tone]}`}
+      >
         {value}
       </div>
-      {sub !== undefined && <div className="mt-1 text-2xs text-faint">{sub}</div>}
+      {sub !== undefined && (
+        <div className="mt-1 text-2xs text-faint">{sub}</div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * ページの見出し＋「ここで何ができるか」。新人が開いた瞬間に触り始められるよう、
+ * よく使う操作を tips に数行だけ添える。
+ */
+export function PageHeader({
+  title,
+  lead,
+  tips,
+  tipsKey,
+}: {
+  title: string;
+  lead: ReactNode;
+  tips?: ReactNode[];
+  tipsKey?: string;
+}) {
+  return (
+    <div className="space-y-3">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+        <p className="mt-1 max-w-[80ch] text-xs leading-relaxed text-muted">
+          {lead}
+        </p>
+      </div>
+      {tips !== undefined && tipsKey !== undefined && (
+        <Tips tipsKey={tipsKey} tips={tips} />
+      )}
+    </div>
+  );
+}
+
+/** 「はじめての方へ」の案内。閉じたら localStorage に記憶（読めない環境でも表示は壊さない）。 */
+export function Tips({
+  tipsKey,
+  tips,
+}: {
+  tipsKey: string;
+  tips: ReactNode[];
+}) {
+  const storageKey = `tips-closed:${tipsKey}`;
+  const [closed, setClosed] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem(storageKey) === "1";
+    } catch {
+      return false;
+    }
+  });
+  if (closed || tips.length === 0) return null;
+  const close = () => {
+    setClosed(true);
+    try {
+      window.localStorage.setItem(storageKey, "1");
+    } catch {
+      // 保存できない環境では、このページを開いている間だけ閉じる
+    }
+  };
+  return (
+    <div className="flex items-start gap-3 rounded-lg border border-info/20 bg-info-soft px-4 py-3">
+      <div className="min-w-0 flex-1">
+        <div className="text-xs font-semibold text-info">はじめての方へ</div>
+        <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs leading-relaxed text-ink">
+          {tips.map((t, i) => (
+            <li key={i}>{t}</li>
+          ))}
+        </ul>
+      </div>
+      <button
+        type="button"
+        onClick={close}
+        className="focus-ring shrink-0 rounded px-1.5 text-2xs text-muted hover:text-ink"
+        aria-label="案内を閉じる"
+      >
+        閉じる
+      </button>
+    </div>
+  );
+}
+
+/** 下線タブ。ページ内の切り替えに使う（URLは変えない）。 */
+export function Tabs<T extends string>({
+  tabs,
+  value,
+  onChange,
+}: {
+  tabs: { id: T; label: string; count?: number }[];
+  value: T;
+  onChange: (id: T) => void;
+}) {
+  return (
+    <div
+      className="flex flex-wrap gap-1 border-b border-hairline"
+      role="tablist"
+    >
+      {tabs.map((t) => (
+        <button
+          key={t.id}
+          type="button"
+          role="tab"
+          aria-selected={value === t.id}
+          onClick={() => onChange(t.id)}
+          className={`focus-ring -mb-px border-b-2 px-3 py-2 text-[13px] transition-colors duration-100 ${
+            value === t.id
+              ? "border-accent font-medium text-ink"
+              : "border-transparent text-muted hover:text-ink"
+          }`}
+        >
+          {t.label}
+          {t.count !== undefined && (
+            <span className="tnum ml-1.5 text-2xs text-faint">{t.count}</span>
+          )}
+        </button>
+      ))}
     </div>
   );
 }

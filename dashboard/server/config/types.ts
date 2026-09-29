@@ -52,6 +52,10 @@ export type Setting = {
   requires?: Requirement[];
   /** 「実行時刻はコード固定」など、設定できない事実の注記 */
   fixedNote?: string;
+  /** "basic" = 新人がまず触る「よく使う設定」。無指定は詳細設定（既定では畳む） */
+  level?: "basic";
+  /** 自発ループの分類（画面で小見出しにまとめる） */
+  category?: string;
   /** 行を展開したときに出す詳細パラメータ */
   children?: Setting[];
 };

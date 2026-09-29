@@ -228,7 +228,9 @@ api.get("/data/tasks", async (c) => {
   const rows = [...tasksUnified(), ...reminders].sort((a, b) =>
     (a.due ?? "9999").localeCompare(b.due ?? "9999"),
   );
-  return c.json({ items: rows });
+  // 担当者は <@ID> のまま入っているので、引ける名前は引いて返す
+  const ids = rows.flatMap((r) => (r.owner ?? "").match(/\d{17,20}/g) ?? []);
+  return c.json({ items: rows, idNames: resolveDiscordIds(ids) });
 });
 // 名前まわりは2つで1組（正式表記を覚える辞書と、決め打ちで直す単語帳）なので
 // 1タブ＝1リクエストにまとめる

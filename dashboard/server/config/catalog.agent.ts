@@ -30,6 +30,7 @@ const BASICS: Setting[] = [
   },
   {
     path: "home_channel_id",
+    level: "basic",
     label: "ホームチャンネル",
     desc: "このAIの自室。ここでは（下の設定次第で）呼ばれなくても答えます。",
     kind: "string",
@@ -53,6 +54,7 @@ const BASICS: Setting[] = [
   },
   {
     path: "require_mention",
+    level: "basic",
     label: "呼ばれた時だけ答える",
     desc: "オンにすると、自室でも「@名前」で呼ばれた時だけ返事します。チャンネルを静かに保ちたい子に。",
     kind: "bool",
@@ -218,6 +220,7 @@ const BASICS: Setting[] = [
 const SKILLS: Setting[] = [
   {
     path: "skills.reminder",
+    level: "basic",
     label: "リマインダー",
     desc: "「明日9時に◯◯を知らせて」のような自然な言葉でリマインダーを登録し、時間が来たら配信します。",
     kind: "bool",
@@ -241,6 +244,7 @@ const SKILLS: Setting[] = [
     // image_gen は「設定オブジェクトの存在＝有効」。トグルは .enabled リーフに
     // 書き（既存のbackend等を保全）、表示は presenceIsOn で解決する
     path: "skills.image_gen.enabled",
+    level: "basic",
     label: "画像生成",
     desc: "依頼に応じて画像を生成して投稿します。参考画像を添付すると、そのテイストを踏まえて作ります。",
     kind: "bool",
