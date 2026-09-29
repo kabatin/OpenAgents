@@ -7,6 +7,12 @@
 
 ## [Unreleased]
 
+## [0.2.2] — 2026-09-29
+
+開発BOTが自分の承認ゲートを書き換えられた穴を塞ぎ、完了主張の裏付けを
+厳しくしたリリース。あわせて Claude Code の思考の深さの指定、ダッシュボードの
+全面的な見直し（初めての人が触れる画面・Discord ID の桁落ち修正）を含む。
+
 ### セキュリティ
 
 - **開発BOTが自分の承認ゲートと安全弁を書き換えられた** — 書き込み禁止が
@@ -319,7 +325,8 @@ macOS・Windows・Linux で緑。
 - 添付読解・Web検索などツールを使う機能は Claude Code 選択時のみ
 - ドキュメントは日本語が正（英語は README のみ）
 
-[Unreleased]: https://github.com/kabatin/OpenAgents/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/kabatin/OpenAgents/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/kabatin/OpenAgents/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/kabatin/OpenAgents/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/kabatin/OpenAgents/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/kabatin/OpenAgents/compare/v0.1.1...v0.1.2
