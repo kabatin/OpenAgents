@@ -163,7 +163,9 @@ api.get("/ops/logs", async (c) => {
   return c.json({
     thresholdBytes: ROTATE_THRESHOLD_BYTES,
     items: inventory,
-    note: "devbot のログは rotate-bot-logs.sh の対象外です（肥大しても自動退避されません）",
+    note:
+      "常駐プロセス（run.py）が、BOTを起動・再起動するたびに10MBを超えたログを退避します（3世代まで）。" +
+      "長く動き続けている間は一時的に超えることがあります",
   });
 });
 
@@ -176,10 +178,22 @@ api.get("/ops/logs/:id", async (c) => {
   }
 });
 
-api.get("/ops/subloops", (c) => {
-  // scope は生のチャンネルID/ユーザーIDなので、引けるものは名前にして返す
+api.get("/ops/subloops", async (c) => {
+  // scope は生のチャンネルID/ユーザーID、またはエージェントID。引けるものは名前にして返す
   const items = subLoops();
-  return c.json({ items, idNames: resolveDiscordIds(items.map((i) => i.scope)) });
+  const agentNames: Record<string, string> = {};
+  try {
+    const agents = ((await readConfig())["agents"] ?? []) as { id?: unknown; name?: unknown }[];
+    for (const a of agents) {
+      if (typeof a.id === "string" && typeof a.name === "string") agentNames[a.id] = a.name;
+    }
+  } catch {
+    // 設定が読めなくても一覧は出す（名前の解決だけ諦める）
+  }
+  return c.json({
+    items,
+    idNames: { ...agentNames, ...resolveDiscordIds(items.map((i) => i.scope)) },
+  });
 });
 
 api.get("/activity", (c) => {

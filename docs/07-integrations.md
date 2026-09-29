@@ -31,7 +31,7 @@
 | `CYCLES` | 定期（既定30分ごと） | 定期処理。文字列を返すとホームchに投稿 |
 | `PREHOOKS` | 発言のたび | 決定的トリガー。True を返すと通常応答を止める |
 
-`ctx` は `chatbot/integrations.py` の `Context`（エージェントID・DBパス・
+`ctx` は `core/integrations.py` の `Context`（エージェントID・DBパス・
 発言者・管理者かどうか等）。**Discord固有のオブジェクトは入っていません** —
 将来 Slack などに載せ替えても連携が壊れないようにするためです。
 
@@ -57,11 +57,11 @@
 チームで共有したいときは、その連携だけ別のプライベートリポジトリにして
 ここに置く（またはシンボリックリンクを張る）のがおすすめです。
 
-## `plugins`（`chatbot/tools/`）との違い
+## `plugins`（`core/tools/`）との違い
 
 似た仕組みが2つあります。
 
-| | integrations（ここ） | plugins（`chatbot/tools/`） |
+| | integrations（ここ） | plugins（`core/tools/`） |
 |---|---|---|
 | 誰が書く | 人間 | AI（開発BOT）も書ける |
 | import | 制限なし | `os` / `subprocess` / `socket` 等は**禁止**（AST検査） |

@@ -140,7 +140,7 @@ export async function agentSummaries(config: Record<string, Json>): Promise<Agen
   summaries.push({
     id: "devbot",
     name: "開発BOT",
-    role: "開発BOT。他のBOTを監視し、承認つきで自分たちのコードを直す。",
+    role: "他のBOTを見張り、人の承認つきで自分たちのコードを直す",
     homeChannelId: String(dev["dev_channel_id"] ?? ""),
     service: "devbot",
     proactiveEnabled: Boolean(

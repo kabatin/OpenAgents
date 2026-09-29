@@ -70,7 +70,7 @@ xhigh / max）。深いほど丁寧ですが遅く・高くなります。検索
     "require_mention": false,             // true なら呼ばれた時だけ答える
     "name_call": { "enabled": false, "shadow": true, "aliases": ["あかり"] },
     "runner_enabled": false,              // true でWeb検索などが使える経路になる
-    "tool_loop": { "enabled": false, "shadow": true },   // 調べてから答える（下記）
+    "tool_loop": { "enabled": false, "shadow": true },   // 調べてから答える（下記・Claude Code のみ）
     "reminder_max_active": 30,            // 1人が同時に持てるリマインダーの上限
 
     "skills": {
@@ -135,10 +135,16 @@ DBに記録します（複数だと同じ発言が二重に記録されます）
   "rest": { "start_hour": 23, "end_hour": 8 },   // 深夜は休む
 
   "rescue":  { "enabled": true, "shadow": true },
-  "briefing": { "enabled": false }
-  // …ほかにも多数（ダッシュボードの「全体設定」で一覧できます）
+  "briefing": { "enabled": false },
+  "minutes_channel_id": "",   // 議事録チャンネル（TODO抽出と納期の声かけ）
+  "deadline": { "announce": true, "nudge": true, "stale_notice": true }
+  // …ほかにも多数（管理画面の「エージェント → 自分から動く機能」で一覧できます）
 }
 ```
+
+`deadline` は議事録TODOの投稿スイッチです。`announce`＝追跡を始めた報告、
+`nudge`＝期日の声かけ、`stale_notice`＝超過7日で手放す報告。止めるのは
+投稿だけで、追跡と記録（手放しの判定を含む）は続きます。
 
 ### 3値トグル（OFF / シャドー / 本番）
 
@@ -202,7 +208,10 @@ DBに記録します（複数だと同じ発言が二重に記録されます）
 "dev_bot": {
   "enabled": false,
   "token": "",
-  "dev_channel_id": ""
+  "dev_channel_id": "",
+  "model": "claude-opus-5-5",          // 実装に使うモデル
+  "verify_model": "claude-sonnet-5",   // 実装後の照合に使うモデル（空で省略）
+  "approval_expire_days": 7            // 👍待ちをこの日数で保留にして次へ進む
 },
 "meeting_bot": {
   "enabled": false,

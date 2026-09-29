@@ -11,8 +11,9 @@
  */
 import fs from "node:fs";
 import fsp from "node:fs/promises";
+import path from "node:path";
 
-import { logTargets } from "../paths.ts";
+import { LOGS_DIR, logTargets } from "../paths.ts";
 
 export type LogLevel = "error" | "warn" | "info" | "debug";
 
@@ -187,9 +188,9 @@ export function watchLog(
 export async function logInventory(): Promise<
   { id: string; label: string; path: string; sizeBytes: number | null; rotated: boolean }[]
 > {
-  // rotate-bot-logs.sh が面倒を見ているのは chatbot と meetingbot だけ。
-  // devbot のログは対象外なので、それを画面で分かるようにする。
-  const rotatedDirs = ["chatbot", "meetingbot"];
+  // 退避は常駐プロセス（core/supervisor.py の rotate_log）が起動のたびに行う。
+  // 対象は state/logs/ に置かれる、常駐プロセスが起動したBOTのログ
+  const logsRoot = path.resolve(LOGS_DIR) + path.sep;
   return Promise.all(
     logTargets().map(async (t) => {
       let sizeBytes: number | null = null;
@@ -201,13 +202,14 @@ export async function logInventory(): Promise<
       return {
         ...t,
         sizeBytes,
-        rotated: rotatedDirs.some((d) => t.path.includes(`/${d}/`)),
+        rotated: path.resolve(t.path).startsWith(logsRoot),
       };
     }),
   );
 }
 
-export const ROTATE_THRESHOLD_BYTES = 50 * 1024 * 1024;
+/** core/supervisor.py の LOG_MAX_BYTES と揃える（超えたら次の起動で退避される） */
+export const ROTATE_THRESHOLD_BYTES = 10 * 1024 * 1024;
 
 export function existsSync(file: string): boolean {
   return fs.existsSync(file);

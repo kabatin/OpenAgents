@@ -176,10 +176,13 @@ function ActivityItem({
   row: r,
   guildId,
   dayHeader,
+  names,
 }: {
   row: ActivityRow;
   guildId: string | null;
   dayHeader: string | null;
+  /** エージェントIDから表示名へ（設定由来。固定の対応表は持たない） */
+  names: Record<string, string>;
 }) {
   const [open, setOpen] = useState(false);
   const url = discordUrl(guildId, r.channelId, r.postedMessageId);
@@ -210,10 +213,10 @@ function ActivityItem({
           <span className="tnum mt-0.5 w-10 shrink-0 text-2xs text-faint">
             {r.createdAt.slice(11, 16)}
           </span>
-          <Avatar id={r.agentId} name={agentLabel(r.agentId)} size="sm" />
+          <Avatar id={r.agentId} name={agentLabel(r.agentId, names)} size="sm" />
           <span className="min-w-0 flex-1">
             <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
-              <span className="font-medium">{agentLabel(r.agentId)}</span>
+              <span className="font-medium">{agentLabel(r.agentId, names)}</span>
               {r.channelName !== null && (
                 <span className="text-muted">が #{r.channelName} で</span>
               )}
@@ -392,6 +395,7 @@ export function OverviewPage({
                   key={r.id}
                   row={r}
                   guildId={guildId}
+                  names={agentNames}
                   dayHeader={
                     i === 0 ||
                     dayOf(rows[i - 1]!.createdAt) !== dayOf(r.createdAt)

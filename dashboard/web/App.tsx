@@ -136,13 +136,14 @@ export default function App() {
   }, [reloadSetup, reload]);
 
   // ナビに出すエージェントは設定から来る（固定の一覧は持たない）。
-  // 開発BOTは agents[] に居ない別プロセスなので、有効なときだけ足す
+  // 開発BOTは有効なときだけ足す。概要の agents に開発BOTのカードが含まれる
+  // ことがあるので、id で重複を除く（二重に並んでいた）
   const navAgents = [
     ...agents.map((a) => ({ id: a.id, label: a.name })),
     ...(liveServices.some((s) => s.id === "devbot" && s.enabled)
       ? [{ id: "devbot", label: "開発BOT" }]
       : []),
-  ];
+  ].filter((a, i, arr) => arr.findIndex((x) => x.id === a.id) === i);
 
   if (setupState?.needsSetup === true) {
     return (

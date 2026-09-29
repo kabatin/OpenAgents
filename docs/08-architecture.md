@@ -1,7 +1,7 @@
 # 全体設計
 
 チャットの全会話を SQLite に蓄積する取込基盤と、その上で動くAIエージェント。
-**1プロセスで複数のBotアカウントを同時に動かします**（3体いても3プロセスにはなりません）。
+**1プロセスで複数のBotアカウントを同時に動かします**（何体いてもプロセスは1本です）。
 
 ## 層の分け方
 
@@ -67,7 +67,7 @@ platforms/
   "agents": [
     {"id": "agent1", "name": "エージェント1", "token": "...",
      "home_channel_id": "...", "archiver": true,
-     "persona_files": ["../../IDENTITY.md", "personas/agent1_tone.md"], "role": ""},
+     "persona_files": ["personas/agent1.md"], "role": ""},
     {"id": "agent2", "name": "エージェント2", "token": "...",
      "home_channel_id": "...",
      "persona_files": ["personas/design.md"],
@@ -80,7 +80,7 @@ platforms/
 - `history_limit`(既定10) はループガードの窓。`context_history_limit`(既定30) が
   「直近の会話」として応答に渡す過去メッセージ件数（会話の連続性用・別枠）
 - `token` が空のエージェントは起動時にスキップされる（ログに出る）
-- `archiver: true` はちょうど1体。persona_files はこのディレクトリ基準の相対パス
+- `archiver: true` はちょうど1体。persona_files はリポジトリ直下からの相対パス
 - **config.json と archive.db は gitignore 済み（トークン入りのためコミット禁止）**
 
 ## エージェントの増員手順
@@ -90,21 +90,22 @@ platforms/
    Public Bot OFF、Reset Token でトークン取得
 2. OAuth2 URL Generator: scope=`bot`、権限 = View Channels / Send Messages /
    Send Messages in Threads / Read Message History / Embed Links → サーバーへ招待
-3. `personas/<id>.md` を作成（IDENTITY.md の章構成＋末尾に【話し方】）
+3. `personas/<id>.md` を作成（`personas/*.template.md` を複製して書き換える。管理画面の「性格」からも作れます）
 4. `config.json` の agents に追記 → 再起動
 
 ## 運用
 
 ```bash
-# 常駐（launchd）
-launchctl kickstart -k gui/$(id -u)/com.discord.archivebot   # 再起動
-tail -f bot.log                                              # ログ
+# 常駐（全BOTの親プロセス。自動起動は docs/05-autostart.md）
+python run.py
+tail -f state/logs/archivebot.log                            # ログ
 
-# 単体テスト（Discord抜きで回答を試す）
-./venv/bin/python ask.py --agent design "バナーどうしたらいい？"
+# Discord抜きで回答を試す
+./venv/bin/python -m core.ask --agent agent1 "納期はどうなってる？"
 
 # ユニットテスト
-./venv/bin/python -m unittest test_units -v
+./venv/bin/python -m unittest discover -s core -t . -q
+./venv/bin/python -m unittest discover -s platforms -t . -q
 
 # 模範Q&Aの回帰採点（週1回、cron や launchd で回す想定・Claude Code の費用が掛かる）
 ./venv/bin/python -m core.golden_eval --set curated
@@ -128,7 +129,7 @@ key は種別の頭文字＋id（A6 / H27 / R57）。`list_all` が3種を期日
 1行で手放す（`action_items.overdue_at` が起点）。
 ダッシュボードの「データ → 追跡タスク」タブは同じビューの閲覧専用。
 
-## LLM呼び出しの計測（v4 Phase 0）
+## LLM呼び出しの計測
 
 すべての Claude Code 起動は `core/invoke_claude.py` を通る（通常回答・観察ループ・
 要約・YouTube/PDF要約・議事録BOT・開発BOT）。`search.run_claude` も Claude Code を
@@ -188,28 +189,28 @@ docx/xlsx/pptx/音声/動画は非対応（読めない旨を正直に返す）�
 あわせて、複数のエージェントが同じ文面を送る共通層（相互レビューの依頼など）は
 特定の口調を持たせない。
 
-## Webhook人格（自己増殖の試用枠 / Phase 2）
+## Webhook人格（Botを増やさずに試す人格）
 
 Botアカウントを増やさず、**Webhook**（メッセージ単位で名前・アイコンを差替）で
-新しい役割の「試用枠エージェント」を産む。既存3体（本物Bot）とは独立で無干渉。
+新しい役割の「試用枠エージェント」を産む。本物のBotとは独立で干渉しない。
 
 - **仕組み**: 受信はアーカイブ担当クライアント（全ch受信）が代行し、投稿だけWebhookで人格名・
   アイコンを差し替える。人格の定義は archive.db の `agents` テーブル（設定の束）
-- **産み方**: `./venv/bin/python manage_agents.py add --id keiri --name AI経理 \
-  --home-channel <ch_id> --persona personas/keiri.md [--avatar <url>]` → archivebot再起動で参加
-- **一覧/退役**: `manage_agents.py list` / `manage_agents.py retire --id keiri`
+- **産み方**: `./venv/bin/python -m platforms.discord.manage_agents add --id keiri --name AI経理 \
+  --home-channel <ch_id> --persona personas/keiri.md [--avatar <url>]` → 会話エージェントの再起動で参加
+- **一覧/退役**: `manage_agents list` / `manage_agents retire --id keiri`（同じく `-m` で起動）
 - **応答条件**: そのホームchの人間発言に、その人格として応答（Web検索・ルール記憶も持つ）。
   Webhook投稿・Bot・他エージェント名指し・無テキストには反応しない（無限ループ遮断）
 - **なりすまし防止**: 名前・アイコンは台帳の値をコードが強制。登録時にid/ホームch/名前の
-  衝突（本物Bot・既存人格）を弾く。globalルール設定は管理者のみ（Phase 1と共通）
+  衝突（本物Bot・既存人格）を弾く。globalルール設定は管理者のみ（本物のBotと同じ）
 - **制約（割り切り）**: リアクション・オンライン表示・VC参加は不可（VCが要る役割は
   本物Botで作る）。typingはアーカイブ担当名義で代理表示。名前の横に「APP」バッジ
 - **昇格（Tier 2）**: 実績が出た人格は Developer Portal でBotアプリを作り本物Botへ昇格
-  （人格・ルール・記憶は引き継ぐ）。※昇格フローはPhase 4で自動化予定
+  （人格・ルール・記憶は引き継ぐ）。昇格は今のところ手作業
 
 ### AI人事（採用でエージェントを増やす人格・skill=hire）
 
-AI人事（AI鈴木）は「組織の穴を見つけて新エージェントを採用(spawn)」する人格。
+AI人事は「組織の穴を見つけて新エージェントを採用(spawn)」する人格。
 判断は人間が握る＝**提案と実行を分離**する（設計思想）。
 
 - 相談 → AI人事が既存メンバーで足りるか吟味 → 要ると判断したら `[HIRE:]` マーカーで**提案**
@@ -219,10 +220,10 @@ AI人事（AI鈴木）は「組織の穴を見つけて新エージェントを�
   → ペルソナ生成 → 台帳登録 → 再起動なし反映 → 配属先で自己紹介
 - 安全弁: 承認はアトミック確保（二重spawn防止）・👍のみ・管理者のみ、上限
   `MAX_WEBHOOK_AGENTS`、採用人格は hireスキル非継承（増殖チェーン不可）
-- 登録: `manage_agents.py add --id jinji --name AI鈴木 --persona personas/jinji.md
+- 登録: `manage_agents add --id jinji --name AI人事 --persona personas/jinji.md
   --home-channel <ch> --avatar avatars/jinji.png --skill hire`
 
-## 育つ土台（ルール記憶・誠実な失敗・フィードバック / Phase 1）
+## 育つ土台（ルール記憶・誠実な失敗・フィードバック）
 
 新要求を「コード変更」でなく「データ（ルール）」として吸収する（`rules.py`）。
 runner経路のエージェントに有効。
@@ -244,8 +245,8 @@ runner経路のエージェントに有効。
   収集（物差しの原料。archiverが raw reaction イベントで記録、著者はarchive.dbから照会）
 - **勝ちパターン学習**: 自発発言への👍は「良い例」として教訓帳
   （proactive_lessons / polarity='up'）に自動記録され、以後の自発判断プロンプトへ
-  注入される（👎教訓帳RM#7の対称。👍全解除で引っ込む・可逆）
-- **自己採点の週次蒸留**: 投稿後セルフレビュー（RM#14）の低スコア回答から
+  注入される（👎の教訓帳と対になる。👍を全部外せば引っ込む・可逆）
+- **自己採点の週次蒸留**: 投稿後の自己採点で低スコアだった回答から
   共通の改善因子を週1で蒸留し（`selfreview_distill.py`）、「自己改善メモ」として
   通常回答のプロンプトへ常時注入する。助言は最新の蒸留だけが生きる差し替え式。
   設定: `proactive.selfreview_distill: {enabled, weekday, hour}`。
@@ -254,7 +255,7 @@ runner経路のエージェントに有効。
 
 ## Web検索スキル（全員・runner経路）
 
-3体とも WebSearch / WebFetch を基本スキルとして持つ（`runner_enabled: true` の
+全エージェントが WebSearch / WebFetch を基本スキルとして持つ（`runner_enabled: true` の
 runner経路でのみ有効）。URLを貼られたり最新情報・社外の事実を求められると、
 claude CLIが実際に検索・取得して出典URL付きで答える。モデルが必要と判断した時
 だけ発火するため、社内ログで完結する質問や雑談ではWebを使わない。
@@ -309,13 +310,11 @@ claude CLIが実際に検索・取得して出典URL付きで答える。モデ�
 ## YouTube要約（アーカイブ担当）
 
 アーカイブ担当のホームchにYouTube URLを投稿するだけで動画を要約して返信する。
-他のchでは「@エージェント1 + URL」のときだけ反応（OpenClaw時代の
-youtube-summarize スキルの移植）。
+他のchでは「@エージェント + URL」のときだけ反応する。
 
 - **仕組み**: マーカー方式と違いLLMは発動判断に関与しない決定的プリフック。
   bot.py の `_maybe_youtube_summary` が `_trigger` の "home"/"human_mention"
-   結果をゲートに正規表現でURL検知（メール私書箱の `_maybe_email_detail` と
-  同型）。字幕は `youtube-transcript-api` でInnertube API経由取得
+   結果をゲートに正規表現でURL検知。字幕は `youtube-transcript-api` でInnertube API経由取得
   （動画ダウンロード不要・APIキー不要）→ claude CLIでアーカイブ担当口調に要約
 - **対応URL**: watch?v= / youtu.be / shorts / live（`<URL>`包みも可）。
   裸の11桁IDは誤爆防止のため非対応。複数URLは先頭1本だけ処理
@@ -328,7 +327,7 @@ youtube-summarize スキルの移植）。
   他エージェントへの展開も同フラグ1行（require_mention組はメンション時のみ発動）
 - 単体テスト: `./venv/bin/python youtube_summary.py <YouTube URL>`
 
-## Phase 3: 質問BOT（実装済み）
+## 検索と回答
 
 - 検索: `search.py` — claude CLIで同義語込みキーワード抽出 → trigram全文検索
   ＋チャンネル名マッチ。
@@ -336,12 +335,12 @@ youtube-summarize スキルの移植）。
 
 ### 既知の限界と次の一手
 - trigramキーワード検索は同義語展開で補っているが、語彙が大きくズレる質問は
-  取りこぼし得る。本格的な意味検索は **Phase 2b** で追加予定
-  （Ollama(bge-m3) か Python3.11 venv の sentence-transformers → sqlite-vec）。
-- Phase 4: 画像のVision説明文生成（実体は持たず説明テキストのみ）。
+  取りこぼし得る。意味検索（埋め込み＋ベクトル検索）は未実装。ツールループを
+  使うと、エージェントが言い回しを変えて自分で検索し直すので、実用上はかなり補える。
+- 画像の中身は検索対象にならない（添付の実体を保存しないため）。
 
 
-## ツールループ（v4 Phase 1 / core/archive_tools）
+## ツールループ（core/archive_tools）
 
 回答経路を「1回生成 → 事後にマーカーを正規表現で拾って実行」から、
 **モデルが必要な時に自分で社内データを引き、書いた結果を見てから本文を書く**
@@ -366,7 +365,7 @@ youtube-summarize スキルの移植）。
   失敗した write があれば呼び出し側が失敗を1行目に置く。search のヒット0は
   「🔎 該当なし」を1行出す。permission_denials は RBAC の穴の検出器
 - **honesty の縮小**: 本番のツールループでは `detect_fake_done_by_tools`
-  （完了主張 × 該当ツール未呼び出し）で判定し、-# 行の正規表現は旧経路の保険に
+  （完了主張 × 該当ツールの成功なし）で判定し、-# 行の正規表現は旧経路の保険に
 - **起動**（`launch.py`）: `build(ctx)` が `--mcp-config` 文字列と allow を作る。
   サーバは `python -m core.archive_tools.server`（cwd は repo ルート固定）。
   `skill_note(live)` が system に足す告知、`strip_retired_markers` がツールに
@@ -384,17 +383,18 @@ youtube-summarize スキルの移植）。
    max_budget_usd / inject_search_hits / inject_facts / prompt_style` を渡す
 2. 戻り値の `events` から `_apply_tool_evidence` が -# 行を付ける（本番）か記録だけ
    する（シャドー）。使えたのに使わなかった回答も `proactive_log`（kind=tool_loop,
-   action=unused）に残す＝使用率が Step D の物差し。`permission_denials` は
+   action=unused）に残す＝使用率が注入削減（下表の D）の物差し。`permission_denials` は
    kind=tool_denied
 3. 本番では、ツールに置き換えたマーカー（REMIND / RULE / FACT / ACTION / GLOSSARY /
    TERM / PROACTIVE_QUOTA）は `strip_retired_markers` で除去だけし、該当スキルの
    指示文も注入しない（マーカーとツールの二重経路を作らない）。「できたフリ」は
-   `tools_used` で判定する
+   **成功した**ツール（`evidence.tools_succeeded`）で判定する。呼んだが失敗した
+   ツールは裏付けにならない
 4. 自己採点（self_review）には `evidence.summarize_for_review(events)` を渡す
 5. 観察ループ（二次判定 `proactive.decide_reply`・放置質問の救出）にも
    `_observe_tool_kwargs` で **読み取りのみ**（dry_run）のツールを渡す
 
-段階導入とロールバック（設計書の Step A〜D）:
+段階導入とロールバック:
 
 | Step | 内容 | 戻し方 |
 |---|---|---|
@@ -407,3 +407,27 @@ youtube-summarize スキルの移植）。
 前ターンの「ツール無しで回答」の惰性でツールを使わなくなる（実測: 告知を強めても 0 回）。
 直近の会話は history 注入で残るので文脈は保たれる。シャドー観察の一次証拠
 （実プロンプト・system・全イベント）は `state/toolloop/<message_id>.json` に残る。
+
+## 開発BOT（platforms/discord/dev）
+
+Discordの「AI開発室」で起票を指示すると、本番とは別の作業ツリーで `claude -p` が
+実装し、テストが通ったものだけを管理者の👍で本番に反映します。実装ジョブは
+macOS / Linux 専用です（無音検知の `select` とプロセスツリーの停止が POSIX 前提）。
+
+暴走しないよう、何重にも止めます。
+
+- **書き込み範囲**（`dev_gate.py`・PreToolUse フック）: `core/` `platforms/`
+  `integrations/` `dashboard/` `docs/` の配下だけ。`personas/` `knowledge/`
+  `state/`（利用者のもの）、ルート直下、`node_modules` などは拒否。
+  安全弁（`dev_gate.py` `deploy.py` `gate.py`）と設定・秘密（`config.json` `.env` `*.db`）は
+  範囲内でも拒否
+- **開発BOT自身は不可侵**: `platforms/discord/dev/` は書き込み禁止。さらに反映の直前に
+  差分を見て、ここに触れていれば止める（`deploy.protected_changes`。Bash の `sed -i` の
+  ようにフックを通らない書き込みもここで止まる）
+- **読み取り**: ホーム配下は秘密のある場所（`~/.ssh` `~/.aws` など）だけを名指しで拒否。
+  macOS の TCC 対象（`~/Documents` など）は deny に書くと常駐プロセスが許可待ちで
+  固まるので、Bash 側の名指し拒否で守る
+- **反映前の確認**: 実装とは別のモデルが起票と差分を照合し、承認者に一言添える。
+  中核ファイルに触れる差分には 🧠 の警告。👍待ちは `dev_bot.approval_expire_days`
+  （既定7日）で保留にして次の提案へ進む
+- 規約は `platforms/discord/dev/dev-guidelines.md` にあり、実装プロンプトへそのまま注入される
