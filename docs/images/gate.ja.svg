@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="470" viewBox="0 0 1280 470" role="img" aria-label="自分から話す前に、どのループも同じ関門を通る">
+  <title>自分から話す前に、どのループも同じ関門を通る</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0B1020"/><stop offset="60%" stop-color="#101A33"/>
+      <stop offset="100%" stop-color="#0A0F1E"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#7C8CFF"/><stop offset="100%" stop-color="#4CC9E8"/>
+    </linearGradient>
+    <linearGradient id="accentFill" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#7C8CFF" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="#4CC9E8" stop-opacity="0.22"/>
+    </linearGradient>
+    <pattern id="dots" width="26" height="26" patternUnits="userSpaceOnUse">
+      <circle cx="1.5" cy="1.5" r="1.5" fill="#8FA0D0" fill-opacity="0.08"/>
+    </pattern>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#A7B0CC"/>
+    </marker>
+    <marker id="arrowAccent" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#4CC9E8"/>
+    </marker>
+  </defs>
+  <rect width="1280" height="470" rx="20" fill="url(#bg)"/>
+  <rect width="1280" height="470" rx="20" fill="url(#dots)"/>
+  <text x="40" y="58" font-family="-apple-system, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Yu Gothic UI', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="700" fill="#4CC9E8" text-anchor="start" letter-spacing="0.06em"><tspan x="40" dy="0.0">自分から話す前に、どのループも同じ関門を通る</tspan></text>
+  <rect x="40" y="150" width="220" height="104" rx="14" fill="#141C33" stroke="#2A3558" stroke-width="1.5"/>
+  <text x="150.0" y="183.77999999999997" font-family="-apple-system, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Yu Gothic UI', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="19" font-weight="700" fill="#E8ECF8" text-anchor="middle"><tspan x="150.0" dy="0.0">観察ループ</tspan></text>
+  <text x="150.0" y="213.27999999999997" font-family="-apple-system, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Yu Gothic UI', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="400" fill="#A7B0CC" text-anchor="middle"><tspan x="150.0" dy="0.0">30種類が</tspan><tspan x="150.0" dy="20.3">数分おきに見回る</tspan></text>
+  <rect x="320" y="150" width="210" height="104" rx="52.0" fill="#141C33" stroke="#7C8CFF" stroke-width="1.8"/>
+  <text x="425.0" y="195.675" font-family="-apple-system, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Yu Gothic UI', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="17" font-weight="600" fill="#E8ECF8" text-anchor="middle"><tspan x="425.0" dy="0.0">言うべきことが</tspan><tspan x="425.0" dy="24.6">あるか？</tspan></text>
+  <rect x="590" y="150" width="190" height="104" rx="52.0" fill="#141C33" stroke="#7C8CFF" stroke-width="1.8"/>
+  <text x="685.0" y="195.675" font-family="-apple-system, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Yu Gothic UI', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="17" font-weight="600" fill="#E8ECF8" text-anchor="middle"><tspan x="685.0" dy="0.0">シャドー</tspan><tspan x="685.0" dy="24.6">モードか？</tspan></text>
+  <rect x="840" y="150" width="220" height="104" rx="52.0" fill="#141C33" stroke="#7C8CFF" stroke-width="1.8"/>
+  <text x="950.0" y="195.675" font-family="-apple-system, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Yu Gothic UI', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="17" font-weight="600" fill="#E8ECF8" text-anchor="middle"><tspan x="950.0" dy="0.0">今日の上限内？</tspan><tspan x="950.0" dy="24.6">深夜ではない？</tspan></text>
+  <rect x="1112" y="150" width="136" height="104" rx="14" fill="url(#accentFill)" stroke="url(#accent)" stroke-width="2"/>
+  <text x="1180.0" y="207.44" font-family="-apple-system, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Yu Gothic UI', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="17" font-weight="700" fill="#E8ECF8" text-anchor="middle"><tspan x="1180.0" dy="0.0">Discordに投稿</tspan></text>
+  <path d="M260 202.0 H316" fill="none" stroke="#4CC9E8" stroke-width="2" marker-end="url(#arrowAccent)"/>
+  <path d="M530 202.0 H586" fill="none" stroke="#4CC9E8" stroke-width="2" marker-end="url(#arrowAccent)"/>
+  <text x="560.0" y="190.0" font-family="-apple-system, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Yu Gothic UI', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#4CC9E8" text-anchor="middle"><tspan x="560.0" dy="0.0">ある</tspan></text>
+  <path d="M780 202.0 H836" fill="none" stroke="#4CC9E8" stroke-width="2" marker-end="url(#arrowAccent)"/>
+  <text x="810.0" y="190.0" font-family="-apple-system, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Yu Gothic UI', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#4CC9E8" text-anchor="middle"><tspan x="810.0" dy="0.0">いいえ</tspan></text>
+  <path d="M1060 202.0 H1108" fill="none" stroke="#4CC9E8" stroke-width="2" marker-end="url(#arrowAccent)"/>
+  <text x="1086.0" y="190.0" font-family="-apple-system, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Yu Gothic UI', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#4CC9E8" text-anchor="middle"><tspan x="1086.0" dy="0.0">はい</tspan></text>
+  <path d="M425.0 150 C425.0 88 150.0 88 150.0 146" fill="none" stroke="#A7B0CC" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="287.5" y="94" font-family="-apple-system, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Yu Gothic UI', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#A7B0CC" text-anchor="middle"><tspan x="287.5" dy="0.0">ない → 黙る</tspan></text>
+  <rect x="590" y="348" width="470" height="86" rx="14" fill="#141C33" stroke="#2A3558" stroke-width="1.5" stroke-dasharray="6 5"/>
+  <text x="825.0" y="383.015" font-family="-apple-system, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Yu Gothic UI', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="17" font-weight="700" fill="#E8ECF8" text-anchor="middle"><tspan x="825.0" dy="0.0">記録だけして、投稿しない</tspan></text>
+  <text x="825.0" y="410.515" font-family="-apple-system, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Yu Gothic UI', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="400" fill="#A7B0CC" text-anchor="middle"><tspan x="825.0" dy="0.0">管理画面で中身を読み、発言させるかを人が決める</tspan></text>
+  <path d="M685.0 254 V344" fill="none" stroke="#A7B0CC" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="695.0" y="306.0" font-family="-apple-system, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Yu Gothic UI', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#A7B0CC" text-anchor="start"><tspan x="695.0" dy="0.0">はい</tspan></text>
+  <path d="M950.0 254 V344" fill="none" stroke="#A7B0CC" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="960.0" y="306.0" font-family="-apple-system, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Yu Gothic UI', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#A7B0CC" text-anchor="start"><tspan x="960.0" dy="0.0">いいえ</tspan></text>
+</svg>

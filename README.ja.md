@@ -96,7 +96,7 @@ v0.2.0 からは、回答中に**AI自身が社内データを引き直せます
 書いてから失敗する構造そのものが無くなります。既定はオフで、
 シャドー（記録のみ）→本番の順に段階導入できます。
 
-### 呼ばれなくても働く（30種類の観察ループ）
+### 呼ばれなくても働く（約30種類の観察ループ）
 
 定期的にチャンネルを見回り、気づいたことがあるときだけ発言します。例えば:
 
@@ -107,18 +107,9 @@ v0.2.0 からは、回答中に**AI自身が社内データを引き直せます
 - 朝のブリーフィング、週次レポート、週1のタブロイド風社内新聞
 - 長く休んでいた人が戻ったら、不在中のあらすじを1回だけ渡す
 
-暴走はしません。どのループも、1文字でも投稿する前に同じ関門を通ります:
+暴走はしません。どのループも、1文字でも投稿する前に同じ関門を通ります。
 
-```mermaid
-flowchart LR
-    T["数分おき<br/>30種の観察ループが<br/>チャンネルを見回る"] --> Q{"本当に言うべき<br/>ことがあるか？"}
-    Q -->|ない| T
-    Q -->|ある| S{"シャドー<br/>モードか？"}
-    S -->|はい| L["記録だけで投稿しない<br/>— 管理画面で中身を見て<br/>発言させるかを人間が決める"]
-    S -->|いいえ| B{"今日の上限内か？<br/>深夜ではないか？"}
-    B -->|いいえ| L
-    B -->|はい| M["Discordに投稿"]
-```
+<img src="docs/images/gate.ja.svg" alt="観察ループが投稿する前の関門: 言うべきことがあるか → シャドーモードか → 今日の上限内で深夜ではないか → 投稿。シャドー中や上限超えは記録だけして投稿しない" width="100%">
 
 ### できないことは、できないと言う
 
@@ -139,6 +130,11 @@ flowchart LR
 
 ![設定画面](docs/images/settings.png)
 *各機能は「OFF ／ シャドー ／ 本番」の3択。設定キー名ではなく、使う人の言葉で書いてあります*
+
+### 覚えていること・追いかけていることが見える
+
+![データ画面](docs/images/data.png)
+*ルール・追跡中のタスク・学んだこと・AIの呼び出しコストを目的別に一覧。変えるときは Discord で話しかけます*
 
 ### 性格もブラウザで
 
@@ -175,33 +171,17 @@ git pull --ff-only && python start.py
 
 ## 構成
 
-```mermaid
-flowchart LR
-    D["💬 Discord"] <--> P["platforms/discord"]
+<img src="docs/images/architecture.ja.svg" alt="構成図: Discord と platforms/discord がつながり、core が検索・回答生成・観察ループを担う。会話は state/archive.db（SQLite）に残り、PCの外に出るのは Claude Code / Codex CLI へ渡す質問と必要な文脈だけ" width="100%">
 
-    subgraph host["あなたのPC — プロセスは1本"]
-        direction LR
-        P --> C["core/<br/>検索 · 回答生成 · 観察ループ"]
-        C --> DB[("state/archive.db<br/>SQLite + trigram全文検索")]
-        W["dashboard/<br/>管理画面（localhost）"] -. "config.json" .-> C
-    end
-
-    C --> AI["Claude Code / Codex CLI<br/>質問＋検索で引いた文脈だけを渡す"]
-```
-
-```
-core/          プラットフォーム非依存の中核（検索・回答生成・観察ループ）
-platforms/
-  discord/     Discord実装 ＋ 開発BOT・議事録BOT
-  slack/       未実装（インターフェースと手順書のみ）
-  line/        未実装
-  telegram/    未実装
-dashboard/     管理画面（設定・監視・性格編集）
-integrations/  外部サービス連携の置き場
-personas/      性格ファイル
-knowledge/     前提知識ファイル
-config.json    設定はこの1枚だけ
-```
+| フォルダ | 中身 |
+|---|---|
+| `core/` | 検索・回答生成・観察ループ・ツールループ。Discord を知らない中核 |
+| `platforms/discord/` | Discord 実装（＋開発BOT・議事録BOT）。Slack・LINE・Telegram はインターフェースと手順書のみ |
+| `dashboard/` | 管理画面（セットアップ・設定・監視・性格編集） |
+| `integrations/` | 外部サービス連携の置き場 |
+| `personas/` `knowledge/` | 性格と前提知識。あなたのファイルで、Git には載りません |
+| `state/` | 会話の記録（SQLite）・ログなど、動かすと作られるもの |
+| `config.json` | 設定はこの1枚だけ（画面から編集できます） |
 
 `core/` は Discord も Slack も知りません。`platforms/` の実装が
 `core.chat.ChatPlatform` を満たすことで繋がります

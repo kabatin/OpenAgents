@@ -39,7 +39,7 @@ provider you picked — nothing is uploaded wholesale, and there is no server
 in the middle.
 
 **The useful colleague is the one who speaks up first.**
-Being answerable is table stakes. OpenAgents runs 30 observation loops that
+Being answerable is table stakes. OpenAgents runs about 30 observation loops that
 periodically look at the channel and speak *only* when there is something to
 say: a deadline nobody is watching, a promise made two weeks ago, a decision
 that contradicts an earlier one. With a daily cap, a night-time quiet period,
@@ -93,25 +93,16 @@ Since v0.2.0 the model can also **query the archive itself while answering**
 and every side effect such as a reminder goes through a tool so the reply is
 written *after* seeing the result. Off by default; roll out shadow → live.
 
-**Works unprompted — 30 observation loops.** It periodically scans channels and
+**Works unprompted — about 30 observation loops.** It periodically scans channels and
 speaks only when it has something: extracting action items from meeting minutes
 and **nudging owners before deadlines**, remembering "I'll do it later"
 promises and following up, answering questions nobody answered for 24h,
 flagging decisions that **contradict earlier ones**, morning briefings, weekly
 reports, even a tabloid-style weekly newspaper.
 
-It won't spam you. Every loop passes the same gate before a word is posted:
+It won't spam you. Every loop passes the same gate before a word is posted.
 
-```mermaid
-flowchart LR
-    T["every few minutes<br/>30 observation loops<br/>scan the channels"] --> Q{"anything actually<br/>worth saying?"}
-    Q -->|no| T
-    Q -->|yes| S{"in shadow<br/>mode?"}
-    S -->|yes| L["recorded, never posted<br/>— you review it in the<br/>dashboard and decide"]
-    S -->|no| B{"under today's cap?<br/>outside quiet hours?"}
-    B -->|no| L
-    B -->|yes| M["post to Discord"]
-```
+<img src="docs/images/gate.en.svg" alt="The gate before an observation loop posts: anything worth saying → shadow mode? → under today's cap and outside quiet hours → post. In shadow mode or over the cap it is only recorded" width="100%">
 
 **Admits failure — mechanically.** If the agent claims it did something that
 didn't actually run, that's detected deterministically and **corrected in the
@@ -128,6 +119,11 @@ to itself **only after human approval**.
 
 ![Settings](docs/images/settings.png)
 *Each behaviour is off, shadow, or live — described in plain language, not config keys*
+
+### See what it remembers and what it's tracking
+
+![Data page](docs/images/data.png)
+*Rules, tracked tasks, what it has learned, and AI call costs — grouped by purpose. To change anything, just tell it in Discord*
 
 ### Personalities are edited in the browser too
 
@@ -162,31 +158,17 @@ this — including restarting the running supervisor in place — see
 
 ## Layout
 
-```mermaid
-flowchart LR
-    D["💬 Discord"] <--> P["platforms/discord"]
+<img src="docs/images/architecture.en.svg" alt="Layout: Discord talks to platforms/discord; core handles search, generation and the observation loops; every message is kept in state/archive.db (SQLite); the only thing that leaves your machine is the question plus retrieved context sent to Claude Code or Codex CLI" width="100%">
 
-    subgraph host["your machine — a single process"]
-        direction LR
-        P --> C["core/<br/>search · generation · observation loops"]
-        C --> DB[("state/archive.db<br/>SQLite + trigram FTS")]
-        W["dashboard/<br/>web UI on localhost"] -. "config.json" .-> C
-    end
-
-    C --> AI["Claude Code / Codex CLI<br/>your question + retrieved context"]
-```
-
-```
-core/          Platform-independent: search, generation, observation loops
-platforms/
-  discord/     Discord implementation (+ dev bot, meeting bot)
-  slack/       Not implemented — interface and notes only
-  line/        Not implemented
-  telegram/    Not implemented
-dashboard/     Web UI: setup, settings, monitoring, persona editing
-integrations/  Your own external-service connectors
-config.json    The only config file
-```
+| Folder | What's in it |
+|---|---|
+| `core/` | Search, generation, observation and tool loops — knows nothing about Discord |
+| `platforms/discord/` | The Discord implementation (+ dev bot, meeting bot). Slack, LINE and Telegram have an interface and notes only |
+| `dashboard/` | Web UI: setup, settings, monitoring, persona editing |
+| `integrations/` | Your own external-service connectors |
+| `personas/` `knowledge/` | Personalities and background knowledge — your files, not tracked by Git |
+| `state/` | The archive (SQLite), logs and other runtime files |
+| `config.json` | The only config file (editable from the UI) |
 
 `core/` knows nothing about Discord. Platform code satisfies
 `core.chat.ChatPlatform`, and a test enforces that the dependency never points
