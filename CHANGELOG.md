@@ -7,6 +7,15 @@
 
 ## [Unreleased]
 
+### 修正
+
+- **開発BOTが本体コードに書き込めなかった** — 書き込み許可が切り出し元の構成
+  （`scripts/` 配下）のままで、OpenAgents の `core/` や `platforms/` には一切
+  書けず、実質的に改修ができなかった。許可範囲を `core/` `platforms/`
+  `integrations/` `dashboard/` `docs/` にし、利用者のもの（`personas/`
+  `knowledge/` `state/`）とルート直下のファイル、`node_modules` などは触らせない。
+  改修プロンプトと開発ガイドラインの案内も OpenAgents の構成に直した
+
 ## [0.2.2] — 2026-09-29
 
 開発BOTが自分の承認ゲートを書き換えられた穴を塞ぎ、完了主張の裏付けを

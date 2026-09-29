@@ -21,40 +21,50 @@ class DecideTest(unittest.TestCase):
     def _d(self, tool, path):
         return dev_gate.decide(tool, {"file_path": path}, self.cwd)
 
-    # --- 許可（scripts/ 配下の通常コード） ---
-    def test_allows_archive_bot(self):
-        self.assertIsNone(self._d("Write", "scripts/chatbot/bot.py"))
+    # --- 許可（OpenAgents の本体コード） ---
+    def test_allows_core_and_platform_code(self):
+        # 以前は ai-senko の構成（scripts/）のまま許可していたため、
+        # OpenAgents の core/ や platforms/ に一切書けず改修ができなかった
+        for path in ("core/reminders.py", "core/test_x.py",
+                     "platforms/discord/bot.py", "integrations/example/plugin.py",
+                     "dashboard/server/config/catalog.agent.ts",
+                     "docs/02-configuration.md"):
+            self.assertIsNone(self._d("Write", path), path)
 
-    def test_allows_new_test(self):
-        self.assertIsNone(
-            self._d("Edit", "scripts/chatbot/test_x.py"))
+    def test_denies_user_data_and_root_files(self):
+        # 人格・知識・実行時状態は利用者のもの。ルート直下の設定類も触らせない
+        for path in ("personas/agent1.md", "knowledge/faq.md",
+                     "state/reminders.json", "run.py", "requirements.txt",
+                     "dashboard/node_modules/x/index.js",
+                     "scripts/chatbot/bot.py"):
+            self.assertIsNotNone(self._d("Write", path), path)
 
     # --- 拒否（安全弁は不可侵・秘密・種別） ---
-    def test_denies_outside_scripts(self):
+    def test_denies_outside_allowed_dirs(self):
         self.assertIsNotNone(self._d("Write", "tasks/todo.md"))
 
-    def test_denies_config_even_under_scripts(self):
+    def test_denies_config_even_under_allowed_dirs(self):
         self.assertIsNotNone(
-            self._d("Write", "scripts/chatbot/config.json"))
+            self._d("Write", "core/config.json"))
 
     def test_denies_dev_gate_itself(self):
-        self.assertIsNotNone(self._d("Edit", "scripts/devbot/dev_gate.py"))
+        self.assertIsNotNone(self._d("Edit", "core/dev_gate.py"))
 
     def test_denies_deploy(self):
-        self.assertIsNotNone(self._d("Edit", "scripts/devbot/deploy.py"))
+        self.assertIsNotNone(self._d("Edit", "core/deploy.py"))
 
     def test_denies_builder_gate(self):
-        self.assertIsNotNone(self._d("Write", "scripts/builder/gate.py"))
+        self.assertIsNotNone(self._d("Write", "core/tools/gate.py"))
 
     def test_denies_plist(self):
-        self.assertIsNotNone(self._d("Write", "scripts/whatever.plist"))
+        self.assertIsNotNone(self._d("Write", "platforms/whatever.plist"))
 
     def test_denies_db(self):
         self.assertIsNotNone(
-            self._d("Write", "scripts/chatbot/archive.db"))
+            self._d("Write", "core/archive.db"))
 
     def test_denies_env(self):
-        self.assertIsNotNone(self._d("Write", "scripts/.env"))
+        self.assertIsNotNone(self._d("Write", "core/.env"))
 
     def test_denies_absolute_outside(self):
         self.assertIsNotNone(self._d("Write", "/etc/passwd"))
@@ -64,7 +74,7 @@ class DecideTest(unittest.TestCase):
         return dev_gate.decide("Bash", {"command": cmd}, self.cwd)
 
     def test_bash_normal_allowed(self):
-        self.assertIsNone(self._bash("grep -rn reminder scripts/chatbot"))
+        self.assertIsNone(self._bash("grep -rn reminder core"))
         self.assertIsNone(self._bash(
             "../chatbot/venv/bin/python -m unittest discover"))
 
@@ -94,7 +104,7 @@ class DecideTest(unittest.TestCase):
     def test_bash_secret_glob_bypass_denied(self):
         # `config.js*` のようなglobでの config.json 回避も拾う
         self.assertIsNotNone(
-            self._bash("cat scripts/chatbot/config.js*"))
+            self._bash("cat core/config.js*"))
 
     def test_bash_package_install_denied(self):
         for cmd in ("pip install requests",
@@ -115,8 +125,8 @@ class DecideTest(unittest.TestCase):
         for cmd in ("git status", "git diff HEAD", "git add -A",
                     'git commit -m "fix pull request"',   # メッセージ中の語は誤爆しない
                     "git log --grep=push",
-                    "grep -rn 'async def' scripts/",
-                    "grep -rn functools scripts/chatbot",
+                    "grep -rn 'async def' core/",
+                    "grep -rn functools core",
                     "python3 -c 'print(1)'"):
             self.assertIsNone(self._bash(cmd), cmd)
 
@@ -126,8 +136,7 @@ class OwnCodeGuardTest(unittest.TestCase):
     """開発BOT自身のコードは丸ごと不可侵。承認ゲート（管理者の👍判定）は bot.py、
     書き込み許可とフックの組み立ては dev_pipeline.py にあり、ここを書き換えられると
     「自分の制限を緩める」「承認を省く」改修が👍1回で通りうる。
-    書き込み許可の範囲を platforms/ まで広げた状態で確かめる（許可範囲の外なら
-    元から拒否されるので、それではこの検査を確かめたことにならない）。"""
+    platforms/ は書き込み許可の範囲内なので、この検査が効いていることを確かめられる。"""
 
     def setUp(self):
         self.cwd = tempfile.mkdtemp()
@@ -136,8 +145,7 @@ class OwnCodeGuardTest(unittest.TestCase):
         shutil.rmtree(self.cwd, ignore_errors=True)
 
     def _d(self, tool, path):
-        return dev_gate.decide(tool, {"file_path": path}, self.cwd,
-                               allowed_subdir="platforms")
+        return dev_gate.decide(tool, {"file_path": path}, self.cwd)
 
     def test_denies_own_pipeline_and_gate(self):
         self.assertIsNotNone(self._d("Edit", "platforms/discord/dev/dev_pipeline.py"))

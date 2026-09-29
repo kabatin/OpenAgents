@@ -50,7 +50,7 @@ class ClassifyEventTest(unittest.TestCase):
 
     def test_edit_shows_basename(self):
         ev = self._asst([{"type": "tool_use", "name": "Edit",
-                          "input": {"file_path": "/w/scripts/x/bot.py"}}])
+                          "input": {"file_path": "/w/core/x/bot.py"}}])
         self.assertEqual(dev_pipeline.classify_event(ev), "✏️ 編集 bot.py")
 
     def test_bash_shows_first_line(self):
@@ -150,7 +150,7 @@ class SuitesForTest(unittest.TestCase):
         # 常に回す chatbot が先頭、触られたスイートが名前順で続く
         self.assertEqual(got, ["core", "platforms"])
 
-    def test_ignores_files_outside_scripts(self):
+    def test_ignores_files_outside_suites(self):
         got = dev_pipeline.suites_for(["README.md", "x.py"])
         self.assertEqual(got, ["core"])
 
@@ -320,7 +320,8 @@ class BuildPromptTest(unittest.TestCase):
             {"id": 9, "description": "OCR機能", "context": "X投稿"})
         self.assertIn("#9", p)
         self.assertIn("OCR機能", p)
-        self.assertIn("scripts/", p)
+        self.assertIn("core/", p)
+        self.assertNotIn("scripts/", p)   # ai-senko の構成を案内しない
         self.assertIn("config.json", p)   # 触ってはいけない旨
 
     def test_injects_custom_guidelines(self):

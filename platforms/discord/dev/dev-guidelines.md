@@ -6,11 +6,12 @@
 
 ## 最重要・統合方針
 - **まず既存の関連実装を Grep/Glob/Bash で探して読むこと**。いきなり新規ファイルを作らない。
-- 機能の多くは scripts/discord-archive/ にある（bot.py, reminders.py, rules.py, db.py,
-  agent_runtime.py 等）。既存機能の拡張なら**その既存モジュールを直接改修して統合する**。
+- 機能の中身（プラットフォーム非依存）は core/ にある（reminders.py, rules.py, db.py,
+  archive_tools/ 等）。Discord との配線は platforms/discord/（bot.py, agent_runtime.py,
+  agent_loops.py 等）。既存機能の拡張なら**その既存モジュールを直接改修して統合する**。
   孤立した新規ファイルを作るのは、本当にそれが正しい設計の時だけにする。
 
-## discord-archive のモジュール地図（新機能をどこに書くか）
+## モジュール地図（新機能をどこに書くか）
 - **bot.py は太らせない**（トリガー判定・応答フロー・起動処理のみ）。新機能の配線は種別で:
   - 観察ループ系（定期的に見て動く）→ ロジックは新モジュール、配線は
     **agent_loops.py の `_cycle_plan()` に1行**＋サイクルメソッド追加
@@ -47,7 +48,7 @@
 ## 設定を増やしたら管理ダッシュボードのカタログも直す（必須）
 
 config フラグを新設・変更したら、**同じ改修の中で**
-`scripts/dashboard/server/config/catalog.*.ts` にも1件足すこと。
+`dashboard/server/config/catalog.*.ts` にも1件足すこと。
 片方だけだと「動いているのに画面に出ない機能」または「画面にあるのに効かないトグル」が
 生まれ、人間が実態を誤解する。
 
@@ -60,7 +61,7 @@ config フラグを新設・変更したら、**同じ改修の中で**
 **使う人が読んで判断できる日本語**にする。`default` はコード側の実際の既定値。
 投稿を伴う機能は `kind: "tri"`（OFF/シャドー/本番）にして、既定はシャドー。
 
-検証: `cd scripts/dashboard && npm test && npm run typecheck`
+検証: `cd dashboard && npm test && npm run typecheck`
 （依存の追加は禁止。カタログ追記に新しい依存は要らない）
 
 ## 新機能の安全規約（フラグとシャドー）
@@ -73,7 +74,9 @@ config フラグを新設・変更したら、**同じ改修の中で**
   （worktreeでは実挙動を検証できないことへの対策。v3のproactive_logが手本）。
 
 ## 厳守する規約
-- 変更してよいのは scripts/ 配下のみ。次のファイルへの書き込みは拒否される:
+- 変更してよいのは core/ platforms/ integrations/ dashboard/ docs/ の配下のみ。
+  personas/ knowledge/ state/（利用者のもの）とルート直下のファイルは触れない。
+  次のファイルへの書き込みは許可範囲の中でも拒否される:
   dev_gate.py / deploy.py / gate.py / settings.json / config.json / .env / *.plist / *.db。
 - 開発BOT自身のコード（platforms/discord/dev/ 配下すべて。承認ゲートと安全弁を含む）は
   書き込みも反映もできない。改修が必要なら最終要約で申告する（人間の開発セッションで扱う）。

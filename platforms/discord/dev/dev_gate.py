@@ -2,9 +2,12 @@
 """開発BOT(開発BOT)の安全弁 — claude Code の PreToolUse hook（Phase 2）。
 
 builder/gate.py（tools/配下のみ許可）を土台に、本体改修を可能にするため
-書き込み許可を **scripts/ ツリー全体** へ広げる。ただし「脳と安全弁は不可侵」を
-守るため、次は scripts/ 配下でも書き込みを拒否する:
+書き込み許可を **本体コードのディレクトリ**（ALLOWED_SUBDIRS）へ広げる。
+人格・知識・実行時状態（personas/ knowledge/ state/）とルート直下のファイルは
+利用者のものなので対象外。ただし「脳と安全弁は不可侵」を守るため、次は
+許可範囲の中でも書き込みを拒否する:
   - 安全弁コード自身: dev_gate.py / deploy.py / gate.py
+  - 開発BOT自身のコード: platforms/discord/dev/ 配下すべて
   - 設定・秘密: settings.json / config.json / .env / *.db
   - 常駐定義: *.plist
   - .git 直接操作
@@ -19,8 +22,10 @@ import re
 import sys
 
 # 書き込みを許すルート（cwd 直下のこのサブツリーのみ）
-ALLOWED_SUBDIR = "scripts"
-# scripts/配下でも書き込み禁止のファイル名（basename一致・大小無視）
+ALLOWED_SUBDIRS = ("core", "platforms", "integrations", "dashboard", "docs")
+# 許可範囲の中でも拒否するパスの部品（依存の実体は触らせない）
+DENY_PARTS = {"node_modules", "__pycache__", "dist"}
+# 許可範囲の中でも書き込み禁止のファイル名（basename一致・大小無視）
 DENY_NAMES = {"dev_gate.py", "deploy.py", "gate.py",
               "settings.json", "config.json", ".env", ".git"}
 # 拡張子で拒否（常駐定義・DB実体・秘密系）
@@ -83,10 +88,11 @@ def _check_bash(command):
     return None
 
 
-def decide(tool_name, tool_input, cwd, *, allowed_subdir=ALLOWED_SUBDIR):
+def decide(tool_name, tool_input, cwd, *, allowed_subdirs=ALLOWED_SUBDIRS):
     """許可(None) か 拒否理由(str) を返す（純粋関数・テスト対象）。
     - Bash: 秘密ファイル名を含むコマンドを拒否（それ以外は許可）
-    - 書き込み系: cwd/scripts/ 配下のみ許可。保護名/保護拡張子は配下でも拒否
+    - 書き込み系: cwd 直下の allowed_subdirs 配下のみ許可。保護名/保護拡張子/
+      開発BOT自身のコードは配下でも拒否
     - その他ツールは介入しない（Read禁止は claude --settings 側の責務）"""
     if tool_name == "Bash":
         return _check_bash(tool_input.get("command", ""))
@@ -107,10 +113,14 @@ def decide(tool_name, tool_input, cwd, *, allowed_subdir=ALLOWED_SUBDIR):
         if (abspath + os.sep).startswith(guarded):
             return (f"{sub}/ は開発BOT自身のコード（承認ゲート・安全弁）のため"
                     "書き込めません。改修が必要なら最終要約で申告してください")
-    allowed_root = os.path.realpath(os.path.join(cwd, allowed_subdir)) + os.sep
-    if not (abspath + os.sep).startswith(allowed_root):
-        return (f"{allowed_subdir}/ 配下以外への書き込みは禁止です"
-                f"（脳と安全弁は不可侵）: {abspath}")
+    root = os.path.realpath(cwd)
+    rel = os.path.relpath(abspath, root)
+    parts = rel.replace("\\", "/").split("/")
+    if rel.startswith("..") or parts[0] not in allowed_subdirs:
+        return (f"{'/ '.join(allowed_subdirs)}/ 配下以外への書き込みは禁止です"
+                f"（利用者のファイルと脳・安全弁は不可侵）: {abspath}")
+    if DENY_PARTS & set(parts):
+        return f"{rel} は依存・生成物の置き場のため書き込めません"
     return None
 
 

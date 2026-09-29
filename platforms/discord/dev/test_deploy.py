@@ -12,17 +12,17 @@ from platforms.discord.dev import deploy
 class ParsePorcelainTest(unittest.TestCase):
     def test_parses_modified_untracked_and_rename(self):
         # -z 形式: NUL区切り・rename は「新パス\0旧パス」の2レコード
-        out = (" M scripts/a.py\0"
-               "?? scripts/new.py\0"
-               "R  scripts/renamed.py\0scripts/old.py\0")
+        out = (" M core/a.py\0"
+               "?? core/new.py\0"
+               "R  core/renamed.py\0core/old.py\0")
         self.assertEqual(deploy.parse_porcelain(out),
-                         ["scripts/a.py", "scripts/new.py",
-                          "scripts/renamed.py"])
+                         ["core/a.py", "core/new.py",
+                          "core/renamed.py"])
 
     def test_nonascii_paths_survive(self):
-        out = "?? scripts/日本語 ファイル.py\0"
+        out = "?? core/日本語 ファイル.py\0"
         self.assertEqual(deploy.parse_porcelain(out),
-                         ["scripts/日本語 ファイル.py"])
+                         ["core/日本語 ファイル.py"])
 
     def test_empty_output_means_clean(self):
         self.assertEqual(deploy.parse_porcelain(""), [])
