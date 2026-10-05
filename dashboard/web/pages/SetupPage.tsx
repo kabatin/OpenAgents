@@ -90,6 +90,111 @@ function Field({
   );
 }
 
+type HistoryChoice = "none" | "days" | "all";
+
+function historyDaysValid(mode: HistoryChoice, days: number): boolean {
+  return mode !== "days" || (Number.isInteger(days) && days >= 1 && days <= 3650);
+}
+
+/**
+ * 過去の会話をどこまで取り込むか。
+ * 取り込んだ会話だけが、エージェントの答える材料になる。
+ * どれを選んでも、セットアップ以降の会話は全部記録される。
+ */
+function HistoryChoiceField({
+  mode,
+  days,
+  onMode,
+  onDays,
+}: {
+  mode: HistoryChoice;
+  days: number;
+  onMode: (m: HistoryChoice) => void;
+  onDays: (d: number) => void;
+}) {
+  const options: { value: HistoryChoice; title: string; desc: string }[] = [
+    {
+      value: "none",
+      title: "取り込まない",
+      desc: "これから先の会話だけを覚えます。エージェントは、セットアップより前のやりとりを知りません。",
+    },
+    {
+      value: "days",
+      title: "直近の会話だけ取り込む（おすすめ）",
+      desc: "最近の決定や経緯には答えられます。大きなサーバーでも短時間で終わります。",
+    },
+    {
+      value: "all",
+      title: "すべて取り込む",
+      desc: "サーバーができてからの全会話を取り込みます。下の注意を読んでから選んでください。",
+    },
+  ];
+  return (
+    <fieldset className="space-y-2">
+      <legend className="mb-1 text-xs font-medium">過去の会話を取り込みますか？</legend>
+      <p className="text-2xs leading-relaxed text-muted">
+        エージェントは、取り込んだ会話を検索して答えます。どれを選んでも、
+        セットアップ以降の会話はすべて記録されます。あとから「全体設定」で範囲を広げることもできます。
+      </p>
+      {options.map((o) => (
+        <label
+          key={o.value}
+          className={`flex cursor-pointer gap-2.5 rounded border px-3 py-2 ${
+            mode === o.value ? "border-accent bg-accent-soft" : "border-hairline"
+          }`}
+        >
+          <input
+            type="radio"
+            name="history"
+            className="mt-0.5"
+            checked={mode === o.value}
+            onChange={() => onMode(o.value)}
+          />
+          <span className="space-y-0.5">
+            <span className="block text-xs font-medium">
+              {o.title}
+              {o.value === "days" && (
+                <span className="ml-2 font-normal text-muted">
+                  直近
+                  <input
+                    type="number"
+                    min={1}
+                    max={3650}
+                    value={days}
+                    onChange={(e) => onDays(Number(e.target.value))}
+                    onClick={() => onMode("days")}
+                    className="mx-1 w-16 rounded border border-hairline bg-surface px-1.5 py-0.5 text-right text-xs focus-ring"
+                    aria-label="取り込む日数"
+                  />
+                  日
+                </span>
+              )}
+            </span>
+            <span className="block text-2xs leading-relaxed text-muted">{o.desc}</span>
+          </span>
+        </label>
+      ))}
+      {mode === "days" && !historyDaysValid(mode, days) && (
+        <p className="text-2xs text-danger">日数は 1〜3650 の整数で指定してください。</p>
+      )}
+      {mode === "all" && (
+        <div className="rounded border border-warn/30 bg-warn-soft px-3 py-2 text-2xs leading-relaxed">
+          ⚠️ <b>昔から使っている大きなサーバーでは、取り込みに数時間〜数日かかることがあります。</b>
+          Discord から一度に取れるのは100件ずつで、速さにも上限があるためです。
+          取り込み中も、新しい会話の記録と返事は止まりません。
+          <ul className="mt-1 list-disc pl-4">
+            <li>会話の記録（手元のファイル）が大きくなります</li>
+            <li>
+              BOTが読めるチャンネルの<b>昔の雑談や、もう居ない人の発言も</b>検索の対象になります
+            </li>
+            <li>AIに渡るのは、質問に関係する一部だけです（全部を送ることはありません）</li>
+          </ul>
+        </div>
+      )}
+    </fieldset>
+  );
+}
+
 const inputClass =
   "w-full rounded border border-hairline bg-surface px-2.5 py-1.5 text-xs focus-ring";
 
@@ -114,6 +219,10 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
   );
   const [channels, setChannels] = useState<Channel[]>([]);
   const [channelId, setChannelId] = useState("");
+  // 過去ログの取り込み範囲。昔からある大きなサーバーで全部を取り込むと
+  // 数時間〜数日かかるので、既定は「直近90日」
+  const [historyMode, setHistoryMode] = useState<HistoryChoice>("days");
+  const [historyDays, setHistoryDays] = useState(90);
 
   // ステップ4: AI
   const [providers, setProviders] = useState<Provider[]>([]);
@@ -238,7 +347,10 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
   const finish = () =>
     guard(async () => {
       // 1) サーバーと使うAIを保存
-      await api.post("/setup/platform/save", { guildId });
+      await api.post("/setup/platform/save", {
+        guildId,
+        history: { mode: historyMode, days: historyDays },
+      });
       await api.post("/setup/llm/save", { provider, model });
 
       // 2) 性格ファイルをテンプレートから作る
@@ -475,11 +587,20 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
               </Field>
             )}
 
+            {channelId !== "" && (
+              <HistoryChoiceField
+                mode={historyMode}
+                days={historyDays}
+                onMode={setHistoryMode}
+                onDays={setHistoryDays}
+              />
+            )}
+
             <div className="flex gap-2">
               <Button
                 variant="primary"
                 busy={busy}
-                disabled={channelId === ""}
+                disabled={channelId === "" || !historyDaysValid(historyMode, historyDays)}
                 onClick={() => void detectLlm()}
               >
                 次へ

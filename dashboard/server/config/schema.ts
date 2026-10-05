@@ -10,6 +10,8 @@
  */
 import { z } from "zod";
 
+import { isValidSince } from "../setup/history.ts";
+
 const idLike = z.union([z.string(), z.number()]);
 
 const agentSchema = z
@@ -79,6 +81,15 @@ export type ValidationIssue = { path: string; message: string };
  */
 export function checkInvariants(cfg: unknown): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
+  // 過去ログの起点。Python 側（core/archive_window.py）が読めない値を保存すると
+  // BOTが起動しなくなるので、書く前に止める（型検査の結果に関わらず見る）
+  const since = (cfg as { archive?: { since?: unknown } } | null)?.archive?.since;
+  if (!isValidSince(since)) {
+    issues.push({
+      path: "archive.since",
+      message: "過去ログの起点の形式が読めません（例: 2026-07-01 または 2026-07-01T09:30:00+09:00）",
+    });
+  }
   const parsed = configSchema.safeParse(cfg);
   if (!parsed.success) {
     for (const e of parsed.error.errors) {

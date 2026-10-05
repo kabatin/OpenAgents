@@ -10,6 +10,17 @@ import { WEEKDAY_OPTIONS, type Setting, type SettingGroup } from "./types.ts";
 
 const CONVERSATION: Setting[] = [
   {
+    path: "archive.since",
+    label: "過去の会話をいつから取り込むか",
+    desc:
+      "この日付より前の会話は取り込みません（エージェントはそれより前のやりとりを知りません）。" +
+      "空にすると、サーバーができてからの全部を取り込みます。前の日付に変えると、次の再起動で足りない分だけを取りに行きます。" +
+      "大きなサーバーで大きく遡ると、取り込みに数時間〜数日かかることがあります。書き方: 2026-07-01",
+    kind: "string",
+    default: null,
+    fixedNote: "後ろの日付に変えても、取り込み済みの会話は消えません",
+  },
+  {
     path: "guild_id",
     level: "basic",
     label: "対象のDiscordサーバー",

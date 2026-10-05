@@ -157,6 +157,11 @@ def validate(cfg):
         problems.extend(_agent_problems(agents))
     if not cfg.get("guild_id"):
         problems.append("Discordサーバー（guild_id）が未設定です")
+    try:
+        from core import archive_window
+        archive_window.from_config(cfg)
+    except ValueError as e:
+        problems.append(f"{e}（archive.since）")
     dev = cfg.get("dev_bot") or {}
     if dev.get("enabled") and not str(dev.get("token") or "").strip():
         problems.append("開発BOTが有効ですが、Botトークンが未設定です")

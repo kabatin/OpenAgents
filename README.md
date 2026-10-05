@@ -63,7 +63,7 @@ A browser opens and walks you through the rest:
 
 1. Create a Discord bot (the steps are shown on screen)
 2. Paste the token — the bot's name appears if it worked
-3. Pick your server and channel **from a list**
+3. Pick your server and channel **from a list**, and choose how much past history to import
 4. Choose your AI and have it reply once, to prove it works
 5. Pick a personality template and name your agent
 6. Your agent says hello in Discord 🎉

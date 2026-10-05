@@ -37,6 +37,7 @@ import {
   postMessage,
   verifyToken,
 } from "../setup/discord.ts";
+import { type HistoryMode, sinceFromChoice } from "../setup/history.ts";
 import { detectProviders, testProvider } from "../setup/llm.ts";
 import * as personas from "../setup/personas.ts";
 import { reset, ResetError } from "../setup/reset.ts";
@@ -354,10 +355,17 @@ setup.post("/agents/remove", async (c) => {
 
 /** サーバーと管理者を設定に保存する。 */
 setup.post("/platform/save", async (c) => {
-  const { guildId, adminId } = await body(c);
+  const raw = (await body(c)) as Record<string, unknown>;
+  const { guildId, adminId } = raw as Record<string, string>;
   try {
     const patches = [{ path: "guild_id", value: guildId ?? "" }];
     if (adminId) patches.push({ path: "admins", value: [adminId] as never });
+    // 過去ログの取り込み範囲。指定が無い呼び出し（古い画面）は従来どおり「すべて」
+    const history = raw["history"] as { mode?: HistoryMode; days?: number } | undefined;
+    if (history?.mode !== undefined) {
+      const since = sinceFromChoice(history.mode, history.days, new Date());
+      patches.push({ path: "archive.since", value: since as never });
+    }
     await patchConfig(patches);
     return c.json({ ok: true });
   } catch (e) {

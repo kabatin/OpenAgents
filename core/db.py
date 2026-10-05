@@ -55,6 +55,13 @@ CREATE TABLE IF NOT EXISTS users (
     external_id  TEXT
 );
 
+-- 過去ログをチャンネルごとにどこまで遡って取り込んだか（archive.since の起点）。
+-- since: UTC の ISO 日時、空文字 = すべて。起点を前にずらしたときに足りない分だけ取りに行く
+CREATE TABLE IF NOT EXISTS archive_coverage (
+    channel_id  INTEGER PRIMARY KEY,
+    since       TEXT
+);
+
 CREATE TABLE IF NOT EXISTS messages (
     id          INTEGER PRIMARY KEY,
     channel_id  INTEGER,
@@ -969,6 +976,28 @@ def update_content(conn, *, id, content, edited_at):
     _fts_reindex(conn, id, content)   # messagesをUPDATEする前に旧FTSを消す
     conn.execute("UPDATE messages SET content=?, edited_at=? WHERE id=?",
                  (content, edited_at, id))
+
+
+def first_message_id(conn, channel_id):
+    """チャンネルの保存済み最小message_id。古い分を遡るときの起点に使う。"""
+    row = conn.execute(
+        "SELECT MIN(id) FROM messages WHERE channel_id=?", (channel_id,)
+    ).fetchone()
+    return row[0] if row and row[0] else None
+
+
+def get_archive_coverage(conn, channel_id):
+    """遡り済みの起点（未記録なら None、すべてなら空文字）。"""
+    row = conn.execute("SELECT since FROM archive_coverage WHERE channel_id=?",
+                       (channel_id,)).fetchone()
+    return None if row is None else (row[0] or "")
+
+
+def set_archive_coverage(conn, channel_id, since_key):
+    conn.execute(
+        """INSERT INTO archive_coverage(channel_id, since) VALUES(?, ?)
+           ON CONFLICT(channel_id) DO UPDATE SET since=excluded.since""",
+        (channel_id, since_key))
 
 
 def last_message_id(conn, channel_id):

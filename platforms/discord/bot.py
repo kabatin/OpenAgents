@@ -31,6 +31,7 @@ import discord
 
 from core import action_items
 from core import attachments
+from core import archive_window
 from core import config as app_config
 from core import db
 from core import episodes
@@ -236,7 +237,10 @@ class AgentClient(ToolLoopMixin, SkillHooksMixin, MarkerActionsMixin,
         # このアーカイブがどのサーバーのものかを覚える（起動時の突き合わせ用）
         with db.connect(DB_PATH) as conn:
             db.remember_archive_guild(conn, GUILD_ID)
-        await archiving.backfill(guild, DB_PATH)
+        # 過去ログはセットアップで選んだ起点（archive.since）から。起点の形式は
+        # 起動時の validate で検査済みなので、ここでは読むだけ
+        since = archive_window.from_config(agent_runtime.config)
+        await archiving.backfill(guild, DB_PATH, since=since)
         with db.connect(DB_PATH) as conn:
             print("stats:", db.stats(conn))
         agent_runtime._load_webhook_agents()
