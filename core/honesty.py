@@ -128,7 +128,8 @@ LINK_RE = re.compile(r"https?://(?:\w+\.)?discord(?:app)?\.com/channels/")
 # ツール（v4）。-# 行の書式に依存しないので、新しいツールを足しても
 # ここに名前を1つ足すだけで済む（DEEDS の正規表現は旧マーカー経路の保険として残す）
 CLAIM_TOOLS = {
-    "remind": {"add_reminder", "cancel_reminder"},
+    "remind": {"add_reminder", "cancel_reminder", "shift_reminder",
+               "reschedule_reminder"},
     "rule": {"save_rule", "cancel_rule"},
     "capability": {"request_capability"},
     "action": {"update_task"},

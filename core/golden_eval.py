@@ -203,6 +203,48 @@ def save_report(report, out_dir=None, now=None):
     return path
 
 
+def past_means(out_dir, config, exclude=None, limit=8):
+    """同じ設定で回した過去の平均点（新しい順）。実験の回（問題数・モデル等が
+    違う）は混ぜない＝急落の比較を毎週の定例の回同士に限る。"""
+    if not os.path.isdir(out_dir):
+        return []
+    out = []
+    for name in sorted(os.listdir(out_dir), reverse=True):
+        if not name.endswith(".json") or name == exclude:
+            continue
+        try:
+            with open(os.path.join(out_dir, name), encoding="utf-8") as f:
+                rep = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if (rep.get("config") or {}) == config and rep.get("mean") is not None:
+            out.append(rep["mean"])
+        if len(out) >= limit:
+            break
+    return out
+
+
+def report_red_if_dropped(db_path, report, path, out_dir=None):
+    """急落なら「点検で赤」として失敗の台帳へ（1件で開発BOTへ即起票される）。
+    急落でなければ None、急落なら説明文を返す。"""
+    from core import misses
+    hist = past_means(out_dir or OUT_DIR, report["config"],
+                      exclude=os.path.basename(path))
+    why = misses.quality_drop(report.get("mean"), hist)
+    if why is None:
+        return None
+    worst = sorted((i for i in report.get("items") or []
+                    if isinstance(i.get("score"), (int, float))),
+                   key=lambda i: i["score"])[:4]
+    detail = why + "\n" + "\n".join(
+        f"#{i.get('golden_id')} {i['score']}点: {str(i.get('note') or '')[:100]}"
+        for i in worst) + f"\n結果: {os.path.basename(path)}"
+    misses.record_gap(db_path, agent_id=report["config"].get("agent") or "",
+                      source="quality_drop", context="回答品質の回帰チェック（毎週）",
+                      detail=detail, topic="quality:golden")
+    return why
+
+
 def load_rows(conn, agent_id, golden_set="curated", kind="all"):
     """評価対象の行を選ぶ（curated が無ければ auto へ倒す）。"""
     if golden_set == "curated":
@@ -262,6 +304,9 @@ def main(argv=None):
     report["config"] = {"n": args.n, "seed": args.seed, "agent": agent["id"],
                         "model": args.model or search.DEFAULT_MODEL}
     path = save_report(report)
+    why = report_red_if_dropped(db_path, report, path)
+    if why:
+        print(f"⚠️ 点検で赤: {why}（失敗と間違いの台帳へ・開発BOTへ起票されます）")
     cost = sum(i.get("cost_usd") or 0 for i in report["items"])
     print(f"mean(info)={report['mean']} ({report['scored']} 採点・action "
           f"{report['action_excluded']}件は参考) "

@@ -383,6 +383,46 @@ class WriteToolsTest(unittest.TestCase):
         base.update(kw)
         return _ctx(**base)
 
+    def _weekly(self, user="100"):
+        from datetime import datetime
+        e, _ = reminders.add_reminder("6", user, "担当者", "毎週金曜日は定例です。",
+                                      datetime(2099, 10, 9, 18, 0), "weekly")
+        return e["id"]
+
+    def test_shift_reminder_registers_temporary_weekday(self):
+        from core import honesty
+        rid = self._weekly()
+        r = registry.dispatch(self._ctx(), "shift_reminder", {
+            "id": rid, "weekday": 3, "start": "2099-10-15", "end": "2099-11-12",
+            "content": "今週は木曜日が定例です。"})
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(reminders.find_entry(rid)["due"], "2099-11-20T18:00")
+        self.assertIn("-# 登録: ", r["evidence"])          # 完了の証拠（honesty）
+        self.assertTrue(honesty.SUCCESS_DEEDS["remind"].search(r["evidence"]))
+        self.assertIn("shift_reminder", honesty.CLAIM_TOOLS["remind"])
+
+    def test_shift_reminder_only_owner_or_admin(self):
+        rid = self._weekly(user="200")
+        r = registry.dispatch(self._ctx(), "shift_reminder", {
+            "id": rid, "weekday": 3, "start": "2099-10-15", "end": None})
+        self.assertFalse(r["ok"])
+        ok = registry.dispatch(self._ctx(is_admin=True), "shift_reminder", {
+            "id": rid, "weekday": 3, "start": "2099-10-15", "end": None})
+        self.assertTrue(ok["ok"], ok)
+
+    def test_reschedule_reminder_moves_next_time(self):
+        from core import honesty
+        rid = self._weekly()
+        r = registry.dispatch(self._ctx(), "reschedule_reminder",
+                              {"id": rid, "due": "2099-10-15 18:00"})
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(reminders.find_entry(rid)["due"], "2099-10-15T18:00")
+        self.assertTrue(honesty.SUCCESS_DEEDS["remind"].search(r["evidence"]))
+        self.assertIn("reschedule_reminder", honesty.CLAIM_TOOLS["remind"])
+        bad = registry.dispatch(self._ctx(), "reschedule_reminder",
+                                {"id": rid, "due": "2000-01-01 10:00"})
+        self.assertFalse(bad["ok"])                       # 過去には付け替えない
+
     def test_write_tools_hidden_in_shadow_and_bot_turn(self):
         live = {t.name for t in registry.visible_tools(self._ctx())}
         self.assertIn("save_fact", live)

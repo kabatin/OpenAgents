@@ -241,6 +241,16 @@ runner経路のエージェントに有効。
   `admins`（Discord user id）のみ。user/channelスコープは誰でも設定可
 - **誠実な失敗**: 持っていない能力を求められたら無関係な結果を出さず正直に断り、
   `[CAPABILITY: 説明]` で `capability_requests` テーブルに起票（自己改善の入口）
+- **失敗と間違いの台帳**（`core/misses.py`・`misses` テーブル）: ❌された提案と、そのとき
+  一度だけ聞いた理由（返信で受け取り📝だけ返す）、自動ではやり切れなかったこと、
+  ツールの失敗（`registry.dispatch` が ok=false を記録。設定オフ・権限不足など想定内は除く）、
+  できたフリの検出、能力リクエストを1か所に貯める。波及チェックの案への返信で直したときは、
+  前後のリマインダー・タスクの差分を人の指示と一緒に「見本」として残す。
+  観察ループの `misses` サイクル（アーカイブ担当）が同じ種類3件で `capability_requests`
+  に起票する（❌は理由つきだけ数える。能力リクエストと見本は起票しない）
+- **点検で赤**: 乗っ取り訓練の突破（`injection_drill.record_breaches`）と模範Q&Aの
+  平均点の急落（`golden_eval.report_red_if_dropped`。同じ設定の直近3回以上の平均から
+  0.4点以上の下落）は、トピックが `security:` / `quality:` で始まり1件で即起票される
 - **フィードバック**: エージェントの投稿への👍👎リアクションを `feedback` テーブルに
   収集（物差しの原料。archiverが raw reaction イベントで記録、著者はarchive.dbから照会）
 - **勝ちパターン学習**: 自発発言への👍は「良い例」として教訓帳
@@ -306,6 +316,11 @@ claude CLIが実際に検索・取得して出典URL付きで答える。モデ�
   `monthly_end` は常に月末。配信失敗が5回続くと `status=error` で再試行停止
 - 設定: config.json の agent1 `"skills": {"reminder": true}`。
   状態: `reminders.json`（gitignore、非activeは直近50件保持）
+- **曜日・時刻の変更**（`core/reminder_shift.py`）: 「10/15〜11/12は木曜に」のような
+  一時変更は、元の定期を止めて期間内の一時リマインダーと再開日からの定期を登録し直す。
+  日付の計算はコードで行い、LLM には渡さない。会話からは `shift_reminder`、
+  次回だけ動かすのは `reschedule_reminder`。決定の波及チェックの✅で反映するときは、
+  直前に `reminders.json` を `.ripple-<日時>.bak` に退避する
 
 ## YouTube要約（アーカイブ担当）
 
@@ -430,4 +445,8 @@ macOS / Linux 専用です（無音検知の `select` とプロセスツリー�
 - **反映前の確認**: 実装とは別のモデルが起票と差分を照合し、承認者に一言添える。
   中核ファイルに触れる差分には 🧠 の警告。👍待ちは `dev_bot.approval_expire_days`
   （既定7日）で保留にして次の提案へ進む
+- **安全の再点検**: 乗っ取り訓練の突破から来た起票（`[点検で赤]` かつ security）は、
+  テスト通過後に作業ツリーで `python -m core.verify_safety` を本番と同じ条件で流し、
+  結果を👍待ちの要約の先頭に貼る（突破が残れば「👍しないでください」）。点検の間だけ
+  本番の `config.json` と人格ファイルを作業ツリーへリンクし、終わったら外す
 - 規約は `platforms/discord/dev/dev-guidelines.md` にあり、実装プロンプトへそのまま注入される

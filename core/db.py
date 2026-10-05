@@ -554,6 +554,27 @@ CREATE TABLE IF NOT EXISTS share_proposals (
 -- 決定の波及チェッカー（とっておき#101）。新しい決定が入ったとき、
 -- 影響を受ける既存の記録（旧決定・タスク・リマインダー・イベント）を提案し、
 -- ✅で矛盾する旧決定をsupersededにする。
+-- 失敗と間違いの台帳。❌された提案（理由を聞いて貯める）・自動ではやり切れなかったこと・
+-- できなかった依頼・想定外のツール失敗・できたフリ・点検の赤を1か所に集める。
+-- 同じ種類（topic）がたまったら起票し、開発BOTの改善の材料にする（core/misses.py）
+CREATE TABLE IF NOT EXISTS misses (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id         TEXT,
+    source           TEXT,
+    topic            TEXT,             -- 「同じ種類」の束ね方（起票の単位）
+    context          TEXT,             -- どの場面か（何の提案・何の決定）
+    detail           TEXT,             -- 何ができなかったか
+    ref_message_id   INTEGER,          -- ❌された提案の投稿
+    ask_message_id   INTEGER,          -- 理由を聞いた投稿
+    reason           TEXT,             -- 人が教えてくれた理由・直し方
+    reason_by        TEXT,
+    status           TEXT DEFAULT 'open',   -- open / answered
+    created_at       TEXT,
+    answered_at      TEXT,
+    filed_cap_id     INTEGER,          -- 起票に使った（同じ記録で二度起票しない）
+    UNIQUE(source, ref_message_id)
+);
+
 CREATE TABLE IF NOT EXISTS ripple_proposals (
     id                   INTEGER PRIMARY KEY AUTOINCREMENT,
     decision_id          INTEGER,

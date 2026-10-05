@@ -7,12 +7,15 @@ bot.py から分離した AgentClient の mixin（archiver=アーカイブ担当
 
 import asyncio
 
+import discord
+
 from core import ab_test
 from core import action_items
 from core import auto_discover
 from core import db
 from core import event_planner
 from core import golden
+from core import misses
 from core import ripple
 from core import study_group
 from core import proactive
@@ -239,29 +242,50 @@ class ReactionHandlersMixin:
                                    allowed_mentions=ALLOWED_MENTIONS)
 
     async def _maybe_ripple_reaction(self, payload):
-        """波及提案への✅（矛盾する旧決定をsuperseded化）/❌（#101・管理者のみ）。"""
+        """波及提案への✅（案を反映: 旧決定の上書き・タスクの期日変更・
+        リマインダーの付け替え）/❌（何もしない。理由を1回だけ聞く）。管理者のみ。"""
         if (payload.guild_id != GUILD_ID
                 or str(payload.user_id) not in ADMIN_IDS):
             return
         emoji = str(payload.emoji)
         if emoji == "✅":
-            n = await asyncio.to_thread(
+            done = await asyncio.to_thread(
                 ripple.approve, DB_PATH, payload.message_id)
-            if n is not None:
+            if done is not None:
                 channel = (self.get_channel(payload.channel_id)
                            or await self.fetch_channel(payload.channel_id))
-                note = (f"旧決定{n}件を上書き済みにしました" if n
-                        else "確認済みにしました")
-                await channel.send(f"-# 🌊 {note}",
+                await channel.send(f"-# 🌊 {ripple.applied_note(done)}",
                                    allowed_mentions=ALLOWED_MENTIONS)
         elif emoji == "❌":
+            context = await asyncio.to_thread(ripple.context_for, DB_PATH,
+                                              payload.message_id)
             if await asyncio.to_thread(
                     ripple.dismiss, DB_PATH, payload.message_id):
-                channel = (self.get_channel(payload.channel_id)
-                           or await self.fetch_channel(payload.channel_id))
-                await channel.send("-# 🌊 誤検知として見送ります"
-                                   "（教訓として覚えておきます）",
-                                   allowed_mentions=ALLOWED_MENTIONS)
+                # 以前は「教訓として覚えておきます」と返していたが、実際には何も
+                # 覚えていなかった。やることだけを書き、理由を任意で聞いて貯める
+                await self._ask_why(payload, "ripple", context,
+                                    "🌊 何もせず見送りにしました")
+
+    async def _ask_why(self, payload, source, context, done_text, topic=None):
+        """❌された提案に、どこが違ったかを1回だけ聞く（答えは任意）。
+        理由は失敗と間違いの台帳（misses）に貯めて、改善のヒントにする。"""
+        miss_id = await asyncio.to_thread(
+            misses.record_rejection, DB_PATH, agent_id=self.agent["id"],
+            source=source, ref_message_id=payload.message_id, context=context,
+            topic=topic)
+        if miss_id is None:
+            return      # 同じ提案ではもう聞いた
+        channel = (self.get_channel(payload.channel_id)
+                   or await self.fetch_channel(payload.channel_id))
+        try:
+            target = await channel.fetch_message(payload.message_id)
+            ask = await target.reply(misses.question(done_text),
+                                     mention_author=False,
+                                     allowed_mentions=discord.AllowedMentions.none())
+        except discord.DiscordException:
+            ask = await channel.send(misses.question(done_text),
+                                     allowed_mentions=discord.AllowedMentions.none())
+        await asyncio.to_thread(misses.set_ask_message, DB_PATH, miss_id, ask.id)
 
     async def _maybe_share_reaction(self, payload):
         """勉強会提案への✅（ルールをglobalへ昇格）/❌（RM#61・管理者のみ）。"""

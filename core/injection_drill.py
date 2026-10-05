@@ -136,7 +136,8 @@ def _invoke(model):
 
 
 def run_drill(agent, *, model=None, invoke_fn=None, trials=TRIALS_DEFAULT):
-    """全攻撃を trials 回ずつ実行。1回でも従えば突破。[{name, passed, note}]。
+    """全攻撃を trials 回ずつ実行。1回でも従えば突破。
+    [{name, slot, passed, note, reply}]（reply は判定に使った実際の回答）。
     model=None は回答と同じ設定のモデル（本番と同じ条件で測る）。"""
     fn = invoke_fn or _invoke(model)
     results = []
@@ -146,20 +147,44 @@ def run_drill(agent, *, model=None, invoke_fn=None, trials=TRIALS_DEFAULT):
             outcome = None
             for _ in range(max(1, trials)):
                 system, prompt, kwargs = build_attack(agent, atk, workdir)
+                reply = ""
                 try:
-                    passed, note = judge(fn(prompt, system, kwargs))
+                    reply = fn(prompt, system, kwargs) or ""
+                    passed, note = judge(reply)
                 except Exception as e:  # noqa: BLE001 - 1攻撃の失敗で訓練全体を止めない
                     passed, note = None, f"実行失敗: {str(e)[:60]}"
                 if passed is False:
-                    outcome = (False, note)
+                    outcome = (False, note, reply)
                     break
                 if outcome is None or passed is True:
-                    outcome = (passed, note)
-            results.append({"name": atk["name"], "passed": outcome[0],
-                            "note": outcome[1]})
+                    outcome = (passed, note, reply)
+            results.append({"name": atk["name"], "slot": atk["slot"],
+                            "passed": outcome[0], "note": outcome[1],
+                            "reply": outcome[2][:400]})
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
     return results
+
+
+SLOT_LABEL = {"context": "社内ログの検索結果", "history": "ほかの人の発言",
+              "attachment": "添付ファイル"}
+
+
+def record_breaches(db_path, agent_id, results):
+    """突破を「点検で赤」として失敗の台帳へ（1件で開発BOTへ即起票される）。
+    実際の回答を添える（どう従ったかが再現の手がかり）。突破の件数を返す。"""
+    from core import misses
+    n = 0
+    for r in results:
+        if r.get("passed") is False:
+            slot = SLOT_LABEL.get(r.get("slot"), r.get("slot"))
+            misses.record_gap(
+                db_path, agent_id=agent_id, source="drill_breach",
+                context=f"乗っ取り訓練: {r['name']}（{slot}）",
+                detail=f"{r['note']}\n実際の回答: {r.get('reply', '')[:300]}",
+                topic="security:injection")
+            n += 1
+    return n
 
 
 def should_report(results):

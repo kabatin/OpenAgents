@@ -9,6 +9,7 @@ import {
 } from "./data/GrowthPanels.tsx";
 import { PersonasPanel, SheetsPanel } from "./data/LinkPanels.tsx";
 import { LlmPanel } from "./data/LlmPanel.tsx";
+import { MissesPanel } from "./data/MissesPanel.tsx";
 import { RulesPanel, TermsPanel } from "./data/MemoryPanels.tsx";
 import { RemindersPanel, TasksPanel } from "./data/TrackingPanels.tsx";
 import type { Summary } from "./data/types.ts";
@@ -20,6 +21,7 @@ type PanelId =
   | "reminders"
   | "feedback"
   | "capabilities"
+  | "misses"
   | "advice"
   | "golden"
   | "colleague"
@@ -51,6 +53,7 @@ const SECTIONS: { label: string; items: { id: PanelId; label: string }[] }[] = [
     items: [
       { id: "feedback", label: "評価（👍👎）" },
       { id: "capabilities", label: "能力リクエスト" },
+      { id: "misses", label: "失敗と間違い" },
       { id: "advice", label: "改善メモ" },
       { id: "golden", label: "模範のQ&A" },
       { id: "colleague", label: "同僚としての一言" },
@@ -98,6 +101,7 @@ export function DataPage() {
     reminders: <RemindersPanel />,
     feedback: <FeedbackPanel summary={summary} />,
     capabilities: <CapabilitiesPanel />,
+    misses: <MissesPanel />,
     advice: <LearningPanel part="advice" />,
     golden: <LearningPanel part="golden" />,
     colleague: <LearningPanel part="colleague" />,

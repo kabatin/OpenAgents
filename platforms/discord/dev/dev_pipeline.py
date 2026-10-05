@@ -703,6 +703,74 @@ def run_tests(wt_root, files):
                 pass
 
 
+# 点検で赤: 乗っ取り訓練で突破された起票は、反映前に作業場で同じ点検をやり直し、
+# 結果を👍待ちの要約に必ず貼る（開発BOTの自己申告ではなくシステムが流す）。
+RED_MARK = "[点検で赤]"         # core/misses.py の RED_MARK と同じ印
+SAFETY_TIMEOUT_SEC = 900
+
+
+def needs_safety_check(cap_req):
+    """乗っ取り訓練の赤から来た起票か（純粋関数）。品質の赤は反映後の毎週の点検で見る。"""
+    desc = str((cap_req or {}).get("description") or "")
+    return desc.startswith(RED_MARK) and "security:" in desc
+
+
+def safety_line(ok, text):
+    """点検のやり直し結果を、承認者が必ず目にする形にする（純粋関数）。"""
+    body = "\n".join((text or "").strip().splitlines()[:6])
+    if ok:
+        return f"🛡 修正後に乗っ取り訓練をやり直しました\n```\n{body}\n```"
+    return ("🔴 **修正後も乗っ取り訓練で突破があります — 👍しないでください**"
+            f"\n```\n{body or '（点検を流せませんでした）'}\n```")
+
+
+def _safety_links(wt_root):
+    """点検に要る live のファイル（ルートの config.json と、エージェントの人格
+    ファイル）を作業場へ一時的に置く。作ったパスのリスト＝**呼び出し側が必ず消す**
+    （作業場は秘密レスが大前提）。既にあるものは触らない。"""
+    rels = ["config.json"]
+    try:
+        with open(os.path.join(REPO_ROOT, "config.json"), encoding="utf-8") as f:
+            cfg = json.load(f)
+        for agent in cfg.get("agents") or []:
+            rels.extend(str(p) for p in agent.get("persona_files") or []
+                        if not os.path.isabs(str(p)))
+    except (OSError, ValueError):
+        pass
+    created = []
+    for rel in rels:
+        live = os.path.join(REPO_ROOT, rel)
+        dst = os.path.join(wt_root, rel)
+        if (os.path.exists(dst) or not os.path.isfile(live)
+                or not os.path.isdir(os.path.dirname(dst))):
+            continue
+        try:
+            os.symlink(live, dst)
+        except OSError:
+            shutil.copyfile(live, dst)
+        created.append(dst)
+    return created
+
+
+def run_safety_check(wt_root):
+    """作業場（直した後のコード）で `python -m core.verify_safety` を流す（IO）。
+    (ok, 出力) を返す。流せなかったことも ok=False として承認者に見せる。"""
+    created = _safety_links(wt_root)
+    try:
+        r = _run([LIVE_VENV_PY, "-m", "core.verify_safety"], cwd=wt_root,
+                 timeout=SAFETY_TIMEOUT_SEC)
+        out = (r.stdout or "").strip() or (r.stderr or "").strip()[-400:]
+        return r.returncode == 0, out
+    except Exception as e:  # noqa: BLE001 - 流せなかったことも承認者に見せる
+        return False, f"点検を流せませんでした: {type(e).__name__}: {e}"[:300]
+    finally:
+        for p in created:
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+
+
 def run_pyflakes(root, files):
     """変更した .py に pyflakes（未定義名・未使用importの検出）。
     files は changed_files() のリポジトリroot相対パスなので、root=worktreeルートを

@@ -493,3 +493,56 @@ class IdleDiagnosticsTest(unittest.TestCase):
         self.assertIn("受信イベント0件", run["error"])
         self.assertIn("最後はなし", run["error"])
         self.assertIn("子プロセス", run["error"])
+
+
+class SafetyRecheckTest(unittest.TestCase):
+    """点検で赤（乗っ取り訓練の突破）から来た起票は、反映前に同じ点検を
+    作業場でやり直して要約に貼る（開発BOTの自己申告ではなくシステムが流す）。"""
+
+    def test_only_security_red_caps_need_recheck(self):
+        red = {"id": 1, "description": "[点検で赤] 乗っ取り訓練で突破された（種類: security:injection）。"}
+        self.assertTrue(dev_pipeline.needs_safety_check(red))
+        quality = {"id": 2, "description": "[点検で赤] 回答品質…（種類: quality:golden）。"}
+        self.assertFalse(dev_pipeline.needs_safety_check(quality))
+        normal = {"id": 3, "description": "[失敗の常連] ツール…"}
+        self.assertFalse(dev_pipeline.needs_safety_check(normal))
+        self.assertFalse(dev_pipeline.needs_safety_check(None))
+
+    def test_safety_line_warns_loudly_when_still_breached(self):
+        ok = dev_pipeline.safety_line(True, "乗っ取り訓練（本番と同じ条件・各2回）: 3/3 耐えました")
+        self.assertTrue(ok.startswith("🛡"))
+        self.assertIn("3/3", ok)
+        ng = dev_pipeline.safety_line(False, "乗っ取り訓練: 2/3 耐えました\n⚠️ 過去ログ偽装")
+        self.assertIn("👍しないでください", ng)
+        self.assertIn("過去ログ偽装", ng)
+        self.assertIn("流せませんでした", dev_pipeline.safety_line(False, ""))
+
+    def test_run_safety_check_links_live_files_and_cleans_up(self):
+        import json
+        import tempfile
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as live, tempfile.TemporaryDirectory() as wt:
+            os.makedirs(os.path.join(live, "personas"))
+            os.makedirs(os.path.join(wt, "personas"))
+            with open(os.path.join(live, "personas", "agent1.md"), "w", encoding="utf-8") as f:
+                f.write("# 人格")
+            with open(os.path.join(live, "config.json"), "w", encoding="utf-8") as f:
+                json.dump({"agents": [{"id": "agent1",
+                                       "persona_files": ["personas/agent1.md"]}]}, f)
+            seen = {}
+
+            def fake_run(cmd, cwd=None, timeout=None):
+                seen["cmd"], seen["cwd"] = cmd, cwd
+                seen["linked"] = (os.path.exists(os.path.join(wt, "config.json"))
+                                  and os.path.exists(os.path.join(wt, "personas", "agent1.md")))
+                return mock.Mock(returncode=1, stdout="乗っ取り訓練: 2/3 耐えました", stderr="")
+            with mock.patch.object(dev_pipeline, "REPO_ROOT", live), \
+                    mock.patch.object(dev_pipeline, "_run", fake_run):
+                ok, out = dev_pipeline.run_safety_check(wt)
+            self.assertFalse(ok)
+            self.assertIn("2/3", out)
+            self.assertEqual(seen["cmd"][1:], ["-m", "core.verify_safety"])
+            self.assertEqual(seen["cwd"], wt)
+            self.assertTrue(seen["linked"])                         # 流している間だけある
+            self.assertFalse(os.path.exists(os.path.join(wt, "config.json")))   # 秘密を残さない
+            self.assertFalse(os.path.exists(os.path.join(wt, "personas", "agent1.md")))

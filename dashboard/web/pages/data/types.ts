@@ -44,6 +44,20 @@ export type Capability = {
   createdAt: string;
 };
 
+/** 失敗と間違いの台帳の1件（server/db/queries.ts の MissRow と同じ形）。 */
+export type Miss = {
+  id: number;
+  agentId: string | null;
+  source: string;
+  context: string | null;
+  detail: string | null;
+  reason: string | null;
+  status: string;
+  createdAt: string | null;
+  answeredAt: string | null;
+  filedCapId: number | null;
+};
+
 export type Reminder = {
   id: number;
   user_name: string;

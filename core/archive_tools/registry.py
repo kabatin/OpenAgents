@@ -79,8 +79,26 @@ def dispatch(ctx, name, args, tools=None):
     try:
         res = tool.handler(ctx, dict(args or {}))
     except Exception as e:  # noqa: BLE001 - 失敗はモデルに見せる
-        return {"ok": False, "error": f"{type(e).__name__}: {e}"[:300]}
+        res = {"ok": False, "error": f"{type(e).__name__}: {e}"[:300]}
     if not isinstance(res, dict):
-        return {"ok": False, "error": "tool returned non-dict"}
+        res = {"ok": False, "error": "tool returned non-dict"}
     res.setdefault("ok", True)
+    if not res["ok"]:
+        _record_failure(ctx, tool, res.get("error"))
     return res
+
+
+def _record_failure(ctx, tool, error):
+    """想定外のツール失敗を、失敗と間違いの台帳へ（記録の失敗で本処理は止めない）。
+    設定でオフ・上限・入力不足・権限のような想定内の失敗は手がかりにならないので除く。"""
+    try:
+        from core import misses
+        if not misses.worth_recording_tool_error(error):
+            return
+        misses.record_gap(ctx.db_path, agent_id=ctx.agent_id,
+                          source="tool_failed",
+                          context=f"ツール「{tool.label or tool.name}」",
+                          detail=str(error or "")[:300],
+                          topic=f"tool:{tool.name}")
+    except Exception as e:  # noqa: BLE001
+        print(f"misses record failed: {e}")

@@ -212,3 +212,54 @@ class GoldenMigrationTest(unittest.TestCase):
             self.assertIsNone(rows[0]["note"])
         finally:
             os.unlink(path)
+
+
+class QualityDropTest(unittest.TestCase):
+    """毎週の回帰チェックの急落を「点検で赤」として失敗の台帳へ。
+    比べるのは同じ設定で回した過去の回だけ（実験の回は混ぜない）。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = self.tmp.name
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _save(self, name, mean, **config):
+        import json
+        base = {"n": None, "seed": None, "agent": "agent1", "model": "m"}
+        base.update(config)
+        with open(os.path.join(self.dir, name), "w", encoding="utf-8") as f:
+            json.dump({"mean": mean, "config": base}, f)
+
+    def test_history_only_from_same_kind_of_runs(self):
+        from core import golden_eval
+        self._save("20260912-0337.json", 2.8)
+        self._save("20260919-0339.json", 3.0)
+        self._save("20260926-0346.json", 3.1)
+        self._save("20260927-1000.json", 1.0, n=3)          # 実験の回は比べない
+        self._save("20261003-0344.json", 3.4)
+        hist = golden_eval.past_means(self.dir, {"n": None, "seed": None,
+                                                 "agent": "agent1", "model": "m"},
+                                      exclude="20261005-1231.json")
+        self.assertEqual(hist, [3.4, 3.1, 3.0, 2.8])          # 新しい順
+
+    def test_drop_is_recorded_as_red_signal(self):
+        from core import golden_eval
+        from core import misses
+        for name, mean in (("20260912-0337.json", 3.2), ("20260919-0339.json", 3.1),
+                           ("20260926-0346.json", 3.3)):
+            self._save(name, mean)
+        fd, db_path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        self.addCleanup(os.unlink, db_path)
+        db.init_db(db_path)
+        report = {"mean": 2.5, "config": {"n": None, "seed": None, "agent": "agent1",
+                                          "model": "m"},
+                  "items": [{"golden_id": 7, "score": 1, "note": "根拠なし"}]}
+        why = golden_eval.report_red_if_dropped(
+            db_path, report, os.path.join(self.dir, "20261003-0344.json"), out_dir=self.dir)
+        self.assertIsNotNone(why)
+        row = misses.recent(db_path)[0]
+        self.assertEqual(row["source"], "quality_drop")
+        self.assertIn("#7", row["detail"])

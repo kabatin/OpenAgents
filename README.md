@@ -106,14 +106,21 @@ It won't spam you. Every loop passes the same gate before a word is posted.
 
 **Admits failure — mechanically.** If the agent claims it did something that
 didn't actually run, that's detected deterministically and **corrected in the
-same message**. Confident assertions are fact-checked against the archive
-before posting. Empty search results produce "no records found", not guesses.
+same message** — and only actions that *succeeded* count as evidence. Confident
+assertions are fact-checked against the archive before posting. Empty search
+results produce "no records found", not guesses. Generated images are labelled
+with their real pixel size, not the caption's claim.
 
 **Improves itself.** It grades its own answers and distils the failures into
 standing guidance, audits the gap between its persona and its actual
-behaviour, proposes hiring a new agent when it finds unowned work (one 👍 from
-an admin auto-creates it), and — with the dev bot enabled — ships code changes
-to itself **only after human approval**.
+behaviour, and proposes hiring a new agent when it finds unowned work (one 👍
+from an admin auto-creates it). When you ❌ a proposal it asks once what was
+wrong, and keeps that — together with things it couldn't fix on its own and
+failed actions — in a **ledger of misses**; three of the same kind become an
+improvement ticket for the dev bot. With the dev bot enabled it ships code
+changes to itself **only after human approval**, and if a prompt-injection
+drill is ever breached, the fix arrives with the **same drill re-run as
+evidence**.
 
 ### Everything is a toggle
 
@@ -220,6 +227,15 @@ Also: [CHANGELOG](CHANGELOG.md) · [CONTRIBUTING](CONTRIBUTING.md) ·
   explicit opt-in, and it warns you if you do that without a password
 - **Tokens are write-only in the UI.** You can save them; you cannot read them back
 - When reading attachments, the AI's file access is confined to a temp directory
+- **You choose how much past history to import** at setup (none / last N days /
+  everything), so a years-old server doesn't get its entire backlog indexed
+- **Instructions hidden in conversations are ignored.** The agent only follows
+  the system prompt and the person asking; "admin orders" planted in the archive,
+  other people's messages or attachments are treated as data. A monthly drill
+  attacks it under production conditions to check
+- **The dev bot cannot rewrite its own approval gate or safety valves.** It may
+  only write to the application code, and the diff is checked again right
+  before anything is deployed
 
 That said, **your questions and the retrieved context are sent to whichever AI
 provider you choose.** Check that provider's terms before using this with

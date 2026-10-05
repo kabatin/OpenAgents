@@ -23,6 +23,7 @@ import {
   llmByPurpose,
   llmDaily,
   llmRecent,
+  missesLedger,
   observationShadow,
   recentActivity,
   resolveDiscordIds,
@@ -220,6 +221,7 @@ api.get("/data/llm", (c) =>
   c.json({ daily: llmDaily(), byPurpose: llmByPurpose(), recent: llmRecent() }),
 );
 api.get("/data/capabilities", (c) => c.json(capabilityRequests()));
+api.get("/data/misses", (c) => c.json(missesLedger()));
 api.get("/data/roadmap", (c) => c.json(roadmapItems()));
 api.get("/data/dev-jobs", (c) => c.json({ jobs: devJobs(), deploys: deployHistory() }));
 api.get("/data/reminders", async (c) => c.json(await readReminders()));

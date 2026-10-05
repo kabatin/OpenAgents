@@ -119,19 +119,136 @@ class RippleTest(TestBase):
         self.assertEqual(len(impacts), 1)   # 捏造idは捨てる
         self.assertEqual(impacts[0]["id"], old)
 
-    def test_approve_supersedes_only_decisions(self):
-        old = self._decision("旧決定")
-        new_id = self._decision("新決定")
-        pid = ripple.register(self.db_path, new_id,
-                              [{"kind": "decision", "id": old, "why": "w"}])
-        ripple.set_message(self.db_path, pid, 500)
-        self.assertEqual(ripple.approve(self.db_path, 500), 1)
+    def _task(self, task, due, owners="<@111>"):
         with db.connect(self.db_path) as conn:
-            status = conn.execute(
-                "SELECT status FROM decisions WHERE id=?",
-                (old,)).fetchone()[0]
-        self.assertEqual(status, "superseded")
+            conn.execute("INSERT OR IGNORE INTO users(id, display_name) VALUES(111, '田中')")
+            return db.add_action_item(
+                conn, agent_id="agent1", source_message_id=1, channel_id=7,
+                task=task, owners=owners, due_date=due, urgent=0, created_at="t")
+
+    def test_only_changes_are_actionable(self):
+        # 一致・具体化しただけのものは投稿しない（いつも放置される原因だった）
+        impacts = [{"kind": "action_item", "id": 1, "effect": "same", "why": "一致"},
+                   {"kind": "action_item", "id": 2, "effect": "related", "why": "関連"}]
+        self.assertEqual(ripple.actionable(impacts), [])
+        moved = {"kind": "action_item", "id": 3, "effect": "reschedule",
+                 "new_due": "2026-10-15", "why": "定例が木曜に"}
+        self.assertEqual(ripple.actionable(impacts + [moved]), [moved])
+
+    def test_parse_keeps_effect_and_valid_due(self):
+        tid = self._task("定例の準備", "2026-10-16")
+        nd = {"id": self._decision("定例は10/15から木曜開催"),
+              "decision": "定例は10/15から木曜開催", "channel_id": 7}
+        cands = ripple.gather_candidates(self.db_path, nd)
+        impacts = ripple.parse_impacts(
+            f'{{"impacts": [{{"kind": "action_item", "id": {tid}, '
+            '"effect": "reschedule", "new_due": "2026-10-15", "why": "木曜開催に"}, '
+            f'{{"kind": "action_item", "id": {tid}, "effect": "reschedule", '
+            '"new_due": "来週", "why": "日付でない"}]}', cands)
+        self.assertEqual(impacts[0]["new_due"], "2026-10-15")
+        self.assertEqual(impacts[0]["old_due"], "2026-10-16")
+        self.assertEqual(impacts[0]["label"], "定例の準備")
+        self.assertEqual(impacts[0]["owner"], "田中")
+        self.assertEqual(impacts[1]["effect"], "related")   # 日付でなければ自動では変えない
+
+    def test_conflict_only_for_decisions(self):
+        tid = self._task("定例の準備", "2026-10-16")
+        nd = {"id": self._decision("定例は木曜開催"), "decision": "定例は木曜開催",
+              "channel_id": 7}
+        cands = ripple.gather_candidates(self.db_path, nd)
+        impacts = ripple.parse_impacts(
+            f'{{"impacts": [{{"kind": "action_item", "id": {tid}, '
+            '"effect": "conflict", "why": "w"}]}', cands)
+        self.assertEqual(impacts[0]["effect"], "related")
+
+    def test_proposal_says_what_changes_and_what_check_means(self):
+        text = ripple.build_proposal(
+            {"decision": "定例は10/15から木曜開催"},
+            [{"kind": "action_item", "id": 18, "effect": "reschedule",
+              "label": "定例の準備", "owner": "田中", "old_due": "2026-10-16",
+              "new_due": "2026-10-15", "why": "定例が木曜開催になるため"},
+             {"kind": "decision", "id": 33, "effect": "conflict",
+              "label": "定例は金曜開催", "why": "曜日が食い違う"},
+             {"kind": "reminder", "id": 14, "effect": "reschedule",
+              "label": "定例のリマインド", "old_due": "2026-10-16T09:00",
+              "why": "日付がずれる"}])
+        self.assertIn("A18「定例の準備」", text)
+        self.assertIn("田中", text)
+        self.assertIn("10/16 → **10/15**", text)
+        self.assertIn("決定#33「定例は金曜開催」", text)
+        self.assertIn("自動では直せない", text)        # 案を作れないものは明示する
+        self.assertIn("返信で直し方を教えて", text)   # 直し方をエージェントの手元で教わる
+        self.assertIn("✅＝", text)
+        self.assertIn("❌＝", text)
+        self.assertNotIn("っス", text)
+        self.assertNotIn("教訓", text)   # 覚えていないのに「教訓として覚える」と言わない
+
+    def test_approve_applies_due_change_and_supersede(self):
+        old = self._decision("定例は金曜開催")
+        new_id = self._decision("定例は10/15から木曜開催")
+        tid = self._task("定例の準備", "2026-10-16")
+        pid = ripple.register(self.db_path, new_id, [
+            {"kind": "decision", "id": old, "effect": "conflict", "why": "w"},
+            {"kind": "action_item", "id": tid, "effect": "reschedule",
+             "new_due": "2026-10-15", "why": "w"}])
+        ripple.set_message(self.db_path, pid, 500)
+        self.assertEqual(ripple.approve(self.db_path, 500),
+                         {"decisions": 1, "dues": 1, "reminders": 0})
+        with db.connect(self.db_path) as conn:
+            st = conn.execute("SELECT status FROM decisions WHERE id=?", (old,)).fetchone()[0]
+            due = conn.execute("SELECT due_date FROM action_items WHERE id=?", (tid,)).fetchone()[0]
+        self.assertEqual((st, due), ("superseded", "2026-10-15"))
         self.assertIsNone(ripple.approve(self.db_path, 500))   # CAS
+
+    def _weekly_reminder(self):
+        from datetime import datetime
+        from core import reminders
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        orig = reminders.STATE_FILE
+        reminders.STATE_FILE = os.path.join(tmp.name, "reminders.json")
+        self.addCleanup(lambda: setattr(reminders, "STATE_FILE", orig))
+        e, _ = reminders.add_reminder("1", "2", "担当者", "毎週金曜日は定例です。",
+                                      datetime(2099, 10, 9, 18, 0), "weekly")
+        return e
+
+    def test_reminder_shift_is_proposed_and_applied(self):
+        # 「定例は木曜開催に」→ 毎週金曜のリマインドの直し方まで作って✅で反映する
+        rem = self._weekly_reminder()
+        nd = {"id": self._decision("定例は木曜開催"), "decision": "定例は木曜開催",
+              "channel_id": 7}
+        cands = ripple.gather_candidates(self.db_path, nd)
+        impacts = ripple.parse_impacts(
+            f'{{"impacts": [{{"kind": "reminder", "id": {rem["id"]}, '
+            '"effect": "reschedule", "why": "木曜開催に", '
+            '"shift": {"weekday": 3, "start": "2099-10-15", "end": "2099-11-12", '
+            '"content": "今週は木曜日が定例です。"}}]}', cands)
+        self.assertIsNotNone(impacts[0]["plan"])
+        text = ripple.build_proposal(nd, impacts)
+        self.assertIn("（臨時）", text)
+        self.assertIn("✅＝1 をそのまま反映する", text)
+        pid = ripple.register(self.db_path, nd["id"], impacts)
+        ripple.set_message(self.db_path, pid, 777)
+        done = ripple.approve(self.db_path, 777)
+        self.assertEqual(done["reminders"], 1)
+        self.assertIn("リマインダー1件", ripple.applied_note(done))
+
+    def test_temporary_without_end_asks_for_end(self):
+        rem = self._weekly_reminder()
+        nd = {"id": self._decision("定例は一時的に木曜開催"),
+              "decision": "定例は一時的に木曜開催", "channel_id": 7}
+        cands = ripple.gather_candidates(self.db_path, nd)
+        impacts = ripple.parse_impacts(
+            f'{{"impacts": [{{"kind": "reminder", "id": {rem["id"]}, '
+            '"effect": "reschedule", "why": "w", "shift": {"weekday": 3, '
+            '"start": "2099-10-15", "end": null, "temporary": true}}]}', cands)
+        self.assertIn("戻す日が決まったら教えて", ripple.build_proposal(nd, impacts))
+
+    def test_applied_note_reports_what_was_done(self):
+        self.assertEqual(ripple.applied_note({"decisions": 1, "dues": 2}),
+                         "タスク2件の期日を直し、古い決定1件を上書き済みにしました")
+        self.assertEqual(ripple.applied_note({"decisions": 0, "dues": 0}),
+                         "確認済みにしました（自動で直したものはありません）")
 
     def test_dismiss(self):
         new_id = self._decision("新決定")
@@ -139,15 +256,6 @@ class RippleTest(TestBase):
         ripple.set_message(self.db_path, pid, 501)
         self.assertTrue(ripple.dismiss(self.db_path, 501))
         self.assertFalse(ripple.dismiss(self.db_path, 501))
-
-    def test_proposal_text(self):
-        text = ripple.build_proposal(
-            {"decision": "9/5に延期"},
-            [{"kind": "decision", "id": 3, "why": "開催日が矛盾"},
-             {"kind": "reminder", "id": 14, "why": "8/29前提の告知"}])
-        self.assertIn("旧決定 id=3", text)
-        self.assertIn("リマインダー id=14", text)
-        self.assertIn("✅", text)
 
 
 class ComebackTest(TestBase):

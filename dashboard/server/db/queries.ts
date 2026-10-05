@@ -295,6 +295,35 @@ export function capabilityRequests(): CapabilityRow[] {
   );
 }
 
+export type MissRow = {
+  id: number;
+  agentId: string | null;
+  source: string;
+  context: string | null;
+  detail: string | null;
+  reason: string | null;
+  status: string;
+  createdAt: string | null;
+  answeredAt: string | null;
+  filedCapId: number | null;
+};
+
+/** 失敗と間違いの台帳: ❌された提案と理由・自動ではやり切れなかったこと・点検で赤。 */
+export function missesLedger(limit = 100): MissRow[] {
+  return safeQuery(
+    (conn) =>
+      conn
+        .prepare<[number], MissRow>(
+          `SELECT id, agent_id AS agentId, source, context, detail, reason, status,
+                  created_at AS createdAt, answered_at AS answeredAt,
+                  filed_cap_id AS filedCapId
+             FROM misses ORDER BY id DESC LIMIT ?`,
+        )
+        .all(limit),
+    [],
+  );
+}
+
 export type RoadmapRow = {
   id: number;
   title: string;

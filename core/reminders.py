@@ -238,6 +238,20 @@ def cancel_reminder(rid, user_id, is_admin=False):
     return None, "not_found"
 
 
+def set_due(rid, due, content=None):
+    """アクティブなリマインダーの次回時刻（と文面）を付け替える。成功で True。
+    決定で予定がずれたときの直し（reminder_shift.py）から使う。"""
+    state = _load_state()
+    for r in state["reminders"]:
+        if r["id"] == int(rid) and r["status"] == "active":
+            r["due"] = due
+            if content:
+                r["content"] = content
+            _save_state(state)
+            return True
+    return False
+
+
 def find_entry(rid):
     """id指定で1件（statusを問わない・診断用）。無ければ None。"""
     state = _load_state()

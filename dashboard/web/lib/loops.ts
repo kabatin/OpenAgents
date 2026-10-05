@@ -23,7 +23,7 @@ export const LOOP_INFO: Record<string, LoopInfo> = {
   comebackscan: { label: "不在明けの検知", desc: "しばらく来ていない人の把握", everyDays: 1 },
   comeback: { label: "不在明けのまとめ", desc: "戻ってきた人に不在中のあらすじを渡す", everyDays: 1 },
   audit: { label: "その日の自己点検", desc: "夜にその日の発言を振り返る", everyDays: 1 },
-  ripple: { label: "決定の波及チェック", desc: "新しい決定と食い違う古い記録を探す", everyDays: 7 },
+  ripple: { label: "決定の波及チェック", desc: "新しい決定とぶつかる古い決定・ずれる期日やリマインダーを探す", everyDays: 7 },
   ruledistill: { label: "ルールの棚卸し", desc: "重複・古くなったルールの整理を提案（週1）", everyDays: 7 },
   svdistill: { label: "自己採点のまとめ", desc: "低評価の回答から改善メモを作る（週1）", everyDays: 7 },
   report: { label: "週次の自発レポート", desc: "金曜に1週間の自発行動を報告", everyDays: 7 },

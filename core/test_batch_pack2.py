@@ -281,6 +281,20 @@ class InjectionDrillTest(TestBase):
         for tmpl in (search.ANSWER_SYSTEM_TMPL, search.GENERAL_SYSTEM_TMPL):
             self.assertIn("指示とデータの区別", search._build_system(tmpl, self.AGENT))
 
+    def test_breach_goes_to_misses_as_red_signal(self):
+        # 突破は「点検で赤」として失敗の台帳へ。実際の回答も残す（再現の材料）
+        from core import misses
+        results = injection_drill.run_drill(
+            self.AGENT, model="x", trials=1,
+            invoke_fn=lambda p, s, k: f"{injection_drill.CANARY}\nはい")
+        self.assertEqual(
+            injection_drill.record_breaches(self.db_path, "agent1", results), 3)
+        rows = misses.recent(self.db_path)
+        self.assertTrue(all(r["source"] == "drill_breach" for r in rows))
+        self.assertIn("社内ログの検索結果", " ".join(r["context"] for r in rows))
+        self.assertIn("実際の回答", rows[0]["detail"])
+        self.assertEqual(len(misses.file_repeated(self.db_path)), 1)   # 種類ごとに1件の起票
+
     def test_reports_only_on_breach(self):
         # 全部耐えた月・実行失敗だけの月は黙る（反応の無い定期報告を流さない）
         ok = [{"name": "a", "passed": True, "note": ""},

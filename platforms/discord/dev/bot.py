@@ -594,6 +594,15 @@ class DevBot(discord.Client):
                 dev_pipeline.verify, cap_req, wt, model=self.verify_model,
                 test_tail=test_tail)
             warnings.append(dev_pipeline.verify_warning(verdict))
+        # 点検で赤（乗っ取り訓練の突破）から来た起票は、直した作業場で同じ点検を
+        # やり直して結果を要約の先頭に貼る（突破が残れば「👍しないで」を出す）
+        if files and dev_pipeline.needs_safety_check(cap_req) and (
+                not run.get("error") or salvaged):
+            progress.set_phase("乗っ取り訓練をやり直し中")
+            await self._safe_edit(prog, "🛡 直したコードで乗っ取り訓練をやり直しています…")
+            safe_ok, safe_out = await asyncio.to_thread(
+                dev_pipeline.run_safety_check, wt)
+            warnings.insert(0, dev_pipeline.safety_line(safe_ok, safe_out))
         warnings.append(dev_pipeline.job_log_label(job_id))
         summary = dev_pipeline.summarize(
             cap_req, test_ok=test_ok, test_tail=test_tail, flakes_ok=flakes_ok,

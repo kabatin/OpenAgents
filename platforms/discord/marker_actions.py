@@ -12,6 +12,7 @@ from core import db
 from core import facts
 from core import glossary
 from core import honesty
+from core import misses
 from core import proactive
 from core import reminders
 from core import rules
@@ -112,6 +113,11 @@ class MarkerActionsMixin:
                     requested_by=str(message.author.id),
                     source_msg_id=message.id, created_at=now)
                 notes.append(f"-# 🧩 能力追加を起票(id={cid}): {desc[:60]}")
+                # 失敗と間違いの台帳にも写す（起票済みなので、ここから二度起票はしない）
+                misses.record_gap(
+                    DB_PATH, agent_id=aid, source="capability",
+                    context="頼まれたけどできなかった", detail=desc,
+                    topic=f"capability:{cid}")
         for e in errors:
             notes.append(f"-# ⚠️ ルール登録に失敗: {e}")
         if not notes:
@@ -294,6 +300,11 @@ class MarkerActionsMixin:
                 channel_id=message.channel.id, trigger_message_id=message.id,
                 detail=",".join(missing))
             print(f"[{self.agent['id']}] fake-done caught: {missing}")
+            misses.record_gap(
+                DB_PATH, agent_id=self.agent["id"], source="fake_done",
+                context=f"「{(message.clean_content or '')[:60]}」への回答",
+                detail="実行していないのに完了と書いた: " + "・".join(missing),
+                topic="fake_done:" + ",".join(sorted(missing)))
             return self._honest_failure(
                 honesty.build_fake_done_note(missing), answer, missing)
         # 完了主張×実行結果が失敗のみ＝本文と実挙動の矛盾

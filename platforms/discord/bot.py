@@ -40,6 +40,7 @@ from core import glossary
 from core import heartbeat
 from core import integrations
 from core import invoke_claude
+from core import misses
 from core import msgref
 from core import plugins
 from core import proactive
@@ -57,6 +58,7 @@ from core import thread_reply
 from platforms.discord import archiving
 from platforms.discord.agent_loops import AgentLoopsMixin
 from platforms.discord.marker_actions import MarkerActionsMixin
+from platforms.discord.misses_hooks import MissesHooksMixin
 from platforms.discord.reaction_handlers import ReactionHandlersMixin
 from platforms.discord.skill_hooks import SkillHooksMixin
 from platforms.discord.tool_loop import ToolLoopMixin
@@ -128,7 +130,7 @@ def name_call_allowed_here(channel_id, other_home_ids, excluded_ids):
 
 
 class AgentClient(ToolLoopMixin, SkillHooksMixin, MarkerActionsMixin,
-                  AgentLoopsMixin,
+                  AgentLoopsMixin, MissesHooksMixin,
                   ReactionHandlersMixin, WebhookPersonaMixin, discord.Client):
     """1エージェント = 1 Botアカウント = 1クライアント。
 
@@ -319,7 +321,16 @@ class AgentClient(ToolLoopMixin, SkillHooksMixin, MarkerActionsMixin,
             if await self._run_integration_prehooks(message):
                 return
 
+        # ❌の理由の返信は台帳に貯めて、会話にはしない
+        if self.is_archiver and await self._maybe_miss_reason(message):
+            return
+
         trigger = self._trigger(message)
+        # 決定の波及チェックへの返信（直し方を教えてくれた）は、返信の@通知を
+        # 切っていてもエージェントへの依頼として受ける
+        teach = await self._teaching_context(message)
+        if trigger is None and teach:
+            trigger = "human_mention"
         if trigger is None:
             # 誰も呼ばれていない投稿でも、PDF添付だけは自動要約する
             await self._maybe_pdf_summary(message)
@@ -345,7 +356,11 @@ class AgentClient(ToolLoopMixin, SkillHooksMixin, MarkerActionsMixin,
                 print(f"[{self.agent['id']}] chain limit reached "
                       f"({chain}/{MAX_BOT_CHAIN}) in #{message.channel}")
                 return
+        before = (await asyncio.to_thread(misses.snapshot, DB_PATH)
+                  if teach else None)
         await self._respond(message, history)
+        if teach:
+            await self._record_teaching(message, teach, before)
 
     def _active_rules(self, message):
         """この文脈（全体＋このch＋この人）で有効な、自分のルール（期限切れ除外）。"""

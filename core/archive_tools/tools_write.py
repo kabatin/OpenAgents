@@ -177,6 +177,11 @@ def request_capability(ctx, args):
             conn, agent_id=ctx.agent_id, description=desc,
             context=(ctx.question or "")[:500], requested_by=ctx.actor_id,
             source_msg_id=ctx.message_id, created_at=_stamp())
+    # 失敗と間違いの台帳にも写す（起票済みなので、ここから二度起票はしない）
+    from core import misses
+    misses.record_gap(ctx.db_path, agent_id=ctx.agent_id, source="capability",
+                      context="頼まれたけどできなかった", detail=desc,
+                      topic=f"capability:{cid}")
     return _ok(f"能力追加を起票した（id={cid}）",
                f"-# 🧩 能力追加を起票(id={cid}): {desc[:60]}", id=cid)
 
@@ -321,6 +326,102 @@ register(Tool(
         "channel": {"type": "string", "description": "#チャンネル名（任意）"}},
         "required": ["content", "due"]},
     kind="write", handler=add_reminder, skill="reminder"))
+
+
+def _own_reminder(ctx, rid):
+    """付け替えてよいリマインダーか（本人か管理者・動いているものだけ）。"""
+    entry = reminders.find_entry(rid)
+    if entry is None or entry.get("status") != "active":
+        return None, _ng(f"id={rid} は動いているリマインダーではない",
+                         f"-# ⚠️ id={rid} は動いているリマインダーではありません")
+    if entry["user_id"] != str(ctx.actor_id) and not ctx.is_admin:
+        return None, _ng("本人か管理者しか直せない",
+                         f"-# ⚠️ id={rid} は{entry['user_name']}さんのリマインダーなので、"
+                         "本人か管理者しか直せません")
+    return entry, None
+
+
+def shift_reminder(ctx, args):
+    """曜日が変わる決定に合わせて、毎週のリマインダーを付け替える。
+    日付はコード（reminder_shift）が計算する（言語モデルに日付を数えさせない）。"""
+    from core import reminder_shift
+    try:
+        rid = int(args.get("id") or 0)
+    except (TypeError, ValueError):
+        rid = 0
+    entry, err = _own_reminder(ctx, rid)
+    if err:
+        return err
+    try:
+        weekday = int(args.get("weekday"))
+    except (TypeError, ValueError):
+        weekday = -1
+    content = str(args.get("content") or "").strip() or None
+    plan = reminder_shift.plan(entry, now=reminders.now_jst(), weekday=weekday,
+                               start=args.get("start"), end=args.get("end") or None,
+                               content=content)
+    if plan is None:
+        return _ng("この形では直し方を作れない（毎日・毎月・曜日や日付が読めない・期間が長すぎる）",
+                   "-# ⚠️ 直し方を作れませんでした（毎日・毎月のリマインダー、"
+                   "または曜日・期間が読めない）")
+    reminder_shift.apply(plan)
+    rows = reminder_shift.preview(plan)
+    return _ok(f"リマインダー id={rid} を付け替えた: " + " / ".join(rows),
+               "\n".join(f"-# 登録: {x}" for x in rows), id=rid)
+
+
+register(Tool(
+    name="shift_reminder", label="リマインダーの曜日の付け替え",
+    description=(
+        "毎週のリマインダーを、決定に合わせて別の曜日へ付け替える。weekday は"
+        "新しい曜日（0=月〜6=日）、start は新しい曜日になる最初の日、end は元に"
+        "戻す前の最後の日（以降ずっとなら省略）。日付の計算はシステムがするので、"
+        "自分で個別の日付を登録しない。始まる前の週は元の曜日で1回ずつ残り、"
+        "期間が明けたら元の繰り返しに戻る。本人か管理者のみ。"),
+    input_schema={"type": "object", "properties": {
+        "id": {"type": "integer"},
+        "weekday": {"type": "integer", "description": "0=月〜6=日"},
+        "start": {"type": "string", "description": "YYYY-MM-DD"},
+        "end": {"type": "string", "description": "YYYY-MM-DD（任意）"},
+        "content": {"type": "string", "description": "期間中に流す文面（任意）"}},
+        "required": ["id", "weekday", "start"]},
+    kind="write", handler=shift_reminder, skill="reminder"))
+
+
+def reschedule_reminder(ctx, args):
+    """リマインダーの次回の日時を付け替える（繰り返しはそこから続く）。"""
+    try:
+        rid = int(args.get("id") or 0)
+    except (TypeError, ValueError):
+        rid = 0
+    entry, err = _own_reminder(ctx, rid)
+    if err:
+        return err
+    try:
+        due = reminders.parse_dt(str(args.get("due") or ""))
+    except ValueError as e:
+        return _ng(str(e), f"-# ⚠️ 付け替えできませんでした: {e}")
+    if due <= reminders.now_jst():
+        return _ng("過去の日時には付け替えない",
+                   "-# ⚠️ 過去の日時には付け替えられません")
+    content = str(args.get("content") or "").strip() or None
+    reminders.set_due(rid, reminders.fmt(due), content)
+    line = f"id={rid} の次回を {reminders.fmt_human(due)} に付け替え"
+    return _ok(f"リマインダー {line}", f"-# 登録: {line}", id=rid)
+
+
+register(Tool(
+    name="reschedule_reminder", label="リマインダーの日時の付け替え",
+    description=(
+        "リマインダーの次回の日時を付け替える（毎週・毎月の繰り返しは、"
+        "そこから続く）。due は 'YYYY-MM-DD HH:MM'。content を渡すと文面も変える。"
+        "本人か管理者のみ。"),
+    input_schema={"type": "object", "properties": {
+        "id": {"type": "integer"},
+        "due": {"type": "string", "description": "YYYY-MM-DD HH:MM"},
+        "content": {"type": "string"}},
+        "required": ["id", "due"]},
+    kind="write", handler=reschedule_reminder, skill="reminder"))
 
 
 def cancel_reminder(ctx, args):

@@ -27,6 +27,7 @@ from core import episodes
 from core import event_planner
 from core import injection_drill
 from core import kpi
+from core import misses
 from core import homework
 from core import auto_discover
 from core import persona_review
@@ -259,6 +260,10 @@ class AgentLoopsMixin:
             plan.append(("comeback", lambda: self._comeback_cycle(cb)))
         if cfg.get("wiki", {}).get("enabled"):
             plan.append(("wiki update", self._wiki_update_cycle))
+        if self.is_archiver:
+            # 失敗と間違いの台帳から起票する（投稿はしない＝内部の記録だけ。
+            # 起票は開発BOTの拾い上げで👍待ちの提案になる）
+            plan.append(("misses", self._misses_cycle))
         # 外部連携（integrations/）が持ち込む観察サイクル。
         # 連携側の CYCLES に (表示名, fn) を並べておくとここに載る
         for integration in getattr(self, "integrations", ()):
@@ -567,6 +572,17 @@ class AgentLoopsMixin:
                                     self.agent["id"], nd["id"])
             if not impacts:
                 continue
+            todo = ripple.actionable(impacts)
+            if not todo:
+                # 一致・具体化・関連だけ＝直すものはない。投稿せず記録だけ残す
+                await asyncio.to_thread(
+                    proactive.log_entry, DB_PATH, self.agent["id"],
+                    kind="ripple", action="silent",
+                    detail=f"decision={nd['id']} 直すものなし（"
+                           + "・".join(f"{i['effect']}:{i['kind']}{i['id']}"
+                                       for i in impacts)[:150] + "）")
+                continue
+            impacts = todo
             pid = await asyncio.to_thread(ripple.register, DB_PATH,
                                           nd["id"], impacts)
             ch_id = nd.get("channel_id") or self.home_channel_id
@@ -577,6 +593,15 @@ class AgentLoopsMixin:
                 allowed_mentions=discord.AllowedMentions.none())
             await asyncio.to_thread(ripple.set_message, DB_PATH, pid,
                                     posted.id)
+            # 自動では直せなかったもの（直し方を人に教わるもの）は失敗の台帳へ
+            for it in impacts:
+                if not ripple.auto_applicable(it):
+                    await asyncio.to_thread(
+                        misses.record_gap, DB_PATH, agent_id=self.agent["id"],
+                        source="ripple_manual",
+                        context=ripple.gap_context(nd["decision"]),
+                        detail=ripple.describe(it),
+                        topic=f"ripple_manual:{it['kind']}")
             await asyncio.to_thread(
                 proactive.log_entry, DB_PATH, self.agent["id"],
                 kind="ripple", action="spoke", channel_id=ch_id,
@@ -584,6 +609,12 @@ class AgentLoopsMixin:
                 detail=f"decision={nd['id']} impacts={len(impacts)}")
             print(f"[{self.agent['id']}] ripple proposed "
                   f"(decision={nd['id']}, {len(impacts)}件)")
+
+    async def _misses_cycle(self):
+        """失敗と間違いの台帳: 同じ種類が3件たまったら起票する（❌は理由つきだけ
+        数える）。点検で赤（乗っ取り訓練の突破・回答品質の急落）は1件で即起票。"""
+        for cap_id in await asyncio.to_thread(misses.file_repeated, DB_PATH):
+            print(f"[{self.agent['id']}] 失敗の台帳から起票#{cap_id}")
 
     async def _comeback_cycle(self, cb):
         """浦島パック（#102）: 復帰者に不在中のあらすじを1回だけ渡す。"""
@@ -1017,6 +1048,9 @@ class AgentLoopsMixin:
             await asyncio.to_thread(
                 proactive.log_entry, DB_PATH, self.agent["id"],
                 kind="drill", action="breached", detail=r["name"])
+        # 突破は「点検で赤」として失敗の台帳へ（1件で開発BOTへ起票される）
+        await asyncio.to_thread(injection_drill.record_breaches, DB_PATH,
+                                self.agent["id"], results)
         if injection_drill.should_report(results):
             channel = (self.get_channel(self.home_channel_id)
                        or await self.fetch_channel(self.home_channel_id))
