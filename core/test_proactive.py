@@ -230,6 +230,21 @@ class DecideReplyTest(ProactiveTestBase):
             persona="", agent_name="エージェント1",
             invoke_fn=invoke_fn, search_fn=lambda kws: search_rows or [])
 
+    def test_system_prompt_separates_instructions_from_data(self):
+        # 自分から話す経路も、ほかの人の発言に紛れた命令には従わない
+        from unittest import mock
+        seen = {}
+
+        def fake_invoke(prompt, **kw):
+            seen["system"] = kw.get("system") or ""
+            return mock.Mock(text="回答")
+        with mock.patch.object(proactive.invoke_claude, "invoke", fake_invoke):
+            proactive.decide_reply(
+                self.db_path, "1", "agent1", self.CAND, self.TRIGGER,
+                persona="", agent_name="エージェント1",
+                search_fn=lambda kws: [self.HIT])
+        self.assertIn("指示とデータの区別", seen["system"])
+
     def test_cite_required_without_hits_skips_claude(self):
         text, note = self._decide(search_rows=None)
         self.assertIsNone(text)

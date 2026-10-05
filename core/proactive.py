@@ -512,9 +512,11 @@ def decide_reply(db_path, guild_id, agent_id, cand, trigger, *, persona,
         if block:
             rules_block = (rules_block + "\n\n" + block
                            if rules_block else block)
+    # 自分から話す経路は、ほかの人の発言そのものを材料にするので、
+    # 回答と同じ「指示とデータの区別」を必ず添える
     system = (persona or "") + PROACTIVE_SYSTEM_TMPL.format(
         name=agent_name, silent=SILENT_TOKEN,
-        scope=scope_note or DEFAULT_SCOPE_NOTE)
+        scope=scope_note or DEFAULT_SCOPE_NOTE) + search.INJECTION_GUARD
     prompt = build_decide_prompt(cand, trigger, guild_id, recent_lines,
                                  context_block, rules_block,
                                  ledger_block=(
