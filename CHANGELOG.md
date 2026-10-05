@@ -7,6 +7,13 @@
 
 ## [Unreleased]
 
+## [0.2.3] — 2026-10-05
+
+大きなサーバーにも安心して入れられるようにし、会話に紛れた命令への耐性を
+本番と同じ条件で確かめ直したリリース。セットアップで過去の会話をどこまで
+取り込むかを選べるようにし、失敗と間違いを貯めて改善につなげる仕組みと、
+決定の波及チェックの作り直しを含む。README とドキュメントも図・画面ともに刷新した。
+
 ### セキュリティ
 
 - **社内ログやほかの人の発言に紛れた命令に従っていた** — 検索結果に
@@ -391,7 +398,8 @@ macOS・Windows・Linux で緑。
 - 添付読解・Web検索などツールを使う機能は Claude Code 選択時のみ
 - ドキュメントは日本語が正（英語は README のみ）
 
-[Unreleased]: https://github.com/kabatin/OpenAgents/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/kabatin/OpenAgents/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/kabatin/OpenAgents/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/kabatin/OpenAgents/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/kabatin/OpenAgents/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/kabatin/OpenAgents/compare/v0.1.2...v0.2.0
