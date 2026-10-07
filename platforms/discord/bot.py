@@ -17,6 +17,7 @@ Discord マルチエージェントBot — アーカイブ基盤 + チャンネ�
 import sys
 import os
 import asyncio
+import time
 import contextlib
 import logging
 
@@ -41,6 +42,7 @@ from core import heartbeat
 from core import integrations
 from core import invoke_claude
 from core import misses
+from core import turn_wait
 from core import msgref
 from core import plugins
 from core import proactive
@@ -175,6 +177,11 @@ class AgentClient(ToolLoopMixin, SkillHooksMixin, MarkerActionsMixin,
             agent.get("thread_reply"))
         # True: ホームchでもメンション必須（チャンネルを静かに保つ）
         self.require_mention = bool(agent.get("require_mention"))
+        # 言い終わってから答える: 連投・入力中を待ってまとめて答える（既定オフ）
+        tw_cfg = turn_wait.normalize(agent.get("turn_wait"))
+        self.turn_wait_on = tw_cfg["enabled"]
+        self.turn_wait_max = tw_cfg["max_wait_sec"]
+        self._turn_buffers = {}      # (channel_id, author_id) -> 束ねている投稿
         # 名前呼び: ID メンション無しで「〇〇、これ見て」と呼び名で呼ばれた人間の
         # 発言にも応答する。既定オフ＋シャドー（記録のみ）。名前呼びの取りこぼし対策
         self.name_call_cfg = normalize_name_call(agent.get("name_call"))
@@ -331,15 +338,71 @@ class AgentClient(ToolLoopMixin, SkillHooksMixin, MarkerActionsMixin,
         teach = await self._teaching_context(message)
         if trigger is None and teach:
             trigger = "human_mention"
+        if self.turn_wait_on and not message.author.bot:
+            # 言い終わってから答える: 待っている間の同じ人の投稿は
+            # （メンションが無くても）束ねて、まとめて1回答える
+            key = (message.channel.id, message.author.id)
+            buf = self._turn_buffers.get(key)
+            if buf is not None:
+                buf["msgs"].append(message)
+                buf["last_msg_at"] = time.monotonic()
+                return
+            if trigger in ("home", "human_mention"):
+                now = time.monotonic()
+                self._turn_buffers[key] = {
+                    "msgs": [message], "trigger": trigger, "teach": teach,
+                    "first_at": now, "last_msg_at": now, "typing_at": None}
+                asyncio.create_task(self._turn_waiter(key))
+                return
+        await self._handle_triggered(message, trigger, teach)
+
+    async def on_typing(self, channel, user, when):
+        """束ねている人が入力中なら、言い終わるまで待ちを延ばす。"""
+        buf = self._turn_buffers.get((getattr(channel, "id", None),
+                                      getattr(user, "id", None)))
+        if buf is not None:
+            buf["typing_at"] = time.monotonic()
+
+    async def _turn_waiter(self, key):
+        """言い終わったと判断できたら、束ねた投稿にまとめて1回答える。"""
+        try:
+            while True:
+                await asyncio.sleep(0.5)
+                buf = self._turn_buffers.get(key)
+                if buf is None:
+                    return
+                text = turn_wait.merge(m.clean_content for m in buf["msgs"])
+                if turn_wait.should_fire(
+                        time.monotonic(), first_at=buf["first_at"],
+                        last_msg_at=buf["last_msg_at"],
+                        last_typing_at=buf["typing_at"],
+                        kind=turn_wait.completeness(text),
+                        max_total=self.turn_wait_max):
+                    break
+            buf = self._turn_buffers.pop(key)
+            msgs = buf["msgs"]
+            if len(msgs) > 1:
+                print(f"[{self.agent['id']}] {len(msgs)}件の投稿をまとめて応答")
+            await self._handle_triggered(
+                msgs[-1], buf["trigger"], buf["teach"],
+                question=turn_wait.merge(m.clean_content for m in msgs),
+                extra_messages=msgs[:-1])
+        except Exception as e:      # 束ねの失敗で黙らない（ログに残す）
+            self._turn_buffers.pop(key, None)
+            print(f"[{self.agent['id']}] turn wait failed: {e}")
+
+    async def _handle_triggered(self, message, trigger, teach, question=None,
+                                extra_messages=()):
+        """呼ばれた投稿（または束ねた投稿の最後）に応答する。"""
+        text = question if question is not None else message.clean_content
         if trigger is None:
             # 誰も呼ばれていない投稿でも、PDF添付だけは自動要約する
             await self._maybe_pdf_summary(message)
             return
         # リプライ先の添付は reference の有無で近似（フェッチせず軽量に判定。
         # 無言リプライ+メンションで「リプライ先の画像だけ」の依頼も通す）
-        if not _content_gate(trigger, message.clean_content,
-                             bool(message.attachments)
-                             or bool(message.reference)):
+        has_att = any(m.attachments for m in (message, *extra_messages))
+        if not _content_gate(trigger, text, has_att or bool(message.reference)):
             # 無言添付はノイズ防止で応答しない仕様のまま、PDFのみ例外
             await self._maybe_pdf_summary(message)
             return
@@ -358,7 +421,8 @@ class AgentClient(ToolLoopMixin, SkillHooksMixin, MarkerActionsMixin,
                 return
         before = (await asyncio.to_thread(misses.snapshot, DB_PATH)
                   if teach else None)
-        await self._respond(message, history)
+        await self._respond(message, history, question=question,
+                            extra_messages=extra_messages)
         if teach:
             await self._record_teaching(message, teach, before)
 
@@ -517,12 +581,22 @@ class AgentClient(ToolLoopMixin, SkillHooksMixin, MarkerActionsMixin,
             lock = self._session_locks[channel_id] = asyncio.Lock()
         return lock
 
-    async def _respond(self, message, history):
-        question = message.clean_content.strip()
+    async def _respond(self, message, history, question=None,
+                       extra_messages=()):
+        """question: 連投を束ねた質問文（無ければこの投稿の本文）。
+        extra_messages: 束ねた前の投稿（添付もまとめて読む）。"""
+        question = (question if question is not None
+                    else message.clean_content).strip()
         tmpdir = None
         target = message.channel   # 返信先（スレッド化した場合は差し替わる）
         try:
             atts = await _collect_attachments(message)
+            seen = {a.id for a in atts}
+            for m in extra_messages:
+                for a in m.attachments:
+                    if a.id not in seen:
+                        atts.append(a)
+                        seen.add(a.id)
             supported, skipped = attachments.plan_attachments(atts)
             saved = []
             if supported:

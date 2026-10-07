@@ -61,6 +61,26 @@ const BASICS: Setting[] = [
     default: false,
   },
   {
+    path: "turn_wait.enabled",
+    level: "basic",
+    label: "言い終わるのを待ってから答える",
+    desc: "短い投稿を続けて送る人や、打つのに時間がかかる人のために、依頼が言い終わったと判断できるまで待ってからまとめて答えます。「〜なんだけど、」のような言いかけや、入力中の表示が出ている間は待ちます。待っている間の同じ人の投稿は、メンションが無くても一緒に読みます。",
+    kind: "bool",
+    default: false,
+    children: [
+      {
+        path: "turn_wait.max_wait_sec",
+        label: "待つ時間の上限",
+        desc: "言いかけのまま止まっても、この秒数が過ぎたら答え始めます。",
+        kind: "int",
+        default: 180,
+        min: 10,
+        max: 600,
+        unit: "秒",
+      },
+    ],
+  },
+  {
     path: "reminder_max_active",
     label: "リマインダーの登録上限（1人あたり）",
     desc: "同じ人が同時に持てるアクティブなリマインダーの数。超えると新規登録を断ります。",
