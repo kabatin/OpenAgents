@@ -32,6 +32,7 @@ import discord
 
 from core import action_items
 from core import attachments
+from core import bg_tasks
 from core import archive_window
 from core import config as app_config
 from core import db
@@ -61,6 +62,7 @@ from platforms.discord import archiving
 from platforms.discord.agent_loops import AgentLoopsMixin
 from platforms.discord.marker_actions import MarkerActionsMixin
 from platforms.discord.misses_hooks import MissesHooksMixin
+from platforms.discord.bg_task_runner import BgTaskMixin
 from platforms.discord.reaction_handlers import ReactionHandlersMixin
 from platforms.discord.skill_hooks import SkillHooksMixin
 from platforms.discord.tool_loop import ToolLoopMixin
@@ -132,7 +134,7 @@ def name_call_allowed_here(channel_id, other_home_ids, excluded_ids):
 
 
 class AgentClient(ToolLoopMixin, SkillHooksMixin, MarkerActionsMixin,
-                  AgentLoopsMixin, MissesHooksMixin,
+                  AgentLoopsMixin, MissesHooksMixin, BgTaskMixin,
                   ReactionHandlersMixin, WebhookPersonaMixin, discord.Client):
     """1エージェント = 1 Botアカウント = 1クライアント。
 
@@ -229,6 +231,10 @@ class AgentClient(ToolLoopMixin, SkillHooksMixin, MarkerActionsMixin,
         if self.reminder and not getattr(self, "_reminder_task", None):
             self._reminder_task = asyncio.create_task(self._reminder_loop())
             print(f"[{self.agent['id']}] reminder loop started")
+        # 再起動で途中になった裏の作業を知らせる（例外は外へ出さない）
+        if self._bg_cfg() and not getattr(self, "_bg_recovered", False):
+            self._bg_recovered = True
+            await self._recover_bg_tasks()
         if (self.proactive_cfg.get("enabled")
                 and not getattr(self, "_proactive_task", None)):
             self._proactive_task = asyncio.create_task(self._proactive_loop())
@@ -461,6 +467,10 @@ class AgentClient(ToolLoopMixin, SkillHooksMixin, MarkerActionsMixin,
         parts = [self.agent.get("role") or "",
                  build_roster_note(self.agent["id"])]
         ctx_parts = []
+        # 裏の作業: 人の依頼で、Claude Code が使えるときだけ引き受け方を教える
+        if (message is not None and not message.author.bot
+                and self._bg_available()):
+            parts.append(bg_tasks.SKILL_NOTE)
         if self.image_gen:
             parts.append(IMAGE_SKILL_NOTE)
         if self.is_archiver and not message.author.bot:
@@ -742,6 +752,10 @@ class AgentClient(ToolLoopMixin, SkillHooksMixin, MarkerActionsMixin,
             wiki_topics = []
             if self.is_archiver and not message.author.bot:
                 answer, wiki_topics = wiki.extract_markers(answer)
+            # 裏の作業（[TASK: …]）: マーカーは必ず外し、人の依頼のときだけ引き受ける
+            answer, task_instr = bg_tasks.extract_marker(answer)
+            if message.author.bot or not self._bg_cfg():
+                task_instr = None
             tool_live = (tool_plan is not None
                          and not self.tool_loop_cfg["shadow"])
             if self.reminder and not message.author.bot and not tool_live:
@@ -818,6 +832,8 @@ class AgentClient(ToolLoopMixin, SkillHooksMixin, MarkerActionsMixin,
                                     if tool_plan is not None else [])))
                     self._bg_tasks.add(task)
                     task.add_done_callback(self._bg_tasks.discard)
+            if task_instr:
+                await self._start_bg_task(message, task_instr)
             for topic in wiki_topics[:2]:
                 await self._create_wiki_page(message, topic)
             if image_prompt:

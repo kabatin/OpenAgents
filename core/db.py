@@ -554,6 +554,22 @@ CREATE TABLE IF NOT EXISTS share_proposals (
 -- 決定の波及チェッカー（とっておき#101）。新しい決定が入ったとき、
 -- 影響を受ける既存の記録（旧決定・タスク・リマインダー・イベント）を提案し、
 -- ✅で矛盾する旧決定をsupersededにする。
+-- 裏の作業（core/bg_tasks.py）。重い作業は即答で引き受けて裏で進め、スレッドに途中経過と
+-- 結果を置く。再起動で途中だったものは interrupted にして正直に知らせる。
+-- status: running / done / failed / interrupted
+CREATE TABLE IF NOT EXISTS bg_tasks (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id      TEXT,
+    channel_id    INTEGER,
+    thread_id     INTEGER,
+    requester_id  TEXT,
+    instruction   TEXT,
+    status        TEXT DEFAULT 'running',
+    summary       TEXT,
+    created_at    TEXT,
+    finished_at   TEXT
+);
+
 -- 失敗と間違いの台帳。❌された提案（理由を聞いて貯める）・自動ではやり切れなかったこと・
 -- できなかった依頼・想定外のツール失敗・できたフリ・点検の赤を1か所に集める。
 -- 同じ種類（topic）がたまったら起票し、開発BOTの改善の材料にする（core/misses.py）

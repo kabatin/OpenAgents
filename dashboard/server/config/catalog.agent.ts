@@ -239,6 +239,50 @@ const BASICS: Setting[] = [
 
 const SKILLS: Setting[] = [
   {
+    path: "skills.bg_tasks.enabled",
+    label: "重い作業は裏で進める",
+    desc:
+      "資料・表づくりや、いくつもの調べもののように時間がかかる依頼は「取りかかります」とすぐ返事をして、" +
+      "スレッドで裏で進めます。時間がかかるときは途中経過を書き、終わったら依頼した人に結果とファイルを渡します。" +
+      "作業は使い捨てのフォルダの中だけで行い、社内ログは読むだけ、書き込み・送信系の道具は使いません。" +
+      "Claude Code を使うときだけ動きます。",
+    kind: "bool",
+    level: "basic",
+    default: false,
+    children: [
+      {
+        path: "skills.bg_tasks.report_interval_min",
+        label: "途中経過を書く間隔",
+        desc: "作業が続いている間、この間隔で進み具合をスレッドに書きます（進みが無いときは書きません）。",
+        kind: "int",
+        default: 3,
+        min: 1,
+        max: 30,
+        unit: "分",
+      },
+      {
+        path: "skills.bg_tasks.timeout_min",
+        label: "1件の上限時間",
+        desc: "これを超えたら打ち切り、作りかけのファイルがあれば置いて正直に知らせます。",
+        kind: "int",
+        default: 30,
+        min: 5,
+        max: 120,
+        unit: "分",
+      },
+      {
+        path: "skills.bg_tasks.max_parallel",
+        label: "同時に進める数",
+        desc: "これを超える依頼は、始められなかったと正直に伝えます。",
+        kind: "int",
+        default: 2,
+        min: 1,
+        max: 5,
+        unit: "件",
+      },
+    ],
+  },
+  {
     path: "skills.reminder",
     level: "basic",
     label: "リマインダー",

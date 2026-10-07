@@ -171,6 +171,7 @@ const JA: Record<string, string> = {
   rescue: "救援",
   briefing: "ブリーフィング",
   homework: "宿題（「やっときます」）",
+  bg_task: "裏の作業",
   other: "その他",
 };
 

@@ -88,6 +88,11 @@ The essentials:
 asks "what happened with that?", the agent searches the log and answers with
 citation links. Reminders in natural language, YouTube/PDF auto-summaries, and
 "from now on, do it this way" rule memory are all built in.
+It can also **wait until you've finished typing** — bundling a burst of short
+messages into one answer — and **hand heavy work to the background**: it
+replies "on it" right away, works in a thread inside a throwaway folder,
+posts progress, and drops the result and files there when done (both off by
+default).
 Since v0.2.0 the model can also **query the archive itself while answering**
 (a dependency-free MCP tool loop): it re-searches when the first hit is thin,
 and every side effect such as a reminder goes through a tool so the reply is

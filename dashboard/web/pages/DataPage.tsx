@@ -8,6 +8,7 @@ import {
   LearningPanel,
 } from "./data/GrowthPanels.tsx";
 import { PersonasPanel, SheetsPanel } from "./data/LinkPanels.tsx";
+import { BgTasksPanel } from "./data/BgTasksPanel.tsx";
 import { LlmPanel } from "./data/LlmPanel.tsx";
 import { MissesPanel } from "./data/MissesPanel.tsx";
 import { RulesPanel, TermsPanel } from "./data/MemoryPanels.tsx";
@@ -19,6 +20,7 @@ type PanelId =
   | "terms"
   | "tasks"
   | "reminders"
+  | "bgtasks"
   | "feedback"
   | "capabilities"
   | "misses"
@@ -46,6 +48,7 @@ const SECTIONS: { label: string; items: { id: PanelId; label: string }[] }[] = [
     items: [
       { id: "tasks", label: "追跡タスク" },
       { id: "reminders", label: "リマインダー" },
+      { id: "bgtasks", label: "裏の作業" },
     ],
   },
   {
@@ -99,6 +102,7 @@ export function DataPage() {
     terms: <TermsPanel />,
     tasks: <TasksPanel />,
     reminders: <RemindersPanel />,
+    bgtasks: <BgTasksPanel />,
     feedback: <FeedbackPanel summary={summary} />,
     capabilities: <CapabilitiesPanel />,
     misses: <MissesPanel />,

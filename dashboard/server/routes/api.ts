@@ -24,6 +24,7 @@ import {
   llmDaily,
   llmRecent,
   missesLedger,
+  bgTasks,
   observationShadow,
   recentActivity,
   resolveDiscordIds,
@@ -222,6 +223,8 @@ api.get("/data/llm", (c) =>
 );
 api.get("/data/capabilities", (c) => c.json(capabilityRequests()));
 api.get("/data/misses", (c) => c.json(missesLedger()));
+// 裏の作業（引き受けた重い作業と結果）
+api.get("/data/bg-tasks", (c) => c.json(bgTasks()));
 api.get("/data/roadmap", (c) => c.json(roadmapItems()));
 api.get("/data/dev-jobs", (c) => c.json({ jobs: devJobs(), deploys: deployHistory() }));
 api.get("/data/reminders", async (c) => c.json(await readReminders()));

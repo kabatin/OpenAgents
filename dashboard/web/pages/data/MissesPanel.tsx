@@ -17,6 +17,7 @@ const SOURCE: Record<
   taught: { label: "教わって直した（見本）", tone: "neutral" },
   drill_breach: { label: "乗っ取り訓練で突破", tone: "danger" },
   quality_drop: { label: "回答品質が急に下がった", tone: "danger" },
+  bg_task_failed: { label: "裏の作業が最後までできなかった", tone: "warn" },
 };
 
 /** 理由を聞かない種類（人の操作が起点ではないもの）。 */

@@ -324,6 +324,35 @@ export function missesLedger(limit = 100): MissRow[] {
   );
 }
 
+export type BgTaskRow = {
+  id: number;
+  agentId: string | null;
+  /** Discord の ID は19桁で JS の number に収まらないので文字列で返す */
+  threadId: string | null;
+  requesterId: string | null;
+  instruction: string | null;
+  status: string;
+  summary: string | null;
+  createdAt: string | null;
+  finishedAt: string | null;
+};
+
+/** 裏の作業: 引き受けた重い作業と、その結果（完了報告の本文）・失敗の理由。 */
+export function bgTasks(limit = 50): BgTaskRow[] {
+  return safeQuery(
+    (conn) =>
+      conn
+        .prepare<[number], BgTaskRow>(
+          `SELECT id, agent_id AS agentId, CAST(thread_id AS TEXT) AS threadId,
+                  requester_id AS requesterId, instruction, status, summary,
+                  created_at AS createdAt, finished_at AS finishedAt
+             FROM bg_tasks ORDER BY id DESC LIMIT ?`,
+        )
+        .all(limit),
+    [],
+  );
+}
+
 export type RoadmapRow = {
   id: number;
   title: string;
