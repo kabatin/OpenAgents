@@ -7,6 +7,12 @@
 
 ## [Unreleased]
 
+## [0.2.4] — 2026-10-08
+
+チャットらしく話せるようにしたリリース。連投や入力中を待って言い終わってから
+まとめて答える機能と、時間のかかる依頼をすぐ引き受けてスレッドで裏で進める
+機能を足した（どちらも既定オフ）。
+
 ### 追加
 
 - **言い終わってから答える**（`turn_wait`・既定オフ） — 短い投稿を連投する人や、
@@ -416,7 +422,8 @@ macOS・Windows・Linux で緑。
 - 添付読解・Web検索などツールを使う機能は Claude Code 選択時のみ
 - ドキュメントは日本語が正（英語は README のみ）
 
-[Unreleased]: https://github.com/kabatin/OpenAgents/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/kabatin/OpenAgents/compare/v0.2.4...HEAD
+[0.2.4]: https://github.com/kabatin/OpenAgents/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/kabatin/OpenAgents/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/kabatin/OpenAgents/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/kabatin/OpenAgents/compare/v0.2.0...v0.2.1
