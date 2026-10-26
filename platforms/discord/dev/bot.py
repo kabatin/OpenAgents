@@ -589,6 +589,11 @@ class DevBot(discord.Client):
         flakes_ok, flakes_tail = await asyncio.to_thread(
             dev_pipeline.run_pyflakes, wt, files)
         dstat = await asyncio.to_thread(dev_pipeline.diff_stat, wt)
+        if (not files and not run.get("error")
+                and dev_pipeline.allows_no_change(cap_req)):
+            # 品質の赤は「揺れなら直さない」が正解になりうる。失敗にせず結論を報告して閉じる
+            await self._finish_no_change(job_id, req_id, prog, run)
+            return
         if not files and not run.get("error"):
             # 差分ゼロの「成功」を承認待ちに乗せない（👍で起票だけ閉じる事故防止）
             run = dict(run, error="変更が生成されませんでした（差分なし）")
@@ -643,6 +648,27 @@ class DevBot(discord.Client):
                 f"起票#{req_id}「{cap_req['description'][:60]}」: {err[:200]}")
         self._active_job_ids.pop(req_id, None)   # 正常終了＝例外時failed化は不要
         await self._safe_edit(prog, persona.job_finished(req_id, built))
+
+    async def _finish_no_change(self, job_id, req_id, prog, run):
+        """調べた結果、直さないと結論した起票を閉じる（差分は無いので反映はしない）。"""
+        text = dev_pipeline.no_change_summary(
+            req_id, run.get("final_text", ""), job_id)
+        channel = self._channel()
+        msg = None
+        if channel is not None:
+            try:
+                msg = await channel.send(text[:1900])
+            except discord.DiscordException as e:
+                print(f"変更なし報告の投稿失敗: {e}")
+
+        def _close():
+            with db.connect(DB_PATH) as conn:
+                db.set_capability_status(conn, req_id, "no_change")
+        await asyncio.to_thread(self._finish_job, job_id, "no_change",
+                                msg.id if msg else None, text)
+        await asyncio.to_thread(_close)
+        self._active_job_ids.pop(req_id, None)
+        await self._safe_edit(prog, persona.job_no_change(req_id))
 
     async def _tick_progress(self, prog, progress):
         """4秒ごとに進捗メッセージを更新（1本をedit＝spam回避）。"""

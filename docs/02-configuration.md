@@ -67,13 +67,14 @@
 "llm": {
   "provider": "claude",         // claude / codex / 自分で定義した名前
   "model": "claude-sonnet-5",   // 空ならツールの既定
-  "effort": "xhigh",            // 考える深さ（Claude Code のみ）。"" で指定しない
+  "effort": "medium",           // 考える深さ（Claude Code のみ）。"" で指定しない
   "timeout_sec": 180
 }
 ```
 
 `effort` は Claude Code に渡す思考の深さ（`--effort`：low / medium / high /
-xhigh / max）。深いほど丁寧ですが遅く・高くなります。検索語の抽出のような
+xhigh / max、既定は medium）。深いほど丁寧ですが遅く・高くなります。Opus 5.5 は
+medium でも Opus 5 の high を上回るので、まずは既定のまま使ってください。検索語の抽出のような
 軽い下ごしらえは、この設定に関わらず軽いモデル（Haiku）・浅い思考で回します。
 
 詳しくは [04-llm-providers.md](04-llm-providers.md)。
@@ -245,11 +246,15 @@ DBに記録します（複数だと同じ発言が二重に記録されます）
 
 ```jsonc
 "dashboard": {
-  "host": "127.0.0.1",   // 自分のPCだけ。LANに出すなら "0.0.0.0"
+  "host": "127.0.0.1",   // 自分のPCだけ。LANに出すなら "::"（IPv4/IPv6 の両方）
   "port": 8787,
   "password": ""         // LANに出すなら必須（ユーザー名は admin）
 }
 ```
+
+`"0.0.0.0"` は IPv4 だけで待ち受けます。LANの端末が `〜.local` の名前を
+IPv6 で引くと繋がらないことがあるので、IPv6 が使えない環境でなければ `"::"` を
+使ってください（以前の `"0.0.0.0"` の設定もそのまま動きます）。
 
 **インターネットには公開しないでください。** この画面はBotトークンを
 読めるプロセスです。外から使いたい場合は Tailscale などのVPNを使ってください。

@@ -30,6 +30,26 @@ describe("isAllowedHost", () => {
     }
   });
 
+  it("同一LANのIPv6（ユニークローカル・リンクローカル）は許す", () => {
+    for (const h of ["[fd12:3456::5]:8787", "[fc00::1]", "[fe80::1]:8787", "[FE80::abcd]"]) {
+      expect(isAllowedHost(h), h).toBe(true);
+    }
+  });
+
+  it("グローバルIPv6と、それらしい名前のドメインは拒否する", () => {
+    const cases = [
+      "[2001:db8::1]:8787",
+      "[fec0::1]", // fe80::/10 の外側（境界）
+      "[fd1::1]", // 先頭グループは 0fd1 でプライベートではない
+      "[fe8::1]",
+      "fd00.evil.com:8787",
+      "fe80.example.jp",
+    ];
+    for (const h of cases) {
+      expect(isAllowedHost(h), h).toBe(false);
+    }
+  });
+
   it("Bonjour(.local)とTailscale(*.ts.net)は許す", () => {
     expect(isAllowedHost("my-mac.local:8787")).toBe(true);
     expect(isAllowedHost("mac.tail1234.ts.net")).toBe(true);

@@ -38,8 +38,8 @@
   （config.json / .env / *.db / auth*）は読まない・出力しない・コピーしない。
 - 外部ネットワークへのアクセス（curl/wget等）とパッケージ追加（pip install）は禁止。
   依存追加が必要だと判断したら、実装せず最終要約で「必要な依存」として申告する。
-- 振る舞いを変える場合は必ず対応するテストを追加/更新し、可能なら自分で
-  unittest を回して緑を確認すること（`venv/bin/python -m unittest discover -s core -t . -q`。
+- 振る舞いを変える場合は対応するテストを追加/更新し、自分で unittest を
+  回して緑を確認してから終える（`venv/bin/python -m unittest discover -s core -t . -q`。
   pytest ではなく unittest。システムの python3 では discord が無く動かない）。
   最終的にパイプラインも検証する。
 - 回答の内容に影響する変更（指示文・ツールの description・注入）は、要約に
@@ -98,4 +98,4 @@ config フラグを新設・変更したら、**同じ改修の中で**
   dev_gate.py / deploy.py / gate.py / settings.json / config.json / .env / *.plist / *.db。
 - 開発BOT自身のコード（platforms/discord/dev/ 配下すべて。承認ゲートと安全弁を含む）は
   書き込みも反映もできない。改修が必要なら最終要約で申告する（人間の開発セッションで扱う）。
-- 完了したら、最後に「変更したファイル」と「何をどう変えたか」を3〜6行で要約する。
+- 完了したら最後に、承認者が diff を開く前に読む要約として「変更したファイル」と「何をどう変えたか」を書く（Discord には先頭800字だけが貼られる）。

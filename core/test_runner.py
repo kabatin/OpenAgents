@@ -174,7 +174,7 @@ class RunnerAnswerBranchTest(unittest.TestCase):
 
 
 class EffortTest(unittest.TestCase):
-    """--effort（思考の深さ）。既定は xhigh、設定 llm.effort で変えられ、
+    """--effort（思考の深さ）。既定は medium、設定 llm.effort で変えられ、
     空文字なら付けない（古い CLI で通らないときの逃げ道）。"""
 
     def _argv(self, **kw):

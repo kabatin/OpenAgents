@@ -349,6 +349,13 @@ class ReactionHandlersMixin:
                         user_id=str(payload.user_id), value=value)
             print(f"[{self.agent['id']}] feedback {'+'if added else '-'}"
                   f"{value} on {agent_id}'s msg {payload.message_id}")
+            # 👎は失敗の台帳へ（理由を1回だけ聞く。❌の提案と同じ流れ）
+            if added and value == "down" and emoji == "👎":
+                content = ((msg or {}).get("content") or "")[:120]
+                await self._ask_why(payload, "thumbs_down",
+                                    f"{agent_id}の投稿「{content}」",
+                                    "👎 受け取りました",
+                                    topic=f"thumbs_down:{agent_id}")
             # A/B実験（RM#12）: その発言を生んだ変種へ👍👎を帰属させる
             if added:
                 vid = await asyncio.to_thread(

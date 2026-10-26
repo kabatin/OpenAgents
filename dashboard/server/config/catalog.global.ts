@@ -121,11 +121,11 @@ const LLM: Setting[] = [
       "検索語の抽出など軽い下ごしらえは、ここに関わらず浅く回します。" +
       "古い claude CLI で --effort が通らないときは「指定しない」にしてください。",
     kind: "enum",
-    default: "xhigh",
+    default: "medium",
     options: [
-      { value: "xhigh", label: "とても深く（既定）" },
+      { value: "medium", label: "ふつう（既定）" },
       { value: "high", label: "深く" },
-      { value: "medium", label: "ふつう" },
+      { value: "xhigh", label: "とても深く" },
       { value: "low", label: "浅く" },
       { value: "max", label: "最大" },
       { value: "", label: "指定しない（CLI の既定）" },
@@ -161,13 +161,16 @@ const DASHBOARD: Setting[] = [
     path: "dashboard.host",
     label: "この画面を開ける範囲",
     desc:
-      "127.0.0.1 なら自分のPCからだけ。0.0.0.0 にすると同じLANの他の端末からも開けます" +
-      "（その場合はパスワードを必ず設定してください）。インターネットには公開しないでください。",
+      "127.0.0.1 なら自分のPCからだけ。:: にすると同じLANの他の端末からも開けます" +
+      "（IPv4/IPv6 の両方。その場合はパスワードを必ず設定してください）。" +
+      "IPv6 が使えない環境では 0.0.0.0（IPv4のみ）を選んでください。" +
+      "インターネットには公開しないでください。",
     kind: "enum",
     default: "127.0.0.1",
     options: [
       { value: "127.0.0.1", label: "自分のPCだけ（推奨）" },
-      { value: "0.0.0.0", label: "同じLANの端末からも開く" },
+      { value: "::", label: "同じLANの端末からも開く" },
+      { value: "0.0.0.0", label: "同じLANの端末からも開く（IPv4のみ）" },
     ],
   },
   {

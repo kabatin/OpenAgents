@@ -293,6 +293,27 @@ describe("LLMの選択", () => {
   });
 });
 
+describe("この画面を開ける範囲", () => {
+  const host = flatten(GLOBAL_GROUPS).find((s) => s.path === "dashboard.host")!;
+  const values = (host.options ?? []).map((o) => o.value);
+
+  it("既定は自分のPCだけ", () => {
+    expect(host.default).toBe("127.0.0.1");
+  });
+
+  it("LANに出すときは IPv4/IPv6 の両方で待ち受ける", () => {
+    // .local 名は IPv6 で引かれることがあり、0.0.0.0（IPv4のみ）だと繋がらない
+    expect(values).toContain("::");
+  });
+
+  it("既存の 0.0.0.0 の設定は選択肢に残る（IPv6 が無い環境の逃げ道）", () => {
+    expect(values).toContain("0.0.0.0");
+    expect(() =>
+      toPatches(parseScope("global"), [{ path: "dashboard.host", value: "0.0.0.0" }], indexOf),
+    ).not.toThrow();
+  });
+});
+
 describe("既定の設定でセットアップが完走できる", () => {
   // 実際に起きた不具合: 開発BOTが「無効・トークン空」でも必須扱いされ、
   // 雛形のままではエージェントを1体も追加できなかった（ウィザードが完走しない）

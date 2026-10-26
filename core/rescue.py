@@ -57,6 +57,31 @@ def followups(db_path, candidate):
                                  limit=FOLLOWUP_MESSAGES)
 
 
+RESOLVED_MARK = "[RESOLVED]"
+FOLLOW_NOTE = ("以下は質問の後に同じチャンネルで交わされた発言。すでに済んだこと・"
+               "解決したことを未着手のように案内せず、その後の状況を踏まえて答える。"
+               f"この流れの中で質問への答えが出ている・解決している場合は、本文を書かず "
+               f"{RESOLVED_MARK} とだけ出力する（答えの出た話に重ねて投稿しない）")
+
+
+def answer_history(follow_rows):
+    """回答の生成にも、判定と同じ「その後の流れ」を渡す（純粋関数）。
+    質問文だけで答えると、済んだ直後に「今日が締め切りです」のように
+    終わった話を未着手のように案内してしまう。"""
+    if not follow_rows:
+        return []
+    return [{"author": "（注）", "content": FOLLOW_NOTE, "is_bot": False}] + [
+        {"author": r.get("author") or "?", "content": r.get("content") or "",
+         "is_bot": bool(r.get("is_bot"))} for r in follow_rows]
+
+
+def is_resolved_reply(answer):
+    """回答役が「その後の流れで解決済み」と判断したか（純粋関数）。
+    判定役（軽いモデル）が見落とした解決済みの質問でも、流れを読んだ回答役は
+    気づける。その判断で投稿を止める。"""
+    return RESOLVED_MARK in (answer or "")
+
+
 def build_judge_prompt(candidate, follow_rows):
     """救済判定プロンプト（純粋関数・テスト対象）。"""
     lines = []

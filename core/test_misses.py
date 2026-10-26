@@ -67,6 +67,48 @@ class LedgerTest(_DbCase):
         self.assertNotIn("っス", q)
 
 
+class CorrectionTest(_DbCase):
+    """👎と、返信での訂正・不満も台帳に残す（まず人が読む。自動の起票にはしない）。"""
+
+    def test_detects_corrections(self):
+        for t in ("違うよ", "そうじゃなくて", "ログ読めてないね", "さっきも言った",
+                  "登録できてないじゃん", "ちゃんと見て"):
+            self.assertTrue(misses.looks_like_correction(t), t)
+
+    def test_ignores_ordinary_replies(self):
+        for t in ("ありがとう！", "間違いないです", "了解", "それでお願い", ""):
+            self.assertFalse(misses.looks_like_correction(t), t)
+
+    def test_recorded_once_and_not_auto_filed(self):
+        for _ in range(2):
+            misses.record_correction(self.db_path, agent_id="agent1", ref_message_id=10,
+                                     context="c", detail="違う")
+        for i in range(3):
+            misses.record_correction(self.db_path, agent_id="agent1",
+                                     ref_message_id=11 + i, context="c", detail="違う")
+        self.assertEqual(len(misses.recent(self.db_path)), 4)
+        self.assertEqual(misses.file_repeated(self.db_path), [])
+
+    def test_reply_to_a_correction_is_not_taken_as_reason(self):
+        # 訂正の発言への返信を「❌の理由」として飲み込まない（会話が消える）
+        misses.record_correction(self.db_path, agent_id="agent1", ref_message_id=10,
+                                 context="c", detail="違う")
+        self.assertFalse(misses.save_reason(self.db_path, 10, "それはね", 1))
+
+    def test_thumbs_down_reason_is_saved_but_not_auto_filed(self):
+        ids = []
+        for i in range(3):
+            mid = misses.record_rejection(self.db_path, agent_id="agent1",
+                                          source="thumbs_down", ref_message_id=20 + i,
+                                          context="c", topic="thumbs_down:agent1")
+            misses.set_ask_message(self.db_path, mid, 30 + i)
+            ids.append(mid)
+        self.assertTrue(misses.save_reason(self.db_path, 30, "古い情報だった", 1))
+        self.assertTrue(misses.save_reason(self.db_path, 31, "違う話", 1))
+        self.assertTrue(misses.save_reason(self.db_path, 32, "長すぎ", 1))
+        self.assertEqual(misses.file_repeated(self.db_path), [])
+
+
 class FileRepeatedTest(_DbCase):
     def _cap(self, cid):
         with db.connect(self.db_path) as conn:

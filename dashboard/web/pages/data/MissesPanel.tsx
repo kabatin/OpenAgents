@@ -10,6 +10,8 @@ const SOURCE: Record<
   { label: string; tone: "danger" | "warn" | "neutral" }
 > = {
   ripple: { label: "波及チェックの案に❌", tone: "danger" },
+  thumbs_down: { label: "回答・投稿に👎", tone: "danger" },
+  corrected: { label: "返信で訂正・不満", tone: "warn" },
   ripple_manual: { label: "自動では直せなかった", tone: "warn" },
   capability: { label: "頼まれたけどできなかった", tone: "warn" },
   tool_failed: { label: "ツールの失敗", tone: "danger" },
@@ -22,6 +24,7 @@ const SOURCE: Record<
 
 /** 理由を聞かない種類（人の操作が起点ではないもの）。 */
 const NO_REASON = new Set([
+  "corrected",
   "ripple_manual",
   "tool_failed",
   "fake_done",

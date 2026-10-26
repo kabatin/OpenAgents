@@ -23,6 +23,12 @@ const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const PRIVATE_IPV4 =
   /^(10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})$/;
 
+/**
+ * `[fd12::5]` のようなブラケット表記の、ユニークローカル（fc00::/7）とリンクローカル（fe80::/10）。
+ * 先頭グループは4桁ちょうど（`fd1::` は 0fd1 でプライベートではない）。
+ */
+const PRIVATE_IPV6 = /^\[(f[cd][0-9a-f]{2}|fe[89ab][0-9a-f]):[0-9a-f:.]*\]$/i;
+
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 
 /** `example.com:8787` → `example.com` / `[::1]:8787` → `[::1]` */
@@ -50,6 +56,7 @@ export function isAllowedHost(host: string | undefined, extra: string[] = []): b
   if (extra.includes(name)) return true;
   if (LOOPBACK.has(name)) return true;
   if (PRIVATE_IPV4.test(name)) return true;
+  if (PRIVATE_IPV6.test(name)) return true;
   if (name.endsWith(".local")) return true;
   // Tailscale の MagicDNS（*.ts.net）。使う場合はここが効く
   if (name.endsWith(".ts.net")) return true;

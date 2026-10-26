@@ -16,6 +16,7 @@ from core import runner_answer
 from core import search
 from core import self_review
 from core.archive_tools import evidence
+from core.archive_tools import launch
 
 
 def _tool_use(tid, name, inp):
@@ -123,10 +124,8 @@ class StepDInjectionTest(_TmpDb):
         self.assertEqual(c["search"][0]["limit"], 24)
         prompt, kwargs = c["invoke"][-1]
         self.assertIn("【関連メッセージ】は社内ログから自動検索", kwargs["system"])
-        # ツール注記は【質問】の直後（生成に最も近い位置）
-        self.assertIn("【ツールの使いどころ】", prompt)
-        self.assertLess(prompt.index("【質問】"),
-                        prompt.index("【ツールの使いどころ】"))
+        # ツールの告知は system の1か所だけ（毎ターン本文に重ねない）
+        self.assertNotIn("【ツールの使いどころ】", prompt)
 
     def test_no_injection_skips_keywords_and_uses_v4(self):
         c = self._run(mcp_config="{}", inject_search_hits=0,
@@ -137,7 +136,7 @@ class StepDInjectionTest(_TmpDb):
         self.assertIn("目的: チームの仕事を前に進める", kwargs["system"])
         self.assertNotIn("【関連メッセージ】は質問語", kwargs["system"])
         self.assertNotIn("【関連メッセージ】", prompt)
-        self.assertIn("【ツールの使いどころ】", prompt)
+        self.assertNotIn("【ツールの使いどころ】", prompt)
 
     def test_reduced_injection_v4_notes_it(self):
         c = self._run(mcp_config="{}", inject_search_hits=6, prompt_style="v4")
@@ -149,6 +148,24 @@ class StepDInjectionTest(_TmpDb):
         c = self._run(inject_search_hits=0, inject_facts=False)
         self.assertEqual(c["extract"], 1)
         self.assertNotIn("【ツールの使いどころ】", c["invoke"][-1][0])
+
+
+class ToolNotesTest(unittest.TestCase):
+    """告知は今のモデル向けに: 回数の縛り・「必ず使う」・毎ターンの重ね書きをしない。"""
+
+    def test_skill_note_has_no_call_cap(self):
+        self.assertNotIn("回まで", launch.SKILL_NOTE)
+        self.assertNotIn("必ずツールを使う", launch.SKILL_NOTE)
+        self.assertIn("見つからなかったと正直に言う", launch.SKILL_NOTE)
+
+    def test_no_turn_note(self):
+        self.assertFalse(hasattr(runner_answer, "TOOL_TURN_NOTE"))
+        self.assertFalse(hasattr(launch, "TOOL_TURN_NOTE"))
+
+    def test_web_note_allows_saying_url_cannot_be_opened(self):
+        # 添付を読むターンは WebFetch を外すので、「断らない」と命じない
+        self.assertNotIn("断らない", runner_answer.WEB_SKILL_NOTE)
+        self.assertIn("WebFetch が使えないとき", runner_answer.WEB_SKILL_NOTE)
 
 
 class SelfReviewEvidenceTest(unittest.TestCase):

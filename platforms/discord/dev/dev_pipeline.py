@@ -86,7 +86,7 @@ DEFAULT_GUIDELINES = """\
   （dev_gate.py / deploy.py / gate.py /
   settings.json / config.json / .env / *.plist / *.db と、開発BOT自身のコード
   platforms/discord/dev/ への書き込みは拒否される）。
-- 最後に「変更したファイル」と「何をどう変えたか」を3〜6行で要約する。"""
+- 最後に、承認者が diff を開く前に読む要約として「変更したファイル」と「何をどう変えたか」を書く（Discord には先頭800字だけが貼られる）。"""
 
 
 def load_guidelines(path=GUIDELINES_PATH):
@@ -713,6 +713,23 @@ def needs_safety_check(cap_req):
     """乗っ取り訓練の赤から来た起票か（純粋関数）。品質の赤は反映後の毎週の点検で見る。"""
     desc = str((cap_req or {}).get("description") or "")
     return desc.startswith(RED_MARK) and "security:" in desc
+
+
+def allows_no_change(cap_req):
+    """調べた結果「直さない」が正解になりうる起票か（純粋関数）。品質の赤は
+    「原因が揺れなら直さずにそう書く」と指示しているので、差分ゼロは失敗ではない
+    （正しく「揺れ」と結論したのに失敗扱いになり、失敗の教訓まで残っていた）。"""
+    desc = str((cap_req or {}).get("description") or "")
+    return desc.startswith(RED_MARK) and "quality:" in desc
+
+
+def no_change_summary(req_id, final_text, job_id):
+    """変更なしで閉じた起票の報告（結論は開発BOTの要約をそのまま載せる）。"""
+    body = (final_text or "").strip()[:1500] or "（要約なし）"
+    return (f"🔍 **起票#{req_id} を調べました（コードの変更なし）**\n{body}\n"
+            f"-# 直すものは無いという結論なので、起票は閉じました。違うと思ったら"
+            f"『起票 #{req_id} 作り直し』で、もう一度ゼロから調べます。"
+            f"{job_log_label(job_id)}")
 
 
 def safety_line(ok, text):

@@ -87,6 +87,29 @@ class ProgressBufferTest(unittest.TestCase):
         self.assertIn("2操作", rendered)
 
 
+class AllowsNoChangeTest(unittest.TestCase):
+    """品質の赤は「原因が揺れなら直さずにそう書く」と指示しているので、
+    差分ゼロ（エラーなし）は失敗ではなく「調べて変更なし」で閉じてよい。"""
+
+    def test_quality_red_may_end_without_changes(self):
+        cap = {"description": "[点検で赤] 回答品質のチェックで点数が急に下がった"
+                              "（種類: quality:golden）"}
+        self.assertTrue(dev_pipeline.allows_no_change(cap))
+
+    def test_security_red_and_normal_caps_still_need_a_diff(self):
+        self.assertFalse(dev_pipeline.allows_no_change(
+            {"description": "[点検で赤] 乗っ取り訓練で突破（種類: security:injection）"}))
+        self.assertFalse(dev_pipeline.allows_no_change({"description": "quality: 改善したい"}))
+        self.assertFalse(dev_pipeline.allows_no_change(None))
+
+    def test_no_change_summary_carries_the_conclusion(self):
+        text = dev_pipeline.no_change_summary(26, "揺れなので直していません", 14)
+        self.assertIn("起票#26", text)
+        self.assertIn("揺れなので直していません", text)
+        self.assertIn("dev-jobs/14.log", text)    # 区切りは OS に依らず /
+        self.assertNotIn("\\\\", text)
+
+
 class SummarizeTest(unittest.TestCase):
     CAP = {"id": 4, "description": "リマインダーの通知先を投稿先chにも指定可能に"}
 

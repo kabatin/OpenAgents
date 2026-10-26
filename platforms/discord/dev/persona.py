@@ -66,6 +66,11 @@ def job_finished(req_id, ok):
     return f"🧵 起票#{req_id}、いちおう出しました…テスト赤なので確認してほしいです💦"
 
 
+def job_no_change(req_id):
+    return (f"🔍 起票#{req_id}、調べた結果「直すものは無い」という結論でした。"
+            "理由はこのチャンネルに書きました！")
+
+
 def job_error(req_id, err):
     return f"うぅ、起票#{req_id} の実装でコケちゃいました…ごめんなさい🙇（{err}）"
 

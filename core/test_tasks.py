@@ -38,6 +38,27 @@ class TasksTest(unittest.TestCase):
         reminders.STATE_FILE = self._orig_state
         self.tmp.cleanup()
 
+    # --- 声かけへの返信から対象タスクを引く（「期日を伸ばして」がどのタスクか） ---
+    def test_nudge_reply_resolves_action_item(self):
+        with db.connect(self.path) as conn:
+            db.update_action_nudge(conn, 1, stage="due", message_id=777)
+        item = tasks.for_nudge_message(self.path, 777)
+        self.assertEqual((item["key"], item["task"], item["due"]),
+                         ("A1", "会場予約", "2026-09-10"))
+        self.assertIn("update_task(key=A1)", tasks.nudge_note(item))
+
+    def test_nudge_reply_resolves_homework_including_second_nudge(self):
+        with db.connect(self.path) as conn:
+            conn.execute("UPDATE homework_items SET followup_message_id=888")
+        self.assertEqual(tasks.for_nudge_message(self.path, 888)["key"], "H1")
+        with db.connect(self.path) as conn:
+            conn.execute("UPDATE homework_items SET status='asked2'")
+        self.assertEqual(tasks.for_nudge_message(self.path, 888)["key"], "H1")
+
+    def test_unrelated_message_is_none(self):
+        self.assertIsNone(tasks.for_nudge_message(self.path, 12345))
+        self.assertIsNone(tasks.for_nudge_message(self.path, None))
+
     def test_parse_key(self):
         self.assertEqual(tasks.parse_key("A6"), ("action", 6))
         self.assertEqual(tasks.parse_key("h27"), ("homework", 27))

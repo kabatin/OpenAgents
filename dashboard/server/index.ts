@@ -9,7 +9,9 @@
  *  - パスワードは既定で無し。DASHBOARD_PASSWORD を入れると Basic認証が有効になる
  *
  * 環境変数:
- *  DASHBOARD_HOST          待ち受けアドレス（既定 127.0.0.1 = 自分のPCだけ）
+ *  DASHBOARD_HOST          待ち受けアドレス（既定 127.0.0.1 = 自分のPCだけ。
+ *                          LANに出すなら :: = IPv4/IPv6 の両方。.local 名は IPv6 で
+ *                          引かれることがあり、0.0.0.0（IPv4のみ）だと繋がらない）
  *  DASHBOARD_PORT          ポート（既定 8787）
  *  DASHBOARD_ALLOWED_HOSTS 追加で許可するHost（カンマ区切り。Tailscale等）
  *  DASHBOARD_PASSWORD      設定するとBasic認証が有効（ユーザー名は admin 固定）

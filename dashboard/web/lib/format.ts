@@ -73,6 +73,7 @@ export const ACTION_LABEL: Record<string, string> = {
   published: "発行した",
   event_proposed: "イベント案を提示",
   rescue_shadow: "救援（シャドー）",
+  rescue_skip_resolved: "救援（解決済みと判断して見送り）",
   prep_shadow: "事前パック（シャドー）",
   stale_shadow: "状況確認（シャドー）",
   hw_track: "宿題を追跡開始",

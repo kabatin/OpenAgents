@@ -45,9 +45,12 @@ def search_messages(ctx, args):
 register(Tool(
     name="search_messages",
     description=(
-        "社内チャットの過去ログを全文検索する。社内の事柄（誰が・いつ・何を"
-        "決めた/言った）を答える前に必ず使い、根拠の投稿リンクを回答に添える。"
-        "1回で見つからなければ同義語・別表記で言い換えて再検索してよい。"
+        "社内チャットの過去ログを全文検索する。いま応答中のチャンネルは除外する"
+        "（直近の会話は既に文脈にあるため）。keywords のどれかに当たれば候補になり、"
+        "多くの語に当たった投稿・関連度の高い投稿から最大 limit 件（既定12・最大24）を、"
+        "チャンネル・投稿者・日付・本文・リンク付きで返す。社内の事柄（誰が・いつ・"
+        "何を決めた/言った）に答えるときに使い、根拠にした投稿のリンクを回答に添える。"
+        "当たらなければ同義語・略語⇔正式名・別表記で引き直す。"
         "keywords は名詞中心で3文字以上を推奨。"),
     input_schema={"type": "object", "properties": {
         "keywords": {"type": "array", "items": {"type": "string"},
@@ -80,9 +83,11 @@ register(Tool(
     description=(
         "事実台帳を引く。人が会話で教えてくれた「いまの状況」（担当・状態・"
         "予定の変更など）が主題ごとに1件ずつ入っている。社内の現状を答える"
-        "前に確認する。keywords 空なら直近10件。"),
+        "前に確認する。有効なものだけを新しい順に最大10件。"),
     input_schema={"type": "object", "properties": {
-        "keywords": {"type": "array", "items": {"type": "string"}}}},
+        "keywords": {"type": "array", "items": {"type": "string"},
+                     "description": "主題・本文への部分一致（どれかに当たれば返す。"
+                                    "2文字未満は無視・最大8語）。空なら直近10件"}}},
     kind="read", handler=get_facts))
 
 
@@ -107,9 +112,12 @@ register(Tool(
     description=(
         "決定事項台帳を引く。定例議事録や会話で確定した決定が出典リンク付きで"
         "入っている。「〜って決まってたっけ？」「前と話が違わない？」に答える"
-        "前に確認する。事実台帳の方が新しければそちらを優先する。"),
+        "前に確認する。事実台帳の方が新しければそちらを優先する。"
+        "有効なものだけを新しい順に最大10件。"),
     input_schema={"type": "object", "properties": {
-        "keywords": {"type": "array", "items": {"type": "string"}}}},
+        "keywords": {"type": "array", "items": {"type": "string"},
+                     "description": "主題・本文への部分一致（どれかに当たれば返す。"
+                                    "2文字未満は無視・最大8語）。空なら直近10件"}}},
     kind="read", handler=get_decisions))
 
 

@@ -82,5 +82,53 @@ class MissesHooksTest(unittest.TestCase):
         self.assertEqual(rows[0]["reason"], "10/16から木曜で")
         self.assertIn("2026-10-15 → 2026-10-16", rows[0]["detail"])
 
+
+class CorrectionHookTest(unittest.TestCase):
+    """エージェントの投稿への返信が訂正・不満なら台帳に残す（会話は止めない）。"""
+
+    def setUp(self):
+        fd, self.db_path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        db.init_db(self.db_path)
+        self._orig = misses_hooks.DB_PATH
+        misses_hooks.DB_PATH = self.db_path
+        self._orig_ids = dict(misses_hooks.AGENT_USER_IDS)
+        misses_hooks.AGENT_USER_IDS.clear()
+        misses_hooks.AGENT_USER_IDS["agent1"] = 999
+        with db.connect(self.db_path) as conn:
+            db.upsert_channel(conn, id=1, name="general", type="text")
+            db.upsert_user(conn, id=999, name="bot", display_name="エージェント",
+                           is_bot=True)
+            db.upsert_user(conn, id=500, name="u", display_name="人A", is_bot=False)
+            db.insert_message(conn, id=10, channel_id=1, author_id=999,
+                              content="締め切りは明日です",
+                              created_at="2026-10-16T00:00:00+00:00")
+            db.insert_message(conn, id=11, channel_id=1, author_id=500,
+                              content="人の発言", created_at="2026-10-16T00:00:00+00:00")
+        self.me = NS(user=NS(id=999), is_archiver=True, agent={"id": "agent1"})
+
+    def tearDown(self):
+        misses_hooks.DB_PATH = self._orig
+        misses_hooks.AGENT_USER_IDS.clear()
+        misses_hooks.AGENT_USER_IDS.update(self._orig_ids)
+        os.unlink(self.db_path)
+
+    def _run(self, msg):
+        msg.author.display_name = "人A"
+        asyncio.run(misses_hooks.MissesHooksMixin._maybe_record_correction(self.me, msg))
+        return misses.recent(self.db_path)
+
+    def test_correction_to_agent_post_is_recorded(self):
+        rows = self._run(_Msg("違う、締め切りは来週", 10))
+        self.assertEqual([r["source"] for r in rows], ["corrected"])
+        self.assertIn("締め切りは明日です", rows[0]["context"])
+        self.assertIn("違う、締め切りは来週", rows[0]["detail"])
+
+    def test_ordinary_reply_or_human_post_is_not_recorded(self):
+        self.assertEqual(self._run(_Msg("ありがとう", 10)), [])
+        self.assertEqual(self._run(_Msg("違うよ", 11)), [])   # 人の投稿への返信
+        self.assertEqual(self._run(_Msg("違うよ", None)), [])  # 返信ではない
+
+
 if __name__ == "__main__":
     unittest.main()

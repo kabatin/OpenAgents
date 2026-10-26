@@ -50,6 +50,7 @@ const CAP_STATUS: Record<
   { label: string; tone: "accent" | "danger" | "warn" | "neutral" }
 > = {
   deployed: { label: "実装済み", tone: "accent" },
+  no_change: { label: "調べて変更なし", tone: "neutral" },
   rejected: { label: "見送り", tone: "danger" },
   open: { label: "未対応", tone: "warn" },
 };

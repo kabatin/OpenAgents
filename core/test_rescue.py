@@ -112,6 +112,31 @@ class JudgeTest(RescueTestBase):
         self.assertIn("納期", seen["prompt"])
 
 
+class AnswerHistoryTest(unittest.TestCase):
+    """回答の生成にも、判定と同じ「その後の流れ」を渡す。
+    以前は質問文だけで答えていたため、済んだ直後に「今日が締め切りです」と案内した。"""
+
+    def test_follow_ups_reach_the_answer_with_a_note(self):
+        follow = [{"author": "人A", "content": "抽選終わりました", "is_bot": False}]
+        h = rescue.answer_history(follow)
+        self.assertEqual(h[0]["content"], rescue.FOLLOW_NOTE)
+        self.assertEqual(h[1], {"author": "人A", "content": "抽選終わりました",
+                                "is_bot": False})
+
+    def test_no_follow_ups(self):
+        self.assertEqual(rescue.answer_history([]), [])
+
+    def test_note_asks_for_the_resolved_mark(self):
+        self.assertIn(rescue.RESOLVED_MARK, rescue.FOLLOW_NOTE)
+
+    def test_resolved_reply_detected(self):
+        # 判定役が見落とした解決済みの質問を、流れを読んだ回答役の判断で止める
+        self.assertTrue(rescue.is_resolved_reply("[RESOLVED]"))
+        self.assertTrue(rescue.is_resolved_reply(" [RESOLVED]\n"))
+        self.assertFalse(rescue.is_resolved_reply("まだ決まっていません"))
+        self.assertFalse(rescue.is_resolved_reply(None))
+
+
 class RecordTest(RescueTestBase):
     def test_record_prevents_rejudge(self):
         with db.connect(self.db_path) as conn:

@@ -1365,7 +1365,20 @@ class AgentLoopsMixin:
             result = await asyncio.to_thread(
                 runner_answer.answer_question, DB_PATH, str(GUILD_ID),
                 cand["content"], search.DEFAULT_MODEL, None,
-                [], agent_param, **tool_kw)
+                rescue.answer_history(follow), agent_param, **tool_kw)
+        if rescue.is_resolved_reply(result["answer"]):
+            # 判定役は見落としたが、流れを読んだ回答役が解決済みと判断した＝投稿しない
+            await asyncio.to_thread(
+                rescue.record, DB_PATH, cand["id"], self.agent["id"],
+                "skipped_answered")
+            await asyncio.to_thread(
+                proactive.log_entry, DB_PATH, self.agent["id"],
+                kind="rescue", action="rescue_skip_resolved",
+                channel_id=cand["channel_id"], trigger_message_id=cand["id"],
+                detail=f"回答役が解決済みと判断: {cand['content'][:100]}")
+            print(f"[{self.agent['id']}] rescue skipped (resolved) "
+                  f"in #{cand['channel']}")
+            return
         channel = (self.get_channel(int(cand["channel_id"]))
                    or await self.fetch_channel(int(cand["channel_id"])))
         ref = discord.MessageReference(

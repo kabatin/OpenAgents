@@ -38,6 +38,7 @@ const STATUS_TONE: Record<
 > = {
   done: "accent",
   deployed: "accent",
+  no_change: "neutral",
   approved: "info",
   proposed: "info",
   pending: "neutral",
@@ -59,6 +60,7 @@ const STATUS_JA: Record<string, string> = {
   skipped: "見送り",
   held: "保留（返事なし）",
   deployed: "デプロイ済み",
+  no_change: "調べて変更なし",
   rejected: "却下",
   failed: "失敗",
   open: "未対応",

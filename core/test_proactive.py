@@ -208,6 +208,20 @@ class GateReplyTest(unittest.TestCase):
         text, _ = proactive.gate_reply("あ" * 3000 + LINK, "assist")
         self.assertLessEqual(len(text), proactive.MAX_REPLY_CHARS + 1)
 
+    def test_skeptic_leaves_citation_to_the_gate(self):
+        # 出典の有無は gate_reply が先に落とすので、懐疑役には重ねて書かない
+        p = proactive.build_skeptic_prompt("納期は金曜です", {"kind": "recall"})
+        self.assertNotIn("出典リンク", p)
+
+
+class ProactiveSystemWordingTest(unittest.TestCase):
+    def test_no_char_cap_or_scoring_talk(self):
+        tmpl = proactive.PROACTIVE_SYSTEM_TMPL
+        self.assertNotIn("400文字以内", tmpl)
+        self.assertNotIn("減点", tmpl)
+        self.assertNotIn("必ず守る", tmpl)
+        self.assertIn("要点だけ短く", tmpl)
+
 
 class DecideReplyTest(ProactiveTestBase):
     TRIGGER = {"id": 10, "channel_id": 1, "channel": "general",

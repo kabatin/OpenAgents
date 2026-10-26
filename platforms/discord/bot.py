@@ -43,6 +43,7 @@ from core import heartbeat
 from core import integrations
 from core import invoke_claude
 from core import misses
+from core import tasks
 from core import turn_wait
 from core import msgref
 from core import plugins
@@ -349,6 +350,9 @@ class AgentClient(ToolLoopMixin, SkillHooksMixin, MarkerActionsMixin,
         # ❌の理由の返信は台帳に貯めて、会話にはしない
         if self.is_archiver and await self._maybe_miss_reason(message):
             return
+        if self.is_archiver:
+            # エージェントへの訂正・不満の返信は台帳に残す（会話はそのまま続ける）
+            await self._maybe_record_correction(message)
 
         trigger = self._trigger(message)
         # 決定の波及チェックへの返信（直し方を教えてくれた）は、返信の@通知を
@@ -986,7 +990,15 @@ class AgentClient(ToolLoopMixin, SkillHooksMixin, MarkerActionsMixin,
                 entry = await self._fetch_ref_message(channel_id, mid, message)
             if entry is not None:
                 entries.append(entry)
-        return msgref.build_reference_block(entries, GUILD_ID) or None
+        block = msgref.build_reference_block(entries, GUILD_ID) or ""
+        if ref is not None and ref.message_id:
+            # 追跡タスクの声かけへの返信なら、対象のタスクと変え方を添える
+            # （「期日を伸ばして」がどのタスクの話かをモデルの推測に任せない）
+            item = await asyncio.to_thread(
+                tasks.for_nudge_message, DB_PATH, ref.message_id)
+            if item:
+                block = (block + "\n\n" if block else "") + tasks.nudge_note(item)
+        return block or None
 
     async def _fetch_ref_message(self, channel_id, message_id, origin):
         """DBに無い参照を Discord から取得（best-effort）。他guildは参照しない。

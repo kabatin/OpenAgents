@@ -427,3 +427,17 @@ class ReferenceBlockTest(unittest.TestCase):
         seen, block = self._collect(self._msg())
         self.assertEqual(seen, [])
         self.assertIsNone(block)
+
+    def test_reply_to_task_nudge_adds_the_target_task(self):
+        # 「期日を伸ばして」がどのタスクの話かを、モデルの推測に任せない
+        from core import db as core_db
+        with core_db.connect(self.db_path) as conn:
+            iid = core_db.add_action_item(
+                conn, agent_id="agent1", source_message_id=1, channel_id=300,
+                task="会場予約", owners="<@100>", due_date="2026-09-10",
+                urgent=0, created_at="2026-09-01T10:00")
+            core_db.update_action_nudge(conn, iid, stage="due", message_id=555)
+        _seen, block = self._collect(
+            self._msg(ref=SimpleNamespace(message_id=555, channel_id=300)))
+        self.assertIn(f"update_task(key=A{iid})", block)
+        self.assertIn("会場予約", block)

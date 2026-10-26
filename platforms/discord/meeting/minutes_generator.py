@@ -124,26 +124,26 @@ async def generate_minutes_async(transcript, start_time, end_time, participants)
             participants, gmod.speaker_name_map(gterms))
     participants_str = ', '.join(participants) if participants else '（記録なし）'
 
-    # プロンプト作成（トピック完結型・Slack mrkdwn を直接出力）
+    # プロンプト作成（トピック完結型・Discord markdown を直接出力）
     prompt = f"""あなたは優秀な議事録作成アシスタントです。
 以下はDiscord定例会議の文字起こし（音声認識のため誤字・聞き間違い・フィラーが大量）。
-これを「読みやすいSlack議事録」に変換してください。
+これを「読みやすいDiscord投稿用の議事録」に変換してください。
 
 【会議メタ情報】
 - 日付: {date_str}
 - 時間: {time_str}
 - 参加者: {participants_str}
 
-【内容ルール（最重要）】
+【内容ルール】
 - 音声認識の誤変換を文脈から推測して正す。意味の通らない断片・相槌・雑談・フィラーは捨てる。
 - 聞き取れない箇所を無理に含めない。固有名詞など事実が不確かな点は「（要確認）」と明記。
-- 話題ごとにまとめ、トピックは3〜7個程度に集約する。
+- 話題ごとにまとめ、細かい話題は近いものと束ねる。
 
-【表記ルール（最重要・厳守）】
+【表記ルール】
 - Discordのマークダウン記法で“直接”出力する。太字は **アスタリスク2個** で囲む
   （アスタリスク1個 *…* はDiscordでは斜体になるので太字には使わない）。
 - 箇条書きは • 、区切り線は ━━━━━━━━━━━━━━━━━━ 。
-- ★横長厳禁★: 各行は全角80文字以内に収める。
+- 各行は全角80文字以内に収める（Discordで横に長いと読みにくいため）。
   80文字を超えそうな文は「、」または「。」の直後で必ず改行する。短い文はそのまま1行でよい。
   箇条書きが長い場合も読点・句点で改行して複数行に分ける（継続行は • を付けず全角スペース1つで字下げ）。
 {glossary_instruction}{mapping_instruction}- 余計な前置き・後書きは出力しない（議事録本文のみ）。
@@ -155,7 +155,7 @@ async def generate_minutes_async(transcript, start_time, end_time, participants)
 📋 **定例会議 {date_str}**
 🕐 {time_str} ｜ 参加: {participants_str}
 
-> 会議全体の要約を2〜3行（最重要の決定と急ぎTODOに触れる。各行80文字以内）。
+> 会議全体の要約（最重要の決定と急ぎTODOに触れる。数行。各行80文字以内）。
 
 ━━━━━━━━━━━━━━━━━━
 

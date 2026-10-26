@@ -80,8 +80,7 @@ def build_prompt(persona, title, minutes, user_text, transcript):
         "- 締めの一言（感想や誰向けの動画かを短く）\n"
         "字幕にない事実を創作しない。全体を1200文字以内。\n"
         "依頼者の一言があれば要約の観点に反映する。\n"
-        "これはバックエンドの自動処理。音声通知・ツール実行・作業報告は"
-        "一切せず、要約テキストだけを出力すること。\n\n"
+        "要約本文だけを出力する。\n\n"
         f"【動画タイトル】{title or '不明'}（約{minutes}分）\n"
         f"【依頼者の一言】{user_text or '（URLのみ投稿）'}\n"
         f"【字幕】\n{transcript}")

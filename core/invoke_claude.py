@@ -29,10 +29,10 @@ from core import config as app_config
 from core import llm
 
 DEFAULT_MODEL = llm.BUILTIN_PROVIDERS["claude"]["default_model"]
-# 思考の深さ（--effort）。モデルによって CLI 側の既定が浅い（Opus 5.5 は
-# medium）ので、明示しないと浅いまま回る。設定 llm.effort で変えられる。
+# 思考の深さ（--effort）。Opus 5.5 は medium で Opus 5 の high を上回るので、
+# 既定は medium。深く考えさせたいときは設定 llm.effort で上げる。
 # 解釈しないモデル（Haiku 4.5 など）には CLI が黙って無視するので分岐は不要。
-DEFAULT_EFFORT = "xhigh"
+DEFAULT_EFFORT = "medium"
 EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
 # Web検索・URL取得を伴う回答は5分を超えることがあるため10分
 DEFAULT_TIMEOUT_SEC = llm.LONG_TIMEOUT_SEC
@@ -360,7 +360,7 @@ def invoke(prompt, *, model=DEFAULT_MODEL, system=None, allowed_tools=(),
     purpose: 計測用の用途ラベル（answer / keywords / screen / decide / summary …）
     on_event: stream-json イベントごとの進捗コールバック（指定時は行読み経路）
     max_budget_usd: 1起動の上限額（--max-budget-usd）
-    effort: 思考の深さ（--effort）。None なら設定 llm.effort（既定 xhigh）。
+    effort: 思考の深さ（--effort）。None なら設定 llm.effort（既定 medium）。
         検索語出しのような軽い下ごしらえでは呼び出し側が "low" に下げる。
     失敗時は RuntimeError を送出する（計測には失敗として記録される）。
     """

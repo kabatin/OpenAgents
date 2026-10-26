@@ -171,3 +171,36 @@ def _update_reminder(tid, action, actor_id, is_admin):
     why = {"not_found": "存在しません", "ended": "既に終了済みです",
            "not_owner": "本人か管理者だけが取り消せます"}.get(reason, reason)
     return _fail(f"R{tid} は{why}")
+
+
+def for_nudge_message(db_path, message_id):
+    """声かけ（議事録TODO・宿題）の投稿から、その対象タスクを引く（無ければ None）。
+    声かけへの返信「期日を伸ばして」がどのタスクの話かを、モデルの推測に任せない
+    （推測できずに無反応になっていた）。"""
+    if not message_id:
+        return None
+    with db.connect(db_path) as conn:
+        row = conn.execute(
+            """SELECT id, task, due_date FROM action_items
+               WHERE last_nudge_message_id=? AND status='open'""",
+            (message_id,)).fetchone()
+        if row:
+            return {"key": f"A{row[0]}", "task": row[1], "due": row[2],
+                    "label": LABELS["action"]}
+        row = conn.execute(
+            """SELECT id, task, follow_up_date FROM homework_items
+               WHERE followup_message_id=?
+                 AND status IN ('open', 'asked', 'asked2')""",
+            (message_id,)).fetchone()
+    if row:
+        return {"key": f"H{row[0]}", "task": row[1], "due": row[2],
+                "label": LABELS["homework"]}
+    return None
+
+
+def nudge_note(item):
+    """回答の文脈に添える1ブロック（対象タスクと、変えるときの道具）。"""
+    return (f"【この返信の対象タスク】{item['label']} key={item['key']}"
+            f"「{item['task']}」期日 {item['due'] or '未定'}。"
+            f"期日の変更・完了・取り消しを頼まれたら update_task(key={item['key']}) で行い、"
+            "結果をそのまま伝える（一覧から探し直さない）")

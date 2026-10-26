@@ -14,10 +14,14 @@
 単体テスト: core/test_misses.py
 """
 
+import re
+
 from core import db
 from core import reminders
 
 SOURCE_LABEL = {
+    "thumbs_down": "回答・投稿に👎",
+    "corrected": "返信で訂正・不満を言われた",
     "ripple": "決定の波及チェックの案に❌",
     "ripple_manual": "波及チェックで自動では直せなかった",
     "capability": "頼まれたけどできなかった（能力リクエスト）",
@@ -45,8 +49,10 @@ RED_STEPS = {
         "見比べ、共通する原因（プロンプト・ツール・検索の変更）を特定する。(2) 原因を"
         "直し、根拠を要約に書く。原因が揺れ（モデルの気まぐれ）なら、直さずにそう書く。"),
 }
-REJECTION_SOURCES = ("ripple",)          # 理由つきの❌だけを数える
-NEVER_FILE = ("capability", "taught")    # 起票済み・見本そのもの＝起票の単位にしない
+REJECTION_SOURCES = ("ripple", "thumbs_down")   # 理由つきの❌・👎だけを数える
+# 起票済み・見本そのもの・人が見て判断するもの＝自動の起票にしない
+# （👎と訂正は開発BOTへ自動で回さず、まず人が台帳で読む）
+NEVER_FILE = ("capability", "taught", "thumbs_down", "corrected")
 THRESHOLD = 3
 # 想定内の失敗（設定でオフ・上限・入力不足・存在しないツール）は手がかりにならない
 _EXPECTED_ERRORS = ("設定でオフ", "unknown tool", "上限", "必須", "見つからな",
@@ -72,6 +78,30 @@ def record_rejection(db_path, *, agent_id, source, ref_message_id, context,
                    ref_message_id, created_at) VALUES(?,?,?,?,?,?)""",
             (agent_id, source, topic or source, (context or "")[:300],
              ref_message_id, _now()))
+        return cur.lastrowid if cur.rowcount == 1 else None
+
+
+# エージェントへの返信のうち、訂正・不満の言い方。決まった出来事（❌・ツールの失敗）
+# だけを聞いていると、会話で「違う」「ログ読めてない」と言われた分が台帳に残らない
+_CORRECTION_RE = re.compile(
+    r"違う|ちがう|そうじゃな|じゃなくて|間違(?!いな)|まちが(?!いな)|"
+    r"できてな|出来てな|読めてな|見てな|さっきも|何度も|また同じ|またか|"
+    r"反応しな|返事しな|おかしい|嘘|ちゃんと(見|読|確認)")
+
+
+def looks_like_correction(text):
+    """エージェントへの返信が訂正・不満の言い回しか（純粋関数）。"""
+    return bool(_CORRECTION_RE.search(text or ""))
+
+
+def record_correction(db_path, *, agent_id, ref_message_id, context, detail):
+    """エージェントへの訂正・不満の返信を記録（同じ返信は1回だけ）。記録したら id。"""
+    with db.connect(db_path) as conn:
+        cur = conn.execute(
+            """INSERT OR IGNORE INTO misses(agent_id, source, topic, context,
+                   detail, ref_message_id, created_at) VALUES(?,?,?,?,?,?,?)""",
+            (agent_id, "corrected", f"corrected:{agent_id}", (context or "")[:300],
+             (detail or "")[:500], ref_message_id, _now()))
         return cur.lastrowid if cur.rowcount == 1 else None
 
 
@@ -102,11 +132,14 @@ def save_reason(db_path, replied_to_id, text, user_id):
     if not text or replied_to_id is None:
         return False
     with db.connect(db_path) as conn:
+        # 理由を聞いた種類（❌・👎）だけ。訂正の発言への返信を理由として
+        # 飲み込むと、続きの会話が消える
         row = conn.execute(
-            """SELECT id FROM misses WHERE status='open' AND reason IS NULL
+            f"""SELECT id FROM misses WHERE status='open' AND reason IS NULL
+                 AND source IN ({",".join("?" * len(REJECTION_SOURCES))})
                  AND (ask_message_id=? OR ref_message_id=?)
                ORDER BY id DESC LIMIT 1""",
-            (replied_to_id, replied_to_id)).fetchone()
+            (*REJECTION_SOURCES, replied_to_id, replied_to_id)).fetchone()
         if row is None:
             return False
         conn.execute(

@@ -2,6 +2,8 @@
 """失敗と間違いの台帳への入口（返信で受け取るもの）。AgentClient に混ぜる mixin。
 
 - ❌した提案（または理由を聞いた投稿）への返信 → 理由として台帳に貯める（📝だけ返す）
+- エージェントの投稿への返信が訂正・不満の言い回し → 台帳に残す（会話はそのまま続ける。
+  開発BOTへの自動の起票にはせず、まず人が管理画面で読む）
 - 決定の波及チェックの投稿への返信 → 「直し方を教わった」依頼としてエージェントが
   対応し、前後のリマインダー・タスクの変化を、人の指示と一緒に見本として残す。
   同じ場面の「自動では直せなかった」は答え済みになる（core/misses.py）
@@ -11,9 +13,10 @@ import asyncio
 
 import discord
 
+from core import db
 from core import misses
 from core import ripple
-from platforms.discord.agent_runtime import DB_PATH
+from platforms.discord.agent_runtime import AGENT_USER_IDS, DB_PATH
 
 
 class MissesHooksMixin:
@@ -37,6 +40,35 @@ class MissesHooksMixin:
         except discord.DiscordException:
             pass
         return True
+
+    async def _maybe_record_correction(self, message):
+        """エージェントの投稿への返信が訂正・不満なら、失敗の台帳に残す
+        （会話はそのまま続ける。記録の失敗で返答は止めない）。"""
+        if (message.author.bot or message.reference is None
+                or not message.reference.message_id
+                or not misses.looks_like_correction(message.content)):
+            return
+        ref_id = message.reference.message_id
+
+        def _record():
+            with db.connect(DB_PATH) as conn:
+                author_id = db.message_author(conn, ref_id)
+                target = db.get_message(conn, ref_id) or {}
+            agent_id = next((aid for aid, uid in AGENT_USER_IDS.items()
+                             if uid == author_id), None)
+            if agent_id is None:
+                return None     # エージェントの投稿への返信ではない
+            who = getattr(message.author, "display_name", "") or "?"
+            return misses.record_correction(
+                DB_PATH, agent_id=agent_id,
+                ref_message_id=getattr(message, "id", None),
+                context=f"{agent_id}の投稿「{(target.get('content') or '')[:120]}」",
+                detail=f"{who}: {message.content or ''}")
+        try:
+            if await asyncio.to_thread(_record):
+                print(f"[{self.agent['id']}] correction recorded")
+        except Exception as e:      # noqa: BLE001 - 記録の失敗で返答は止めない
+            print(f"[{self.agent['id']}] correction record failed: {e}")
 
     async def _teaching_context(self, message):
         """決定の波及チェックの投稿への返信なら、その決定の「場面」を返す。
