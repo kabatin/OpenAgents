@@ -73,6 +73,9 @@ A browser opens and walks you through the rest:
 ![Setup wizard](docs/images/setup-wizard.png)
 *The wizard checks each step as you go — a token that doesn't work says so immediately*
 
+![Choosing how much history to import](docs/images/setup-history.png)
+*Safe for years-old servers: choose none / the last N days / everything, and the wizard explains what the agent will and won't be able to answer*
+
 ---
 
 ## What it does

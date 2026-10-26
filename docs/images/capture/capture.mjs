@@ -13,8 +13,30 @@ const PAD = 24;
 const ws = new WebSocket(wsUrl);
 let seq = 0;
 const pending = new Map();
+// セットアップの Discord 接続は本物のトークンが要るので、その API だけ偽の応答を返す
+// （url の末尾 → 返す JSON）。それ以外の通信はそのまま通す
+let mocks = {};
 ws.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
+  if (m.method === "Fetch.requestPaused") {
+    const { requestId, request } = m.params;
+    const hit = Object.keys(mocks).find((k) => request.url.endsWith(k));
+    if (hit) {
+      ws.send(JSON.stringify({
+        id: ++seq, sessionId: m.sessionId, method: "Fetch.fulfillRequest",
+        params: {
+          requestId, responseCode: 200,
+          responseHeaders: [{ name: "Content-Type", value: "application/json" }],
+          body: Buffer.from(JSON.stringify(mocks[hit])).toString("base64"),
+        },
+      }));
+    } else {
+      ws.send(JSON.stringify({
+        id: ++seq, sessionId: m.sessionId, method: "Fetch.continueRequest", params: { requestId },
+      }));
+    }
+    return;
+  }
   if (m.id && pending.has(m.id)) {
     const { resolve, reject } = pending.get(m.id);
     pending.delete(m.id);
@@ -116,6 +138,54 @@ async function shoot(name, url, { prepare, selector = "main", maxHeight = 1500, 
 }
 
 await shoot("setup-wizard", "/setup", { header: false });
+
+// 過去の会話をどこまで取り込むか（セットアップの「どこに住むか決める」）
+// sel に一致した要素のうち最後のものに値を入れる（後から出てくる欄を狙う）
+const setValue = (sel, value) => evaluate(`(() => {
+  const all = document.querySelectorAll(${JSON.stringify(sel)});
+  const el = all[all.length - 1];
+  if (!el) return false;
+  const proto = el.tagName === "SELECT" ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+  Object.getOwnPropertyDescriptor(proto, "value").set.call(el, ${JSON.stringify(value)});
+  el.dispatchEvent(new Event(el.tagName === "SELECT" ? "change" : "input", { bubbles: true }));
+  return true;
+})()`);
+mocks = {
+  "/api/setup/platform/verify": {
+    bot: { id: "100", username: "あかり", avatarUrl: "" },
+    inviteUrl: "https://discord.com/oauth2/authorize?client_id=100",
+    intents: { enabled: true, detail: "" },
+  },
+  "/api/setup/platform/guilds": {
+    guilds: [{ id: "1", name: "サンプル商事", iconUrl: "" }],
+    archive: { guildId: null, messages: 0 },
+  },
+  "/api/setup/platform/channels": {
+    channels: [
+      { id: "10", name: "general", kind: "text", parentId: null },
+      { id: "11", name: "ai相談室", kind: "text", parentId: null },
+    ],
+  },
+};
+await cmd("Fetch.enable", { patterns: [{ urlPattern: "*/api/setup/platform/*", requestStage: "Request" }] });
+await shoot("setup-history", "/setup", {
+  header: false,
+  maxHeight: 1500,
+  prepare: async () => {
+    await click("コピーできた");
+    await sleep(400);
+    await setValue("main input", "MTIzNDU2Nzg5.demo.token");
+    await sleep(200);
+    await click("接続テスト");
+    await sleep(800);
+    await click("次へ");
+    await sleep(1200);
+    await setValue("main select", "11");
+    await sleep(600);
+  },
+});
+await cmd("Fetch.disable");
+mocks = {};
 await shoot("overview", "/", { maxHeight: 1250 });
 await shoot("settings", "/agents/akari", {
   prepare: async () => { await click("よく使う設定"); },

@@ -133,8 +133,7 @@ function HistoryChoiceField({
     <fieldset className="space-y-2">
       <legend className="mb-1 text-xs font-medium">過去の会話を取り込みますか？</legend>
       <p className="text-2xs leading-relaxed text-muted">
-        エージェントは、取り込んだ会話を検索して答えます。どれを選んでも、
-        セットアップ以降の会話はすべて記録されます。あとから「全体設定」で範囲を広げることもできます。
+        エージェントは、取り込んだ会話を検索して答えます。どれを選んでも、セットアップ以降の会話はすべて記録されます。あとから「全体設定」で範囲を広げることもできます。
       </p>
       {options.map((o) => (
         <label
@@ -177,11 +176,21 @@ function HistoryChoiceField({
       {mode === "days" && !historyDaysValid(mode, days) && (
         <p className="text-2xs text-danger">日数は 1〜3650 の整数で指定してください。</p>
       )}
+      {/* 選んだ結果、エージェントの振る舞いがどう変わるか（選択肢の説明より具体的に） */}
+      {mode === "none" && (
+        <div className="rounded border border-info/20 bg-info-soft px-3 py-2 text-2xs leading-relaxed">
+          <b>この選び方だと:</b> セットアップより前の決定や経緯を聞かれても、エージェントは「記録がありません」と答えます（推測で埋めることはしません）。取り込みは一瞬で終わり、記録のファイルも小さく保てます。あとで必要になったら、「全体設定 → 過去の会話をいつから取り込むか」を前の日付にすると、次の再起動で足りない分だけを取り込みます。
+        </div>
+      )}
+      {mode === "days" && historyDaysValid(mode, days) && (
+        <div className="rounded border border-info/20 bg-info-soft px-3 py-2 text-2xs leading-relaxed">
+          <b>この選び方だと:</b> 直近 {days} 日のやりとりを根拠に答えます。それより前の話は「記録がありません」と答えます。取り込みは数分〜数十分で終わり、その間も新しい会話の記録と返事は止まりません。足りなければ、あとから「全体設定」で範囲を広げられます。
+        </div>
+      )}
       {mode === "all" && (
         <div className="rounded border border-warn/30 bg-warn-soft px-3 py-2 text-2xs leading-relaxed">
           ⚠️ <b>昔から使っている大きなサーバーでは、取り込みに数時間〜数日かかることがあります。</b>
-          Discord から一度に取れるのは100件ずつで、速さにも上限があるためです。
-          取り込み中も、新しい会話の記録と返事は止まりません。
+          Discord から一度に取れるのは100件ずつで、速さにも上限があるためです。取り込み中も、新しい会話の記録と返事は止まりません。
           <ul className="mt-1 list-disc pl-4">
             <li>会話の記録（手元のファイル）が大きくなります</li>
             <li>

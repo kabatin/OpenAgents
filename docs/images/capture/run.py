@@ -190,7 +190,8 @@ def main():
             "webSocketDebuggerUrl"]
         subprocess.run(["node", os.path.join(HERE, "capture.mjs"), ws, base, OUT_DIR],
                        check=True)
-        for name in ("setup-wizard", "overview", "settings", "personas", "ops", "data"):
+        for name in ("setup-wizard", "setup-history", "overview", "settings",
+                     "personas", "ops", "data"):
             optimize(os.path.join(OUT_DIR, f"{name}.png"))
     finally:
         for p in procs:   # 自分が立てたプロセスグループだけを止める（名前では探さない）

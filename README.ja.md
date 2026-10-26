@@ -71,6 +71,9 @@ python start.py
 ![セットアップウィザード](docs/images/setup-wizard.png)
 *各手順をその場で検証します — 通らないトークンは貼った瞬間に分かります*
 
+![過去の会話の取り込み範囲](docs/images/setup-history.png)
+*昔から運用しているサーバーでも安心です。過去の会話を「取り込まない／直近N日／すべて」から選べ、選んだ結果エージェントが何を答えられるかもその場で説明します*
+
 Discord側の手順を先に読みたい方は [docs/01-discord-bot-setup.md](docs/01-discord-bot-setup.md) へ。
 
 ---
