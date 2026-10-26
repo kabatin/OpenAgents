@@ -28,6 +28,8 @@ export type SupervisorService = {
   lastExit: string | null;
   heartbeatAgeSec: number | null;
   staleAfterSec: number;
+  /** Discord への接続ゼロが何秒続いているか（つながっていれば null。古い run.py には無い） */
+  offlineSec?: number | null;
   note?: string;
   logPath?: string;
 };

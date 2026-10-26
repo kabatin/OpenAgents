@@ -11,6 +11,8 @@ BOT個々の面倒はここが見る。こうすると mac と Windows で挙動
 - config を読んで、有効なBOTだけを子プロセスとして起動する
 - 落ちたら指数バックオフで再起動する（即座に何度も再起動しない）
 - 生存証明（heartbeat）が古くなったら、ハングとみなして再起動する
+- Discord への接続ゼロが続き、しかもネットは通じるなら、オフライン固着とみなして
+  再起動する（ネット断の最中は再起動しても無駄なので待つ）
 - 標準出力／標準エラーを state/logs/<id>.log にまとめ、大きくなったら退避する
 - 127.0.0.1 の control API で、ダッシュボードから状態確認と再起動ができる
 
@@ -24,6 +26,7 @@ BOT個々の面倒はここが見る。こうすると mac と Windows で挙動
 """
 
 import os
+import socket
 import subprocess
 import sys
 import threading
@@ -44,6 +47,17 @@ LOG_MAX_BYTES = 10 * 1024 * 1024
 LOG_KEEP = 3
 #: 停止を頼んでから強制終了するまで
 TERM_GRACE_SEC = 10
+#: Discord への接続ゼロがこの秒数続いたら、オフライン固着とみなす。
+#: discord.py は自分で再接続するが、ネット断のあと待ちが7分を超えて延び、
+#: 12分以上戻らなかった実例がある。短すぎると瞬断のたびに再起動になる
+OFFLINE_RESTART_SEC = 300
+#: オフライン固着で再起動したあと、次に同じ理由で再起動してよいまで
+OFFLINE_COOLDOWN_SEC = 300
+#: ネットの疎通確認の間隔（ネット断の最中に毎回タイムアウトを待たない）
+NET_PROBE_INTERVAL_SEC = 60
+#: 疎通確認の宛先（Discord に届くかどうかを見たいので Discord 自身）
+NET_PROBE_HOST = ("discord.com", 443)
+NET_PROBE_TIMEOUT_SEC = 5
 
 
 class ServiceDef:
@@ -119,6 +133,30 @@ def should_restart_for_hang(age_sec, stale_after):
     return heartbeat.stale_from(age_sec, stale_after)
 
 
+def offline_action(offline_age, *, net_ok, since_last_restart,
+                   threshold=OFFLINE_RESTART_SEC,
+                   cooldown=OFFLINE_COOLDOWN_SEC):
+    """オフライン固着でどうするか（純粋関数）。
+    None=何もしない / 'cooldown'=直前に再起動した / 'wait_net'=ネット断なので待つ /
+    'restart'=再起動する。"""
+    if offline_age is None or offline_age < threshold:
+        return None
+    if since_last_restart is not None and since_last_restart < cooldown:
+        return "cooldown"
+    if not net_ok:
+        return "wait_net"
+    return "restart"
+
+
+def network_reachable(host=NET_PROBE_HOST, timeout=NET_PROBE_TIMEOUT_SEC):
+    """Discord に TCP でつながるか（DNS も含めて確かめる）。"""
+    try:
+        with socket.create_connection(host, timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
 def rotate_needed(size_bytes, max_bytes=LOG_MAX_BYTES):
     """ログを退避すべきか（純粋関数）。"""
     return size_bytes >= max_bytes
@@ -169,10 +207,16 @@ def child_env():
 class ServiceRunner:
     """1つのBOTを起動し、落ちたら再起動し続ける。"""
 
-    def __init__(self, service, *, python=None, on_event=None):
+    def __init__(self, service, *, python=None, on_event=None,
+                 net_probe=None, clock=None):
         self.service = service
         self.python = python or sys.executable
         self.on_event = on_event or (lambda *a, **k: None)
+        self._net_probe = net_probe or network_reachable
+        self._clock = clock or time.time
+        self._last_offline_restart = None
+        self._last_probe = None          # (時刻, 結果)
+        self._offline_waiting = False
         self.proc = None
         self.failures = 0
         self.restarts = 0
@@ -220,6 +264,8 @@ class ServiceRunner:
                           else None),
             "lastExit": self.last_exit,
             "heartbeatAgeSec": age,
+            "offlineSec": heartbeat.offline_age(self.service.id,
+                                                now=self._clock()),
             "staleAfterSec": self.service.stale_after,
             "note": self.service.note,
             "logPath": self.log_path,
@@ -250,6 +296,8 @@ class ServiceRunner:
     def _spawn(self):
         paths.ensure_state_dirs()
         rotate_log(self.log_path)
+        # 前のプロセスの「切れた時刻」で、起きたばかりの子を判定しない
+        heartbeat.mark_online(self.service.id)
         log = open(self.log_path, "a", encoding="utf-8", errors="replace")
         try:
             proc = subprocess.Popen(
@@ -334,6 +382,47 @@ class ServiceRunner:
                 # ハングは連続失敗ではないので、バックオフも掛けない）
                 self._want_restart.set()
                 self._kill_child()
+                continue
+            self._check_offline()
+
+    def _net_ok(self, now):
+        """ネットの疎通（間隔を空けて確かめ、間の判定は前回の結果を使う）。"""
+        last = self._last_probe
+        if last is not None and now - last[0] < NET_PROBE_INTERVAL_SEC:
+            return last[1]
+        ok = bool(self._net_probe())
+        self._last_probe = (now, ok)
+        return ok
+
+    def _check_offline(self):
+        """Discord への接続ゼロが続いていれば、ネットが通じるときだけ再起動する。"""
+        now = self._clock()
+        age = heartbeat.offline_age(self.service.id, now=now)
+        since_last = (None if self._last_offline_restart is None
+                      else now - self._last_offline_restart)
+        action = offline_action(age, net_ok=True, since_last_restart=since_last)
+        if action == "restart":            # 疎通確認は要るときだけ
+            action = offline_action(age, net_ok=self._net_ok(now),
+                                    since_last_restart=since_last)
+        if action == "wait_net":
+            if not self._offline_waiting:
+                self._offline_waiting = True
+                self.on_event(
+                    self.service.id, "offline_wait",
+                    f"Discordにつながらないまま{age}秒ですが、ネットが通じないため"
+                    "戻るのを待ちます")
+        elif action == "restart":
+            self._offline_waiting = False
+            self._last_offline_restart = now
+            self.on_event(
+                self.service.id, "offline",
+                f"Discordにつながらないまま{age}秒たちました（ネットは通じます）。"
+                "再起動します")
+            self._want_restart.set()
+            self._kill_child()
+        elif action is None:
+            self._offline_waiting = False
+        return action
 
     def _sleep(self, seconds):
         """待つ。停止なら True。再起動要求が来たら早めに切り上げる

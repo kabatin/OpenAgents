@@ -86,6 +86,9 @@ def load_dev_config(path=CONFIG_PATH):
     return int(cfg["guild_id"]), admins, dev
 
 
+# Discord へのつながり具合（切れている時刻をスーパーバイザに見せる）
+GATEWAY = heartbeat.ConnectionTracker("devbot")
+
 class DevBot(discord.Client):
     """監視ハット。interval毎に各ターゲットを観測→状態遷移時のみ通知。"""
 
@@ -118,6 +121,15 @@ class DevBot(discord.Client):
         self._bg.add(task)
         task.add_done_callback(self._bg.discard)
         return task
+
+    async def on_connect(self):
+        GATEWAY.connected("devbot")
+
+    async def on_resumed(self):
+        GATEWAY.connected("devbot")
+
+    async def on_disconnect(self):
+        GATEWAY.disconnected("devbot")
 
     async def on_ready(self):
         print(f"開発BOT logged in as {self.user}")
@@ -191,12 +203,11 @@ class DevBot(discord.Client):
                     await self._maybe_dev_report()
                 except Exception as e:
                     print(f"dev report error: {e}")
-            # ループが回っている証明（IMAPハング型の「生きてるが止まる」を
-            # bot-watchdog が外から検知できるようにする）。ゲートウェイから
-            # 切れている間は書かない＝オフライン固着もwatchdogが拾える
-            # （latencyのnan比較: nan==nan は False）
-            if self.is_ready() and self.latency == self.latency:
-                await asyncio.to_thread(self._touch_heartbeat)
+            # ループが回っている証明（「プロセスは生きているがループが止まる」を
+            # スーパーバイザが検知できるようにする）。Discord から切れている間の
+            # 固着は、つながり具合（GATEWAY）の方でスーパーバイザが見る
+            # （ネット断の最中は再起動しても無駄なので、ここで書くのを止めない）
+            await asyncio.to_thread(self._touch_heartbeat)
             await asyncio.sleep(self.interval_sec)
 
     @staticmethod
@@ -1124,6 +1135,7 @@ def main():
 
     client = DevBot(guild_id=guild_id, admins=admins, dev_cfg=dev_cfg,
                     intents=intents)
+    GATEWAY.begin()
     client.run(token, log_level=logging.WARNING)
 
 

@@ -477,3 +477,149 @@ class RestartSemanticsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OfflineStateTest(unittest.TestCase):
+    """Discordから切れた時刻（生存証明の隣のファイル）の読み書き。
+
+    ネット断のあと、プロセスもイベントループも生きたまま Discord への接続だけが
+    戻らないことがある（discord.py の再接続待ちが7分を超えて延びる）。生存証明は
+    書かれ続けるのでハング検知では拾えない。切れた時刻を別に残して監視する。"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.saved = paths.HEARTBEAT_DIR
+        paths.HEARTBEAT_DIR = os.path.join(self.tmp, "heartbeat")
+
+    def tearDown(self):
+        paths.HEARTBEAT_DIR = self.saved
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_切れた時刻を残し_つながったら消す(self):
+        self.assertIsNone(heartbeat.offline_since("x"))
+        heartbeat.mark_offline("x", now=1000)
+        heartbeat.mark_offline("x", now=1100)   # 切れ続けている間は最初の時刻のまま
+        self.assertEqual(heartbeat.offline_since("x"), 1000)
+        self.assertEqual(heartbeat.offline_age("x", now=1300), 300)
+        heartbeat.mark_online("x")
+        self.assertIsNone(heartbeat.offline_since("x"))
+        heartbeat.mark_online("x")              # 二度目でも落ちない
+
+    def test_生存証明とは別のファイル(self):
+        heartbeat.touch("x", now=5000)
+        heartbeat.mark_offline("x", now=1000)
+        self.assertEqual(heartbeat.read("x"), 5000)
+        heartbeat.clear("x")                    # 停止時は両方消す
+        self.assertIsNone(heartbeat.offline_since("x"))
+
+    def test_書けない場所でも例外を投げない(self):
+        blocker = os.path.join(self.tmp, "file")
+        with open(blocker, "w", encoding="utf-8") as f:
+            f.write("x")
+        paths.HEARTBEAT_DIR = os.path.join(blocker, "heartbeat")
+        self.assertFalse(heartbeat.mark_offline("x"))
+
+
+class ConnectionTrackerTest(unittest.TestCase):
+    """1プロセスに複数のBotがいる（会話エージェント）。全員が切れたときだけ
+    「Discordへの接続がゼロ」とみなす（1体でもつながっていれば正常）。"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.saved = paths.HEARTBEAT_DIR
+        paths.HEARTBEAT_DIR = os.path.join(self.tmp, "heartbeat")
+
+    def tearDown(self):
+        paths.HEARTBEAT_DIR = self.saved
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_全員が切れたときだけ記録する(self):
+        t = heartbeat.ConnectionTracker("svc", clock=lambda: 1000)
+        t.begin()                                   # 起動直後は接続ゼロ
+        self.assertEqual(heartbeat.offline_since("svc"), 1000)
+        t.connected("a")
+        t.connected("b")
+        self.assertIsNone(heartbeat.offline_since("svc"))
+        t.disconnected("a")
+        self.assertIsNone(heartbeat.offline_since("svc"))   # b が生きている
+        t.disconnected("b")
+        self.assertEqual(heartbeat.offline_since("svc"), 1000)
+        t.connected("b")
+        self.assertIsNone(heartbeat.offline_since("svc"))
+
+
+class OfflineDecisionTest(unittest.TestCase):
+    """オフライン固着の再起動判定（純粋関数）。"""
+
+    def test_閾値前は何もしない(self):
+        self.assertIsNone(sup.offline_action(None, net_ok=True, since_last_restart=None))
+        self.assertIsNone(sup.offline_action(299, net_ok=True, since_last_restart=None))
+
+    def test_ネットが通じるときだけ再起動(self):
+        self.assertEqual(
+            sup.offline_action(300, net_ok=True, since_last_restart=None), "restart")
+        # ネット断の最中は再起動しても無駄なので待つ
+        self.assertEqual(
+            sup.offline_action(900, net_ok=False, since_last_restart=None), "wait_net")
+
+    def test_直後はクールダウン(self):
+        self.assertEqual(
+            sup.offline_action(600, net_ok=True, since_last_restart=100), "cooldown")
+        self.assertEqual(
+            sup.offline_action(600, net_ok=True, since_last_restart=300), "restart")
+
+
+class OfflineRestartTest(unittest.TestCase):
+    """監視ループ側: ネット断の最中は待ち、戻ったら1回だけ再起動する。"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.saved = paths.HEARTBEAT_DIR
+        paths.HEARTBEAT_DIR = os.path.join(self.tmp, "heartbeat")
+        self.events = []
+        self.now = [10_000]
+        self.net = [False]
+        self.probes = []
+
+        def probe():
+            self.probes.append(self.now[0])
+            return self.net[0]
+        svc = sup.ServiceDef("svc", "テスト", "x")
+        self.runner = sup.ServiceRunner(
+            svc, on_event=lambda *a: self.events.append(a),
+            net_probe=probe, clock=lambda: self.now[0])
+
+    def tearDown(self):
+        paths.HEARTBEAT_DIR = self.saved
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _kinds(self):
+        return [e[1] for e in self.events]
+
+    def test_ネット断の最中は待ち_戻ったら再起動(self):
+        heartbeat.mark_offline("svc", now=self.now[0] - 400)
+        self.assertEqual(self.runner._check_offline(), "wait_net")
+        self.assertEqual(self.runner._check_offline(), "wait_net")
+        self.assertEqual(self._kinds(), ["offline_wait"])   # 待機の知らせは1回だけ
+        self.assertFalse(self.runner._want_restart.is_set())
+        # 疎通確認は毎回ではなく間隔を空ける（ネット断中に毎5秒タイムアウトを待たない）
+        self.assertEqual(len(self.probes), 1)
+
+        self.now[0] += sup.NET_PROBE_INTERVAL_SEC
+        self.net[0] = True
+        self.assertEqual(self.runner._check_offline(), "restart")
+        self.assertIn("offline", self._kinds())
+        self.assertTrue(self.runner._want_restart.is_set())
+
+        # 再起動直後に同じ判定が来てもクールダウン（再起動の暴走を防ぐ）
+        self.runner._want_restart.clear()
+        self.assertEqual(self.runner._check_offline(), "cooldown")
+        self.assertFalse(self.runner._want_restart.is_set())
+
+    def test_つながっていれば何もしない(self):
+        self.assertIsNone(self.runner._check_offline())
+        self.assertEqual(self.probes, [])
+
+    def test_状態にオフラインの秒数が出る(self):
+        heartbeat.mark_offline("svc", now=self.now[0] - 120)
+        self.assertEqual(self.runner.status()["offlineSec"], 120)

@@ -33,6 +33,7 @@ from collections import deque
 
 # 起動時にimportして遅延を避ける
 from core import config as app_config
+from core import heartbeat
 from platforms.discord.meeting.transcriber import transcribe_audio
 from platforms.discord.meeting.discord_notifier import post_to_discord
 from platforms.discord.meeting.minutes_generator import generate_minutes
@@ -400,6 +401,26 @@ async def _pending_minutes_loop():
         except Exception as e:
             print(f"⚠️ pendingリトライループで例外: {e}", flush=True)
         await asyncio.sleep(PENDING_RETRY_INTERVAL_SEC)
+
+
+# Discord へのつながり具合（切れている時刻をスーパーバイザに見せる）。
+# ネット断のあと、プロセスは生きたまま接続だけ戻らないことがある
+GATEWAY = heartbeat.ConnectionTracker("meetingbot")
+
+
+@bot.event
+async def on_connect():
+    GATEWAY.connected("meetingbot")
+
+
+@bot.event
+async def on_resumed():
+    GATEWAY.connected("meetingbot")
+
+
+@bot.event
+async def on_disconnect():
+    GATEWAY.disconnected("meetingbot")
 
 
 @bot.event
@@ -848,4 +869,5 @@ if __name__ == '__main__':
     # これがstderr(bot.error.log)を肥大化させイベントループを詰まらせ、
     # ハートビート遅延→Discordセッション無効化→切断の原因になっていた。
     logging.getLogger('discord.ext.voice_recv').setLevel(logging.ERROR)
+    GATEWAY.begin()
     bot.run(DISCORD_TOKEN, log_level=logging.WARNING)

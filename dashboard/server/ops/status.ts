@@ -11,6 +11,7 @@ import path from "node:path";
 import {
   classify,
   confirm,
+  discordOnlineFrom,
   heartbeatVerdict,
   STATUS_LABEL,
   type ConfirmState,
@@ -101,7 +102,7 @@ async function buildStatus(
   const health: Health = classify(
     {
       processAlive: svc.pid !== null,
-      discordOnline: alive,
+      discordOnline: discordOnlineFrom(alive, svc.offlineSec),
       logAgeSec: watchesHeartbeat ? logAgeSec : null,
       lastExitStatus: null,
     },

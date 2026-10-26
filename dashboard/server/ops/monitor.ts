@@ -97,6 +97,24 @@ export function confirm(
 /** heartbeat の失効閾値。bot-watchdog/watchdog.sh の STALE_SEC と揃えてある。 */
 export const HEARTBEAT_STALE_SEC = 300;
 
+/** Discord への接続ゼロがこの秒数続いたら「切れている」と表示する（瞬断は出さない） */
+export const OFFLINE_SHOW_SEC = 60;
+
+/**
+ * 生存証明の判定に、スーパーバイザが見ている「接続ゼロの秒数」を重ねる。
+ * ネット断のあと、プロセスもループも生きたまま接続だけ戻らないことがあり、
+ * 生存証明は新しいままなので、それだけでは「正常」に見えてしまう。
+ */
+export function discordOnlineFrom(
+  heartbeatOk: boolean | null,
+  offlineSec: number | null | undefined,
+): boolean | null {
+  if (offlineSec !== null && offlineSec !== undefined && offlineSec >= OFFLINE_SHOW_SEC) {
+    return false;
+  }
+  return heartbeatOk;
+}
+
 export function heartbeatVerdict(ageSec: number | null): {
   ok: boolean | null;
   detail: string;

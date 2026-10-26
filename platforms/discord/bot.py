@@ -101,6 +101,9 @@ from platforms.discord.agent_runtime import (
 
 #: スーパーバイザが鮮度を見るときの名前（core/supervisor.py の ServiceDef と揃える）
 HEARTBEAT_ID = "archivebot"
+# Discord へのつながり具合（全員が切れている時刻をスーパーバイザに見せる）。
+# ネット断のあと、プロセスは生きたまま接続だけ戻らないことがある
+GATEWAY = heartbeat.ConnectionTracker(HEARTBEAT_ID)
 #: 生存証明を書く間隔。失効閾値（既定300秒）より十分短くする
 HEARTBEAT_INTERVAL_SEC = 60
 
@@ -220,6 +223,15 @@ class AgentClient(ToolLoopMixin, SkillHooksMixin, MarkerActionsMixin,
         while True:
             heartbeat.touch(HEARTBEAT_ID)
             await asyncio.sleep(HEARTBEAT_INTERVAL_SEC)
+
+    async def on_connect(self):
+        GATEWAY.connected(self.agent["id"])
+
+    async def on_resumed(self):
+        GATEWAY.connected(self.agent["id"])
+
+    async def on_disconnect(self):
+        GATEWAY.disconnected(self.agent["id"])
 
     async def on_ready(self):
         AGENT_USER_IDS[self.agent["id"]] = self.user.id
@@ -1113,6 +1125,7 @@ async def main():
     # （テストが bot を import しても本番DBへ書かないため）
     invoke_claude.RECORDER = _record_llm_call
 
+    GATEWAY.begin()      # 起動直後はまだ誰もつながっていない
     clients = []
     for agent in AGENTS:
         if not agent.get("token"):

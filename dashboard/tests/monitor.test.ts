@@ -10,6 +10,7 @@ import {
   confirm,
   DISCONNECTED,
   DOWN,
+  discordOnlineFrom,
   heartbeatVerdict,
   IDLE,
   OK,
@@ -106,5 +107,22 @@ describe("heartbeatVerdict", () => {
   });
   it("取得できなければ判定しない", () => {
     expect(heartbeatVerdict(null).ok).toBeNull();
+  });
+});
+
+describe("discordOnlineFrom（Discordへの接続ゼロ）", () => {
+  // ネット断のあと、プロセスもループも生きたまま接続だけ戻らないことがある。
+  // 生存証明は新しいままなので、接続ゼロの秒数で「切れている」と出す
+  it("接続ゼロが1分続いたら切れていると出す", () => {
+    expect(discordOnlineFrom(true, 60)).toBe(false);
+    expect(classify(sig({ discordOnline: discordOnlineFrom(true, 120) })).status).toBe(
+      DISCONNECTED,
+    );
+  });
+  it("瞬断（1分未満）と、つながっているときは生存証明の判定のまま", () => {
+    expect(discordOnlineFrom(true, 30)).toBe(true);
+    expect(discordOnlineFrom(true, null)).toBe(true);
+    expect(discordOnlineFrom(null, null)).toBeNull();
+    expect(discordOnlineFrom(false, null)).toBe(false);
   });
 });
