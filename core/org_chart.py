@@ -16,6 +16,7 @@ from datetime import timedelta
 
 from core import invoke_claude
 from core import db
+from core import profiles
 from core import reminders
 CHART_STATE = "orgchart:"
 CHECKUP_STATE = "checkup:"
@@ -66,11 +67,8 @@ def previous_chart_id(db_path, agent_id):
 
 
 def _first_line(profile):
-    for ln in (profile or "").splitlines():
-        ln = ln.strip().lstrip("-・ ").strip()
-        if ln:
-            return ln[:60]
-    return ""
+    """役割の1行（見出し行は飛ばす）。実体は profiles.headline。"""
+    return profiles.headline(profile)
 
 
 def collect_org(db_path, ai_members, now=None):

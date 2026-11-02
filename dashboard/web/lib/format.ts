@@ -66,6 +66,7 @@ export const ACTION_LABEL: Record<string, string> = {
   used: "ツールを使用",
   unused: "ツールを使わず回答",
   shadow: "シャドーで記録",
+  saved: "台帳に記録した",
   denied: "権限外のツール呼び出し",
   breached: "訓練で突破された",
   caught: "嘘を検知して訂正",
@@ -115,6 +116,7 @@ export const KIND_LABEL: Record<string, string> = {
   stale: "放置されたチャンネル",
   homework: "宿題（「やっときます」）",
   attention: "会話への口出し",
+  facts_extract: "会話から事実を拾う",
 };
 
 export function actionLabel(a: string): string {

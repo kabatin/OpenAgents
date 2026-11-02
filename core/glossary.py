@@ -214,6 +214,20 @@ def build_correction_table(pairs):
             "必ず右の正しい表記で出力する）:\n" + "\n".join(lines) + "\n")
 
 
+def build_synonyms_context(pairs):
+    """回答Context用の表記ゆれ辞書（無ければ空文字・純粋関数）。
+
+    表記ゆれは検索キーワード抽出のプロンプトにしか載せていなかったため、
+    事前注入を切った構成（inject_search_hits=0）ではキーワード抽出自体が走らず、
+    辞書が回答に一切届いていなかった。ツールで検索するときにも使えるよう渡す。"""
+    if not pairs:
+        return ""
+    lines = [f"- {c}（誤記: {w}）" for w, c in pairs[:MAX_TERMS_IN_NOTE]]
+    return ("【既知の表記ゆれ（過去ログには誤記のまま残っている発言がある。"
+            "社内ログを検索するときは正しい表記と誤記の両方で引く）】\n"
+            + "\n".join(lines))
+
+
 def synonyms_note(pairs):
     """検索キーワード抽出へ注入する表記ゆれ情報（無ければ空文字・純粋関数）。
     過去ログには誤表記のまま残っている発言があるため、両方で検索させる。"""

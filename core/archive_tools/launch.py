@@ -72,6 +72,26 @@ def strip_retired_markers(answer):
     return text
 
 
+def skills_for(agent):
+    """エージェント設定から、archive ツールの表示を絞るスキル集合を出す（純粋関数）。
+
+    本番の可視ツールは platforms/discord/tool_loop.py の _tool_skills（bot の
+    属性から作る）。ここは設定だけから同じ集合を出す版で、回答品質の回帰評価
+    （golden_eval）が本番と同じツールを見るために使う（評価だけ固定の集合で、
+    本番と違うツールを測っていた）。ゲートを足すときは両方をそろえる。"""
+    agent = agent or {}
+    out = set()
+    if (agent.get("skills") or {}).get("reminder"):
+        out.add("reminder")
+    # 納期追跡の会話スキル: 議事録追跡を持つエージェントだけ（bot と同じゲート）
+    if (agent.get("proactive") or {}).get("minutes_channel_id"):
+        out.add("action_tracking")
+    # 自発発言枠の変更はアーカイブ担当（マネージャ）だけ
+    if agent.get("archiver"):
+        out.add("quota")
+    return frozenset(out)
+
+
 def normalize(cfg):
     """agents[].tool_loop を既定値で埋めた dict にする（dict 以外は既定）。"""
     src = cfg if isinstance(cfg, dict) else {}

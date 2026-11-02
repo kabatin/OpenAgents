@@ -25,6 +25,7 @@ from core import ab_test
 from core import demand_watch
 from core import episodes
 from core import event_planner
+from core import facts
 from core import injection_drill
 from core import kpi
 from core import misses
@@ -47,6 +48,7 @@ from core import rule_distill
 from core import selfreview_distill
 from core import self_audit
 from core import study_group
+from core import summaries
 from core import wiki
 from core import stale_watch
 from core import runner_answer
@@ -65,6 +67,7 @@ from platforms.discord.agent_runtime import (
     ANSWER_SEM,
     DB_PATH,
     GUILD_ID,
+    SUMMARY_LOCKS,
 )
 
 
@@ -181,6 +184,9 @@ class AgentLoopsMixin:
         pp = cfg.get("prep") or {}
         if pp.get("enabled") and cfg.get("minutes_channel_id"):
             plan.append(("prep pack", lambda: self._prep_pack_cycle(pp)))
+        sc = cfg.get("summaries") or {}
+        if sc.get("enabled", True):
+            plan.append(("summaries", lambda: self._summaries_cycle(sc)))
         pf = cfg.get("profiles") or {}
         if pf.get("enabled"):
             plan.append(("profiles", lambda: self._profiles_cycle(pf)))
@@ -366,6 +372,72 @@ class AgentLoopsMixin:
                                    profiles.MIN_NEW_MESSAGES)))
         if updated:
             print(f"[{self.agent['id']}] profile updated: {updated}")
+
+    async def _summaries_cycle(self, sc):
+        """文脈要約の追いつき: 要約の更新は「エージェントが答えた直後」だけ
+        だったので、エージェントが出ないチャンネルは要約が育たなかった。
+        未反映の多いチャンネルを1周期1つだけ追いつかせる
+        （静かなデータ・投稿なし。応答側の更新と同じロックで直列化する）。"""
+        # 要約側の下限（summaries.MIN_NEW_MESSAGES）未満では更新されないので、
+        # それより小さい設定は下限に丸める（同じchを選び続けないため）
+        min_new = max(summaries.MIN_NEW_MESSAGES,
+                      int(sc.get("min_new_messages",
+                                 summaries.MIN_NEW_MESSAGES)))
+        exclude = tuple(self.proactive_cfg.get("exclude_channel_ids") or ())
+
+        def _pick():
+            with db.connect(DB_PATH) as conn:
+                rows = db.stale_summary_channels(conn, min_new, limit=1,
+                                                 exclude_channel_ids=exclude)
+            return rows[0] if rows else None
+
+        target = await asyncio.to_thread(_pick)
+        if target is None:
+            return
+        channel_id = int(target["channel_id"])
+        lock = SUMMARY_LOCKS.setdefault(channel_id, asyncio.Lock())
+        async with lock:
+            async with ANSWER_SEM:
+                updated = await asyncio.to_thread(
+                    summaries.maybe_update, DB_PATH, channel_id)
+        if updated:
+            print(f"[{self.agent['id']}] summary caught up "
+                  f"(ch={channel_id}, {target['new_messages']} new, "
+                  f"{len(updated)} chars)")
+
+    async def _save_screen_facts(self, screened, digest, cfg):
+        """一次判定のついでに拾った事実を台帳へ（追加のLLM呼び出しは無い）。
+        facts_extract.shadow（既定True）の間は書かずに自発ログへ残す
+        ＝人が中身を見てから本番にする。"""
+        fc = cfg.get("facts_extract") or {}
+        if not fc.get("enabled", True) or not screened.get("facts"):
+            return
+        by_id = {m["id"]: m for m in digest["messages"]}
+        items = []
+        for f in screened["facts"]:
+            trig = by_id.get(f["message_id"])
+            if trig is None:
+                continue
+            items.append({**f, "channel_id": trig["channel_id"],
+                          "stated_by": trig.get("author")})
+        if not items:
+            return
+        detail = " ／ ".join(f"[{i['topic']}] {i['fact']}" for i in items)[:400]
+        if fc.get("shadow", True):
+            await asyncio.to_thread(
+                proactive.log_entry, DB_PATH, self.agent["id"],
+                kind="facts_extract", action="shadow", detail=detail)
+            print(f"[{self.agent['id']}] 事実{len(items)}件を抽出（シャドー）")
+            return
+        saved = await asyncio.to_thread(
+            facts.save_extracted, DB_PATH, self.agent["id"], items)
+        if saved:
+            await asyncio.to_thread(
+                proactive.log_entry, DB_PATH, self.agent["id"],
+                kind="facts_extract", action="saved",
+                detail=" ／ ".join(f"id={i} [{t}] {x}"
+                                   for i, t, x in saved)[:400])
+            print(f"[{self.agent['id']}] 会話から事実{len(saved)}件を台帳に記録")
 
     def _claim_trigger(self, message_id, kind):
         """トリガー発言の横断クレーム（先勝ちCAS・同期）。"""
@@ -1438,16 +1510,25 @@ class AgentLoopsMixin:
         if (cfg.get("ab_test") or {}).get("enabled"):
             variant_id, variant_note = await asyncio.to_thread(
                 ab_test.pick_for_screen, DB_PATH)
-        async with ANSWER_SEM:
-            screened = await asyncio.to_thread(
-                proactive.screen, digest["messages"],
-                agent_name=self.agent["name"],
-                model=cfg.get("screen_model", proactive.SCREEN_MODEL_DEFAULT),
-                scope_note=cfg.get("scope_note"),
-                colleagues=colleagues,
-                variant_note=variant_note,
-                allow_others=bool(cfg.get("others_shadow")),
-                allow_colleague=bool(cfg.get("colleague")))
+        try:
+            async with ANSWER_SEM:
+                screened = await asyncio.to_thread(
+                    proactive.screen, digest["messages"],
+                    agent_name=self.agent["name"],
+                    model=cfg.get("screen_model",
+                                  proactive.SCREEN_MODEL_DEFAULT),
+                    scope_note=cfg.get("scope_note"),
+                    colleagues=colleagues,
+                    variant_note=variant_note,
+                    allow_others=bool(cfg.get("others_shadow")),
+                    allow_colleague=bool(cfg.get("colleague")))
+        except Exception:
+            # 一次判定が失敗した区間は次の周期に読み直す（まだ何も投稿していない）
+            if await asyncio.to_thread(
+                    proactive.rewind_checkpoint, DB_PATH, self.agent["id"],
+                    digest["checkpoint_from"]):
+                print(f"[{self.agent['id']}] screen failed: checkpoint rewound")
+            raise
         # 「その他」枠のシャドー実験（2026-08-18）: 4類型の外で「同僚なら一言
         # 添える」と判断したものを**投稿せずログだけ**残す。2週間後に人間が
         # 読んで、ホワイトリスト方式が正しいかを実データで判断する
@@ -1478,6 +1559,9 @@ class AgentLoopsMixin:
                     decided_on=reminders.now_jst().strftime("%Y-%m-%d"))
                 print(f"[{self.agent['id']}] 会話から決定{len(items)}件を"
                       "台帳に記録")
+        # 会話から拾った「いまの状況・訂正」を事実台帳へ。
+        # 既定シャドー: まず proactive_log に記録だけして、人が見てから本番にする
+        await self._save_screen_facts(screened, digest, cfg)
         # リアクション自動学習（RM#11）: 👎が続いた型の候補はコードで落とす
         suppressed = await asyncio.to_thread(
             proactive.suppressed_patterns, DB_PATH, self.agent["id"])

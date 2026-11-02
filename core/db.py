@@ -1065,6 +1065,32 @@ def get_thread_summary(conn, channel_id):
     return {"summary": row[0], "covered_until": row[1], "updated_at": row[2]}
 
 
+def stale_summary_channels(conn, min_new, limit=5, exclude_channel_ids=()):
+    """要約が遅れているチャンネル（未反映の多い順）。
+    要約の更新は「エージェントが答えた直後」だけだったので、エージェントが
+    出ないチャンネルは要約が育たなかった。観察ループから1周期1chずつ
+    追いつかせるための入力。"""
+    # 本文の無い発言（画像だけ等）は要約の材料にならないので数えない
+    # （数えると更新されないchを毎周期選び続けて、他のchが追いつかない）。
+    # 空リストに NOT IN (NULL) を使うと全行が落ちる（SQLの3値論理）ので、
+    # 除外が無いときは条件自体を外す
+    skip = [int(c) for c in (exclude_channel_ids or ())]
+    cond = (f" AND m.channel_id NOT IN ({','.join('?' * len(skip))})"
+            if skip else "")
+    rows = conn.execute(
+        f"""SELECT m.channel_id, COUNT(*) AS n
+            FROM messages m
+            LEFT JOIN thread_summaries t ON t.channel_id = m.channel_id
+            WHERE m.deleted = 0
+              AND TRIM(COALESCE(m.content, '')) != ''
+              AND m.id > COALESCE(t.covered_until_message_id, 0){cond}
+            GROUP BY m.channel_id
+            HAVING n >= ?
+            ORDER BY n DESC LIMIT ?""",
+        (*skip, int(min_new), int(limit))).fetchall()
+    return [{"channel_id": r[0], "new_messages": r[1]} for r in rows]
+
+
 def upsert_thread_summary(conn, *, channel_id, summary, covered_until,
                           updated_at):
     conn.execute(
@@ -2375,21 +2401,30 @@ def channel_candidates(conn, *, exclude_channel_ids=(), days=60):
     return [(r[0], r[1]) for r in conn.execute(sql, excl)]
 
 
+def _keyword_match_sql(keywords, columns):
+    """LIKE検索の (条件句, 一致語数の式, パラメータ) を組む（純粋）。
+    台帳は「新しい順」だけだと、広い語で古いが決定的な記録が窓から落ちる
+    （一致語数の多い順を第一キーにする）。"""
+    kws = [k.strip() for k in (keywords or []) if len(k.strip()) >= 2][:8]
+    if not kws:
+        return "", "", []
+    per = " OR ".join(f"{c} LIKE ?" for c in columns)
+    where = " OR ".join(f"({per})" for _ in kws)
+    hits = " + ".join(f"(CASE WHEN ({per}) THEN 1 ELSE 0 END)" for _ in kws)
+    params = [f"%{k}%" for k in kws for _ in columns]
+    return where, hits, params
+
+
 def search_decisions(conn, keywords, limit=8):
-    """決定事項をキーワードLIKEで検索（activeのみ・新しい順）。
+    """決定事項をキーワードLIKEで検索（activeのみ・一致語数の多い順→新しい順）。
     キーワードが空/短すぎなら直近limit件を返す。"""
     base = ("SELECT id, decision, topic, source_message_id, channel_id, "
             "decided_on FROM decisions WHERE status='active'")
-    kws = [k.strip() for k in (keywords or []) if len(k.strip()) >= 2][:8]
-    if kws:
-        clauses = " OR ".join("(decision LIKE ? OR topic LIKE ?)"
-                              for _ in kws)
-        params = []
-        for k in kws:
-            params += [f"%{k}%", f"%{k}%"]
+    where, hits, params = _keyword_match_sql(keywords, ("decision", "topic"))
+    if where:
         rows = conn.execute(
-            base + f" AND ({clauses}) ORDER BY id DESC LIMIT ?",
-            params + [limit]).fetchall()
+            f"{base} AND ({where}) ORDER BY ({hits}) DESC, id DESC LIMIT ?",
+            params + params + [limit]).fetchall()
     else:
         rows = conn.execute(base + " ORDER BY id DESC LIMIT ?",
                             (limit,)).fetchall()
@@ -3283,19 +3318,15 @@ def add_fact(conn, *, agent_id, topic, fact, source_kind, source_message_id,
 
 
 def search_facts(conn, keywords, limit=8):
-    """事実をキーワードLIKEで検索（activeのみ・新しい順）。
+    """事実をキーワードLIKEで検索（activeのみ・一致語数の多い順→新しい順）。
     キーワードが空/短すぎなら直近limit件を返す（決定台帳と同じ契約）。"""
     base = ("SELECT id, topic, fact, source_message_id, channel_id, "
             "stated_by, created_at FROM facts WHERE status='active'")
-    kws = [k.strip() for k in (keywords or []) if len(k.strip()) >= 2][:8]
-    if kws:
-        clauses = " OR ".join("(fact LIKE ? OR topic LIKE ?)" for _ in kws)
-        params = []
-        for k in kws:
-            params += [f"%{k}%", f"%{k}%"]
+    where, hits, params = _keyword_match_sql(keywords, ("fact", "topic"))
+    if where:
         rows = conn.execute(
-            base + f" AND ({clauses}) ORDER BY id DESC LIMIT ?",
-            params + [limit]).fetchall()
+            f"{base} AND ({where}) ORDER BY ({hits}) DESC, id DESC LIMIT ?",
+            params + params + [limit]).fetchall()
     else:
         rows = conn.execute(base + " ORDER BY id DESC LIMIT ?",
                             (limit,)).fetchall()

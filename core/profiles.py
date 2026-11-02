@@ -25,6 +25,29 @@ PER_MESSAGE_CHARS = 200
 UPDATE_TIMEOUT_SEC = 180
 
 
+# 蒸留の出力は `**役割・担当:**` の見出しで始まる。見出しだけを引用すると
+# 「誰に聞けばいいか」が全員「**役割・担当・得意分野:**」になるので飛ばす
+# （実運用で、全員が見出しだけになり組織図の投稿にもそのまま出ていた）。
+def _is_heading(line):
+    s = (line or "").strip()
+    if not s:
+        return False
+    if s.startswith("#"):
+        return True
+    return s.startswith("*") and s.rstrip("：: ").endswith("*")
+
+
+def headline(profile, cap=60):
+    """プロファイルから中身のある1行目を取る（純粋関数）。見出し行は飛ばす。"""
+    for raw in (profile or "").splitlines():
+        if _is_heading(raw):
+            continue
+        line = raw.strip().lstrip("-・*# ").strip().strip("*").strip()
+        if line:
+            return line[:cap]
+    return ""
+
+
 def build_update_prompt(name, prev_profile, rows):
     """プロファイル統合更新のプロンプト（純粋関数・テスト対象）。"""
     lines = []

@@ -203,7 +203,9 @@ DBに記録します（複数だと同じ発言が二重に記録されます）
   "rescue":  { "enabled": true, "shadow": true },
   "briefing": { "enabled": false },
   "minutes_channel_id": "",   // 議事録チャンネル（TODO抽出と納期の声かけ）
-  "deadline": { "announce": true, "nudge": true, "stale_notice": true }
+  "deadline": { "announce": true, "nudge": true, "stale_notice": true },
+  "facts_extract": { "enabled": true, "shadow": true },  // 会話から「いまの状況」を事実台帳へ
+  "summaries": { "enabled": true, "min_new_messages": 6 }, // チャンネル要約の追いつき
   // …ほかにも多数（管理画面の「エージェント → 自分から動く機能」で一覧できます）
 }
 ```
@@ -211,6 +213,19 @@ DBに記録します（複数だと同じ発言が二重に記録されます）
 `deadline` は議事録TODOの投稿スイッチです。`announce`＝追跡を始めた報告、
 `nudge`＝期日の声かけ、`stale_notice`＝超過7日で手放す報告。止めるのは
 投稿だけで、追跡と記録（手放しの判定を含む）は続きます。
+
+`facts_extract` は、人同士の会話に出てくる状況報告（「〜は登録済み」「送料は800円に
+変更」）や前の記録の訂正を、会話の見守り（一次判定）と同じ読み取りのついでに事実台帳へ
+拾います（AIの呼び出しは増えません・1周期3件まで）。既定はシャドーで、台帳には書かず
+自発ログ（kind=facts_extract）に拾った内容を残すだけです。中身を見てから
+`"shadow": false` にしてください。
+
+`summaries` は、新しい発言が `min_new_messages`（6〜500）件以上たまったチャンネルの
+文脈要約を、未反映の多い順に1周期1チャンネルだけ更新します（投稿なし）。
+`exclude_channel_ids` のチャンネルは対象外です。
+
+一次判定（会話の見守り）が失敗した周期は、読みかけの区間を次の周期に読み直します
+（失敗の間の決定・事実の抽出が漏れないように）。
 
 ### 3値トグル（OFF / シャドー / 本番）
 

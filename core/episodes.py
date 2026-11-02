@@ -17,6 +17,7 @@ import os
 
 
 from core import db
+from core import profiles
 from core import reminders
 KIND_LABELS = {"decision": "決定", "done": "完了", "event": "イベント確定"}
 MAX_IN_CONTEXT = 8
@@ -78,17 +79,12 @@ def build_timeline_block(db_path, channel_id):
 
 def build_expertise_map(db_path, limit=12):
     """profilesを集約した「誰に何を聞けばいいか」（無ければ空文字）。
-    プロファイルの1行目（役割行）だけを引用して簡潔に保つ。"""
+    役割・担当の中身の1行目だけを引用して簡潔に保つ（見出し行は飛ばす）。"""
     with db.connect(db_path) as conn:
         rows = db.all_profiles(conn, limit=limit)
     lines = []
     for r in rows:
-        first = ""
-        for ln in (r["profile"] or "").splitlines():
-            ln = ln.strip().lstrip("-・ ").strip()
-            if ln:
-                first = ln[:60]
-                break
+        first = profiles.headline(r["profile"])
         if first:
             lines.append(f"- {r['display_name']}: {first}")
     if not lines:

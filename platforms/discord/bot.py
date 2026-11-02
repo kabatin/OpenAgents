@@ -530,6 +530,12 @@ class AgentClient(ToolLoopMixin, SkillHooksMixin, MarkerActionsMixin,
                 glossary.load_terms(DB_PATH))
             if terms_ctx:
                 parts.append(terms_ctx)
+            # 表記ゆれはツールで検索する経路にも要る（事前注入を切ると
+            # キーワード抽出が走らず、辞書が届かなかった）
+            syn_ctx = glossary.build_synonyms_context(
+                glossary.load_pairs(DB_PATH))
+            if syn_ctx:
+                parts.append(syn_ctx)
             # リマインダー指示文も人間発言にのみ（管理者は全員分を見られる）
             if self.reminder and not tool_live:
                 is_admin = str(message.author.id) in ADMIN_IDS
@@ -846,7 +852,8 @@ class AgentClient(ToolLoopMixin, SkillHooksMixin, MarkerActionsMixin,
                         self._self_review_bg(
                             question, answer, message,
                             events=(result.get("events") or []
-                                    if tool_plan is not None else [])))
+                                    if tool_plan is not None else []),
+                            context=references))
                     self._bg_tasks.add(task)
                     task.add_done_callback(self._bg_tasks.discard)
             if task_instr:
@@ -944,10 +951,12 @@ class AgentClient(ToolLoopMixin, SkillHooksMixin, MarkerActionsMixin,
         except Exception as e:
             print(f"[{self.agent['id']}] peer review request failed: {e}")
 
-    async def _self_review_bg(self, question, answer, message, events=None):
+    async def _self_review_bg(self, question, answer, message, events=None,
+                              context=None):
         """投稿後の自己採点（RM#14・シャドー）。結果はproactive_logへ記録のみ。
         events: ツールループの stream-json。使ったツールと結果を根拠として渡す
-        （検索して答えた事実を「根拠のない断定」と誤採点しないため）。"""
+        （検索して答えた事実を「根拠のない断定」と誤採点しないため）。
+        context: リプライ先・参照された投稿（文脈から答えた内容の誤採点を防ぐ）。"""
         try:
             evidence = tool_evidence.summarize_for_review(events or [])
             async with ANSWER_SEM:
@@ -955,7 +964,7 @@ class AgentClient(ToolLoopMixin, SkillHooksMixin, MarkerActionsMixin,
                     self_review.review, question, answer,
                     model=self.proactive_cfg.get(
                         "screen_model", proactive.SCREEN_MODEL_DEFAULT),
-                    evidence=evidence or None)
+                    evidence=evidence or None, context=context or None)
             if r:
                 await asyncio.to_thread(
                     proactive.log_entry, DB_PATH, self.agent["id"],

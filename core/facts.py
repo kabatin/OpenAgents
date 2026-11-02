@@ -66,6 +66,67 @@ def extract_markers(answer):
     return text.strip(), adds, cancel_ids, errors
 
 
+# 会話から拾った事実の保存。add_fact の上書きは topic の完全一致なので、
+# 表記ゆれ（「備品の発注」と「備品発注」）だと古い事実が active のまま残る。
+# 既にある主題に寄せてから書く。助詞・記号・空白を落として比べる
+# （bigram 類似度は短い主題では常に False になるので使えない＝textsim.MIN_BIGRAMS）。
+_TOPIC_NOISE_RE = re.compile(
+    r"[のをにはがとでへや\s　・･/／_\-－—「」『』（）()\[\]【】:：]+")
+
+
+def topic_key(topic):
+    """主題の同一判定キー（純粋関数）。"""
+    return _TOPIC_NOISE_RE.sub("", (topic or "").strip()).lower()
+
+
+def align_topic(topic, active_topics):
+    """既存の主題と同じ意味なら、その表記にそろえる（純粋関数）。
+    そろえないと add_fact の上書き（topic完全一致）が効かず、古い事実が
+    active のまま残る。"""
+    topic = (topic or "").strip()
+    key = topic_key(topic)
+    if not key:
+        return topic
+    for existing in active_topics:
+        if topic_key(existing) == key:
+            return existing
+    return topic
+
+
+def save_extracted(db_path, agent_id, items, *, now=None):
+    """会話から拾った事実を台帳へ。保存した [(id, topic, fact)] を返す。
+    items: [{"topic","fact","message_id","channel_id","stated_by"}]。
+    同じ主題の言い直し（内容も同じ）は書かない＝台帳を水増しさせない。"""
+    from core import db
+    from core import reminders
+    now = now or reminders.fmt(reminders.now_jst())
+    saved = []
+    with db.connect(db_path) as conn:
+        rows = db.search_facts(conn, [], limit=200)
+        topics = [r["topic"] for r in rows]
+        same = {r["topic"]: r["fact"] for r in rows}
+        for it in items:
+            topic = align_topic(it.get("topic"), topics)
+            fact = (it.get("fact") or "").strip()
+            if not topic or not fact:
+                continue
+            # 文字どおり同じときだけ捨てる。類似度で弾くと「900円→800円」の
+            # ような数字の訂正まで「言い直し」扱いで消える（まさに記録したい変化）
+            if same.get(topic, "").strip() == fact:
+                continue
+            fid, _ = db.add_fact(
+                conn, agent_id=agent_id, topic=topic, fact=fact,
+                source_kind="conversation",
+                source_message_id=it.get("message_id"),
+                channel_id=it.get("channel_id"),
+                stated_by=it.get("stated_by"), created_at=now)
+            same[topic] = fact
+            if topic not in topics:
+                topics.append(topic)
+            saved.append((fid, topic, fact))
+    return saved
+
+
 def build_ledger_block(db_path, keywords, guild_id):
     """回答Contextに載せる【事実台帳】（該当なしなら空文字）。
     決定台帳と同じく出典リンクを添える＝引用すれば出典ゲートを通る。

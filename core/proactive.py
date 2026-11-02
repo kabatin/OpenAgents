@@ -121,7 +121,9 @@ def collect_cycle(db_path, agent_id, *, home_channel_id,
 
     Returns:
         None: 初回（checkpointを「今」に初期化）または新規発言なし
-        {"messages": [...], "quota_left": int}: 判定すべき差分あり
+        {"messages": [...], "quota_left": int, "checkpoint_from": int}:
+            判定すべき差分あり（checkpoint_from は前進前の checkpoint。
+            一次判定が失敗したら rewind_checkpoint でここへ戻す）
 
     checkpoint は収集した分だけ必ず前進する（後段が失敗しても再処理しない＝
     二重投稿のリスクより取りこぼしを選ぶ。自発発言はbest-effortでよい）。
@@ -164,7 +166,28 @@ def collect_cycle(db_path, agent_id, *, home_channel_id,
         midnight = reminders.fmt(now.replace(hour=0, minute=0))
         spoken = db.count_proactive_spoken_since(conn, agent_id, midnight)
     return {"messages": msgs,
-            "quota_left": max(0, int(daily_quota) - spoken)}
+            "quota_left": max(0, int(daily_quota) - spoken),
+            "checkpoint_from": after}
+
+
+def rewind_checkpoint(db_path, agent_id, to_message_id):
+    """一次判定が失敗した区間を、次の周期にもう一度読ませる。
+
+    checkpoint は収集時に前へ進める（投稿の二重化を避けるため）。だが一次判定
+    そのものが失敗した区間では何も投稿していないので、戻しても二重投稿は
+    起きない。戻さないと、その区間の決定・事実の抽出が永久に漏れる
+    （認証切れなどで判定が失敗し続けた時間ぶんがそうなる）。
+    前に進める方向には動かさない。Returns: 戻したか。"""
+    with db.connect(db_path) as conn:
+        state = db.get_proactive_state(conn, agent_id)
+        if state is None:
+            return False
+        if (state["last_checked_message_id"] or 0) <= int(to_message_id):
+            return False
+        db.set_proactive_state(conn, agent_id,
+                               last_checked_message_id=int(to_message_id),
+                               last_run_at=state["last_run_at"])
+    return True
 
 
 # ---------------------------------------------------------------- 2) 一次判定
@@ -226,23 +249,40 @@ def build_screen_prompt(messages, agent_name, scope_note=None,
         + "加えて、発言の中に「チームとして明確に決定・確定した事項」"
         "（〜で行く/〜に決定/〜で確定 などの言い切り）があれば decisions に"
         "抽出する。検討中・個人の予定・願望は含めない（迷ったら含めない）。\n\n"
+        "さらに、発言の中に「いまの状況の報告」や「前の記録の訂正」があれば "
+        "facts に抽出する。これは後から『いまどうなってる？』に答えるための"
+        "台帳で、決定（decisions）とは別もの。\n"
+        "- 対象: 済んだ作業の報告（「〜は登録済み」「〜は対応完了」）、変わった値"
+        "（「送料は800円に変更」「期日は金曜にリスケ」）、確定した具体値"
+        "（番号・コード・金額の正）、前に言われていたことの訂正\n"
+        "- 対象外: 作業中・予定・願望・相談・質問、雑談、個人の感想。"
+        "その場限りの実況（「いま向かってます」）も入れない\n"
+        "- topic は後から引くための主題を短く（例『ショップの送料』）。"
+        "同じ主題が既に台帳にあるなら、その主題と同じ言い方にそろえる\n"
+        f"- 最大{MAX_FACTS}件。迷ったら入れない（間違った事実は無いより悪い）\n\n"
         "出力はJSONのみ（説明文・コードブロック不要）:\n"
         '{"candidates": [{"message_id": 123, "kind": "recall", '
         '"search_terms": ["検索語"], "reason": "一言"}], '
         '"decisions": [{"message_id": 123, "decision": "決定内容を1文で", '
+        '"topic": "主題"}], '
+        '"facts": [{"message_id": 123, "fact": "いまの状況を1文で", '
         '"topic": "主題"}], '
         '"handoff": [{"message_id": 123, "to": "agent2", "reason": "一言"}]'
         + ((', "others": [{"message_id": 123, "would_say": "添えるとしたら'
             '何と言うか1文", "why": "なぜ添えたいか一言"}]')
            if allow_others else "")
         + "}\n"
-        '該当なしなら {"candidates": [], "decisions": [], "handoff": []'
+        '該当なしなら {"candidates": [], "decisions": [], "facts": [], '
+        '"handoff": []'
         + (', "others": []' if allow_others else "") + "}\n\n"
         "【発言一覧】\n" + "\n".join(lines)
     )
 
 
 MAX_OTHERS = 1
+# 会話から拾う事実の上限（決定と同じ読み取りのついでに取る＝追加コストゼロ）。
+# 間違った事実は無いより悪いので、決定（5件）より絞る
+MAX_FACTS = 3
 
 
 def parse_screen_others(raw, valid_ids):
@@ -301,6 +341,35 @@ def parse_screen_response(raw, valid_ids):
     return out
 
 
+def parse_screen_facts(raw, valid_ids):
+    """一次判定JSONから「いまの状況・訂正」を検証つきで取り出す（純粋関数）。
+
+    事実台帳の書き込み口が「エージェントが答えた会話の中で save_fact を呼ぶ」
+    だけだと、人同士の会話の状況報告は台帳に来ない。決定事項と同じ読み取りの
+    ついでに拾う。主題の無い事実は後から引けないので捨てる。"""
+    m = _JSON_RE.search(raw or "")
+    if not m:
+        return []
+    try:
+        data = json.loads(m.group(0))
+    except ValueError:
+        return []
+    out = []
+    for f in (data.get("facts") or [])[:MAX_FACTS]:
+        if not isinstance(f, dict):
+            continue
+        try:
+            mid = int(f.get("message_id"))
+        except (TypeError, ValueError):
+            continue
+        text = str(f.get("fact") or "").strip()[:300]
+        topic = str(f.get("topic") or "").strip()[:40]
+        if mid not in valid_ids or not text or not topic:
+            continue
+        out.append({"message_id": mid, "fact": text, "topic": topic})
+    return out
+
+
 def parse_screen_decisions(raw, valid_ids):
     """一次判定JSONから会話中の決定事項を検証つきで取り出す（純粋関数）。
     RM#4: 同じhaiku読み取りのついでに台帳の原料を拾う（追加コストゼロ）。"""
@@ -355,7 +424,7 @@ def parse_screen_handoffs(raw, valid_ids, valid_targets):
 def screen(messages, *, agent_name, model=SCREEN_MODEL_DEFAULT,
            scope_note=None, colleagues=None, invoke_fn=None,
            variant_note=None, allow_others=False, allow_colleague=False):
-    """一次判定: {"candidates", "decisions", "handoffs", "others"} を返す。
+    """一次判定: {"candidates", "decisions", "facts", "handoffs", "others"} を返す。
     invoke_fnはテスト差し替え口。variant_note はA/B実験の追記文（RM#12）。
     allow_others は「その他」枠のシャドー実験（othersは投稿しない）。"""
     prompt = build_screen_prompt(messages, agent_name, scope_note=scope_note,
@@ -370,6 +439,7 @@ def screen(messages, *, agent_name, model=SCREEN_MODEL_DEFAULT,
     ids = {m["id"] for m in messages}
     return {"candidates": parse_screen_response(raw, ids),
             "decisions": parse_screen_decisions(raw, ids),
+            "facts": parse_screen_facts(raw, ids),
             "handoffs": parse_screen_handoffs(
                 raw, ids, set((colleagues or {}).keys())),
             "others": parse_screen_others(raw, ids) if allow_others else []}
@@ -903,8 +973,10 @@ def golden_eval_latest(dir_path=None):
             rep = json.load(f)
     except (OSError, ValueError):
         return None
+    got = ((rep.get("recall") or {}).get("retrieved")) or {}
     return {"mean": rep.get("mean"), "n": rep.get("scored"),
-            "date": os.path.basename(files[-1])[:8]}
+            "date": os.path.basename(files[-1])[:8],
+            "retrieved": got.get("hits"), "retrieved_n": got.get("n")}
 
 
 def build_weekly_report(stats, roster, since_label):
@@ -965,6 +1037,9 @@ def build_weekly_report(stats, roster, since_label):
     if g and g.get("mean") is not None:
         lines.append(f"- 模範Q&Aの回帰採点: 平均{g['mean']}点/5"
                      f"（{g.get('n', '?')}問・{g['date']}）")
+        if g.get("retrieved_n"):
+            lines.append(f"- 根拠の投稿を引けた: "
+                         f"{g['retrieved']}/{g['retrieved_n']}問")
     if stats.get("golden_total"):
         lines.append(f"- ゴールデンセット: 累計{stats['golden_total']}問"
                      "（👍回答から自動蓄積）")

@@ -144,26 +144,47 @@ def extract_keywords(question, model=DEFAULT_MODEL, history="", claude_fn=None,
     return [w for w in re.split(r"[\s、。,.!?！？]+", question) if len(w) >= 2][:6]
 
 
-def _fts_search(conn, keyword, limit):
-    """1キーワードのFTS検索。3文字未満はLIKEでフォールバック。"""
+# 応答中チャンネルの除外条件（m. の別名つき）。recent_from_id があれば
+# その id 以降だけを外す。パラメータは _exclude_params の4つ
+_EXCLUDE_SQL = ("NOT (? IS NOT NULL AND m.channel_id = ? "
+                "AND (? IS NULL OR m.id >= ?))")
+
+
+def _exclude_params(exclude_channel_id, recent_from_id):
+    return [exclude_channel_id, exclude_channel_id,
+            recent_from_id, recent_from_id]
+
+
+def _fts_search(conn, keyword, limit, exclude_channel_id=None,
+                recent_from_id=None):
+    """1キーワードのFTS検索。3文字未満はLIKEでフォールバック。
+
+    除外（応答中ch）は**候補を選ぶ段階で**効かせる。後で落とすと補充が効かず、
+    応答中chの語が0件になっていた。
+    LIKEフォールバックは新しい順（bm25 が無く順位を付けられないので、
+    せめて最近のものを返す。並び順が無いと最古から limit 件だった）。"""
+    excl = _exclude_params(exclude_channel_id, recent_from_id)
     if len(keyword) >= 3:
         q = '"' + keyword.replace('"', '""') + '"'
         try:
             return conn.execute(
-                """SELECT m.id, bm25(messages_fts) AS rank
+                f"""SELECT m.id, bm25(messages_fts) AS rank
                    FROM messages_fts
                    JOIN messages m ON m.id = messages_fts.rowid
                    WHERE messages_fts MATCH ? AND m.deleted = 0
+                     AND {_EXCLUDE_SQL}
                    ORDER BY rank LIMIT ?""",
-                (q, limit),
+                [q, *excl, limit],
             ).fetchall()
         except sqlite3.OperationalError:
             pass
     # LIKEフォールバック（短いキーワードや特殊文字）
     return conn.execute(
-        """SELECT id, 0.0 AS rank FROM messages
-           WHERE deleted = 0 AND content LIKE ? LIMIT ?""",
-        (f"%{keyword}%", limit),
+        f"""SELECT m.id, 0.0 AS rank FROM messages m
+           WHERE m.deleted = 0 AND m.content LIKE ?
+             AND {_EXCLUDE_SQL}
+           ORDER BY m.id DESC LIMIT ?""",
+        [f"%{keyword}%", *excl, limit],
     ).fetchall()
 
 
@@ -187,7 +208,8 @@ def search_messages(db_path, keywords, limit=24, per_keyword=12,
     # 塞ぐ（実際にCIで発覚）。必ず閉じる db.connect を使う
     with db.connect(db_path) as conn:
         for kw in keywords:
-            for mid, rank in _fts_search(conn, kw, per_keyword):
+            for mid, rank in _fts_search(conn, kw, per_keyword,
+                                         exclude_channel_id, recent_from_id):
                 # ヒット数を加点、bm25(負の値ほど良い)を反映
                 s = scores.get(mid, {"hits": 0, "rank": 0.0})
                 s["hits"] += 1
@@ -199,10 +221,12 @@ def search_messages(db_path, keywords, limit=24, per_keyword=12,
             if len(kw) < 2:
                 continue
             for (mid,) in conn.execute(
-                """SELECT m.id FROM messages m JOIN channels c ON c.id=m.channel_id
-                   WHERE c.name LIKE ? AND m.deleted=0
+                f"""SELECT m.id FROM messages m JOIN channels c ON c.id=m.channel_id
+                   WHERE c.name LIKE ? AND m.deleted=0 AND {_EXCLUDE_SQL}
                    ORDER BY m.id DESC LIMIT ?""",
-                (f"%{kw}%", per_keyword),
+                [f"%{kw}%",
+                 *_exclude_params(exclude_channel_id, recent_from_id),
+                 per_keyword],
             ).fetchall():
                 s = scores.get(mid, {"hits": 0, "rank": 0.0})
                 s["hits"] += 1
@@ -225,15 +249,15 @@ def search_messages(db_path, keywords, limit=24, per_keyword=12,
                        (SELECT COUNT(*) FROM attachments a
                         WHERE a.message_id=m.id AND a.is_video=1) AS vids,
                        (SELECT COUNT(*) FROM attachments a
-                        WHERE a.message_id=m.id) AS atts
+                        WHERE a.message_id=m.id) AS atts,
+                       (SELECT GROUP_CONCAT(a.filename, ' / ')
+                        FROM attachments a WHERE a.message_id=m.id) AS names
                 FROM messages m
                 LEFT JOIN channels c ON c.id=m.channel_id
                 LEFT JOIN users u ON u.id=m.author_id
                 WHERE m.id IN ({placeholders})
-                  AND NOT (? IS NOT NULL AND m.channel_id = ?
-                           AND (? IS NULL OR m.id >= ?))""",
-            ids + [exclude_channel_id, exclude_channel_id,
-                   recent_from_id, recent_from_id],
+                  AND {_EXCLUDE_SQL}""",   # 二重の安全網
+            ids + _exclude_params(exclude_channel_id, recent_from_id),
         ).fetchall()
 
     by_id = {r[0]: r for r in rows}
@@ -243,6 +267,7 @@ def search_messages(db_path, keywords, limit=24, per_keyword=12,
             "id": r[0], "channel_id": r[1], "channel": r[2] or "?",
             "author": r[3] or "?", "content": r[4] or "",
             "created_at": r[5], "imgs": r[6], "vids": r[7], "atts": r[8],
+            "att_names": r[9] or "",
         }
         for r in ordered
     ]
@@ -251,6 +276,20 @@ def search_messages(db_path, keywords, limit=24, per_keyword=12,
 def jump_link(guild_id, channel_id, message_id):
     """発言へのリンク。形式はプラットフォーム実装が登録する（core/chat.py）。"""
     return chat.link_to(msgref.PLATFORM, guild_id, channel_id, message_id)
+
+
+ATT_NAMES_IN_CONTEXT = 3
+ATT_NAME_CHARS = 40
+
+
+def _attachment_names(raw, limit=ATT_NAMES_IN_CONTEXT, cap=ATT_NAME_CHARS):
+    """添付ファイル名の表示（純粋関数）。長い名前と件数は切る。"""
+    names = [n.strip() for n in str(raw or "").split(" / ") if n.strip()]
+    if not names:
+        return ""
+    shown = [n if len(n) <= cap else n[:cap] + "…" for n in names[:limit]]
+    rest = len(names) - len(shown)
+    return " / ".join(shown) + (f" ほか{rest}件" if rest > 0 else "")
 
 
 def build_context(rows, guild_id):
@@ -264,6 +303,11 @@ def build_context(rows, guild_id):
         if r["atts"] and not media:
             media.append(f"添付{r['atts']}")
         media_s = f" | 添付:{'/'.join(media)}" if media else ""
+        # ファイル名も出す（件数だけだと「あの資料」を名前で思い出せない。
+        # 中身は保存していないので名前と投稿リンクが頼り）
+        names = _attachment_names(r.get("att_names"))
+        if names:
+            media_s += f"（{names}）"
         link = jump_link(guild_id, r["channel_id"], r["id"])
         date = (r["created_at"] or "")[:10]
         lines.append(

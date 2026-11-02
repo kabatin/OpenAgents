@@ -120,30 +120,103 @@ def _agent_param(agent, tools):
     return {"name": agent["name"], "persona_files": persona, "role": role}
 
 
+# ---------------------------------------------------------------- 想起の計測
+# 採点は「回答が模範に似ているか」だけで、「根拠の投稿を引けたか」は
+# 測っていなかった（出典の項目もリンクの有無だけ）。curated の各問は根拠の投稿
+# （source_link＝決定・事実の出典）を持つので、答え直しの間にツールが返した結果に
+# その投稿が入っていたか＝引けたか、回答がそれを示したか＝引用したかを数える。
+# 追加のAI呼び出しは無い（答え直しの実行ログを読むだけ）。
+_MSG_ID_RE = re.compile(r"/(\d{15,21})(?:\D|$)")
+
+
+def expected_ids(row):
+    """模範Q&Aの根拠の投稿id（source_link の末尾）。無ければ空集合。"""
+    return set(_MSG_ID_RE.findall(str(row.get("source_link") or "") + " "))
+
+
+def retrieved_text(events):
+    """答え直しの間にツールが返した結果の本文をつなげる（純粋関数）。"""
+    parts = []
+    for ev in events or []:
+        if ev.get("type") != "user":
+            continue
+        for block in (ev.get("message") or {}).get("content") or []:
+            if not isinstance(block, dict) or block.get("type") != "tool_result":
+                continue
+            content = block.get("content")
+            if isinstance(content, str):
+                parts.append(content)
+            elif isinstance(content, list):
+                parts += [str(c.get("text") or "") for c in content
+                          if isinstance(c, dict) and c.get("type") == "text"]
+    return "\n".join(parts)
+
+
+def evidence_hit(row, events, answer):
+    """{"retrieved": 引けたか, "cited": 回答で示したか}。根拠の無い問は None。
+    events が無い（ツール無しの実行など）ときは引けたかを判定しない。"""
+    want = expected_ids(row)
+    if not want:
+        return {"retrieved": None, "cited": None}
+    text = retrieved_text(events) if events else None
+    return {"retrieved": (any(i in text for i in want)
+                          if text is not None else None),
+            "cited": any(i in (answer or "") for i in want)}
+
+
+def recall_summary(items):
+    """引けた率・引用した率（判定できた問だけで割る）。"""
+    out = {}
+    for key in ("retrieved", "cited"):
+        vals = [i[key] for i in items if i.get(key) is not None]
+        hits = sum(1 for v in vals if v)
+        out[key] = {"hits": hits, "n": len(vals),
+                    "rate": round(hits / len(vals), 2) if vals else None}
+    return out
+
+
+def production_variant(agent, *, inject_search=None, no_inject_facts=False,
+                       prompt=None):
+    """評価の構成。既定は本番（agents[].tool_loop）と同じにする（純粋関数）。
+    CLI の指定があればそちらを優先する。既定を固定値（v3・注入24件）にして
+    いると、誰も使っていない構成を測り、品質ゲートが本番の劣化を見ない。"""
+    from core.archive_tools import launch
+    tl = launch.normalize((agent or {}).get("tool_loop"))
+    return {"inject_search_hits": (inject_search if inject_search is not None
+                                   else tl["inject_search_hits"]),
+            "inject_facts": tl["inject_facts"] and not no_inject_facts,
+            "prompt_style": prompt or tl["prompt_style"]}
+
+
 def evaluate(db_path, agent, rows, *, tools=True, answer_model=None,
              grader_model=GRADER_MODEL_DEFAULT, guild_id="0",
              answer_fn=None, grade_fn=None, log=print,
-             inject_search_hits=None, inject_facts=True, prompt_style="v3"):
+             inject_search_hits=None, inject_facts=True, prompt_style="v3",
+             skills=None):
     """各行を答え直して採点する。answer_fn/grade_fn はテスト差し替え口。
-    Returns: {"items": [...], "mean": float, "n": int, "scored": int, ...}"""
+    skills は見せるツールの集合（既定は本番と同じ＝agent の設定から出す）。
+    Returns: {"items": [...], "mean": float, "n": int, "scored": int,
+              "recall": {...}, ...}"""
     from core import runner_answer
     from core.archive_tools import launch
     from core.archive_tools.context import ToolContext
 
+    if skills is None:
+        skills = launch.skills_for(agent)
     items = []
     for row in rows:
         started = time.monotonic()
         try:
             if answer_fn is not None:
                 answer, meta = answer_fn(row)
+                events = (meta or {}).get("events")
             else:
                 kw = {}
                 if tools:
                     ctx = ToolContext(
                         agent_id=agent["id"], actor_id="0", db_path=db_path,
                         guild_id=guild_id, channel_id=row.get("channel_id"),
-                        message_id=0, dry_run=True,
-                        skills=frozenset({"reminder", "action_tracking"}))
+                        message_id=0, dry_run=True, skills=skills)
                     plan = launch.build(ctx)
                     kw = {"mcp_config": plan.mcp_config,
                           "mcp_allow": plan.allow, "max_budget_usd": 0.5,
@@ -159,6 +232,7 @@ def evaluate(db_path, agent, rows, *, tools=True, answer_model=None,
                     row.get("channel_id"), history,
                     _agent_param(agent, tools), **kw)
                 answer, meta = res["answer"], res.get("meta") or {}
+                events = res.get("events")
             grade_raw = (grade_fn(row, answer) if grade_fn else
                          invoke_claude.invoke(
                              build_grade_prompt(row["question"], row["answer"],
@@ -175,6 +249,7 @@ def evaluate(db_path, agent, rows, *, tools=True, answer_model=None,
                 "tools_used": meta.get("tools_used"),
                 "cost_usd": meta.get("cost_usd"),
                 "duration_ms": meta.get("duration_ms"),
+                **evidence_hit(row, events, answer),
                 "elapsed_s": round(time.monotonic() - started, 1)})
             log(f"[{row['id']}] {items[-1]['kind']} score={grade['score']} "
                 f"tools={meta.get('tool_calls')} {grade['note']}")
@@ -187,6 +262,7 @@ def evaluate(db_path, agent, rows, *, tools=True, answer_model=None,
     mean = round(sum(scored) / len(scored), 2) if scored else None
     action_n = sum(1 for i in items if i.get("kind") == "action")
     return {"items": items, "mean": mean, "n": len(items),
+            "recall": recall_summary(items),
             "scored": len(scored), "action_excluded": action_n, "tools": tools,
             "variant": {"inject_search_hits": inject_search_hits,
                         "inject_facts": inject_facts,
@@ -276,9 +352,10 @@ def main(argv=None):
     ap.add_argument("--set", choices=["curated", "auto", "all"], default="curated",
                     help="curated=人が採用した模範Q&A（既定・無ければ auto へ）/ auto=👍自動捕獲 / all")
     ap.add_argument("--inject-search", type=int, default=None,
-                    help="事前注入する関連メッセージ上限（既定24・0で注入なし）")
+                    help="事前注入する関連メッセージ上限（既定は本番設定・0で注入なし）")
     ap.add_argument("--no-inject-facts", action="store_true")
-    ap.add_argument("--prompt", choices=["v3", "v4"], default="v3")
+    ap.add_argument("--prompt", choices=["v3", "v4"], default=None,
+                    help="プロンプト形式（既定は本番設定）")
     args = ap.parse_args(argv)
 
     cfg = app_config.load()
@@ -291,16 +368,23 @@ def main(argv=None):
     with db.connect(db_path) as conn:
         rows = load_rows(conn, agent["id"], args.set, args.kind)
     rows = select_rows(rows, n=args.n, seed=args.seed)
+    # 既定は本番と同じ構成・同じツールで測る
+    variant = production_variant(agent, inject_search=args.inject_search,
+                                 no_inject_facts=args.no_inject_facts,
+                                 prompt=args.prompt)
+    from core.archive_tools import launch
+    skills = launch.skills_for(agent)
     print(f"golden[{args.set}] {len(rows)}問 / tools={'off' if args.no_tools else 'on'} / "
-          f"inject={args.inject_search if args.inject_search is not None else 24}"
-          f"{'' if not args.no_inject_facts else ',no-facts'} / prompt={args.prompt} / "
+          f"inject={variant['inject_search_hits']}"
+          f"{'' if variant['inject_facts'] else ',no-facts'} / "
+          f"prompt={variant['prompt_style']} / skills={len(skills)} / "
           f"model={args.model or search.DEFAULT_MODEL}")
     report = evaluate(db_path, agent, rows, tools=not args.no_tools,
                       answer_model=args.model, grader_model=args.grader,
                       guild_id=str(cfg.get("guild_id") or "0"),
-                      inject_search_hits=args.inject_search,
-                      inject_facts=not args.no_inject_facts,
-                      prompt_style=args.prompt)
+                      inject_search_hits=variant["inject_search_hits"],
+                      inject_facts=variant["inject_facts"],
+                      prompt_style=variant["prompt_style"], skills=skills)
     report["config"] = {"n": args.n, "seed": args.seed, "agent": agent["id"],
                         "model": args.model or search.DEFAULT_MODEL}
     path = save_report(report)
@@ -308,8 +392,12 @@ def main(argv=None):
     if why:
         print(f"⚠️ 点検で赤: {why}（失敗と間違いの台帳へ・開発BOTへ起票されます）")
     cost = sum(i.get("cost_usd") or 0 for i in report["items"])
+    rc = report.get("recall") or {}
+    got, cit = rc.get("retrieved") or {}, rc.get("cited") or {}
     print(f"mean(info)={report['mean']} ({report['scored']} 採点・action "
           f"{report['action_excluded']}件は参考) "
+          f"根拠を引けた {got.get('hits')}/{got.get('n')}・"
+          f"引用 {cit.get('hits')}/{cit.get('n')} "
           f"cost=${cost:.2f} → {path}")
 
 

@@ -120,9 +120,14 @@ def build_notes(events):
     return notes, failed
 
 
-def summarize_for_review(events, max_items=8):
+REVIEW_HEAD_CHARS = 600   # 1結果あたり。120字だと一覧の id や日時が切れていた
+
+
+def summarize_for_review(events, max_items=10, head_chars=REVIEW_HEAD_CHARS):
     """自己採点（self_review）に渡す根拠の要約（純粋関数）。
-    使ったツール・引数・ヒット数・結果の冒頭を1行ずつ。無ければ空文字。"""
+    使ったツール・引数・ヒット数・結果の冒頭を1行ずつ。無ければ空文字。
+    結果を120字で切っていたため、ツールで確かめた値（リマインダーの次回日時・
+    起票id）まで「根拠のない断定」と減点されていた。"""
     lines = []
     for r in tool_results(events)[:max_items]:
         parsed = r["parsed"] or {}
@@ -130,7 +135,7 @@ def summarize_for_review(events, max_items=8):
         if r["ok"]:
             hits = parsed.get("hits")
             head = (parsed.get("evidence") or parsed.get("message") or "")
-            head = head.replace("\n", " ")[:120]
+            head = head.replace("\n", " ")[:head_chars]
             hit_s = f" hits={hits}" if hits is not None else ""
             lines.append(f"- {r['name']}({arg}) → ok{hit_s}: {head}")
         else:

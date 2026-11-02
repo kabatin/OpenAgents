@@ -18,13 +18,23 @@ MIN_ANSWER_LEN = 100   # 短い相槌まで採点しない（コスト・ノイ�
 _JSON_RE = re.compile(r"\{.*\}", re.S)
 
 
-def build_prompt(question, answer, evidence=None):
+EVIDENCE_CHARS = 6000
+CONTEXT_CHARS = 1500
+
+
+def build_prompt(question, answer, evidence=None, context=None):
     """自己採点プロンプト（純粋関数）。5=問題なし〜1=問題あり。
     evidence: 回答の途中で実際に使ったツールと結果の要約（v4 Phase 4）。
-    これが無いと「一覧を検索して答えた人数」まで「根拠のない断定」と誤採点する。"""
+    これが無いと「一覧を検索して答えた人数」まで「根拠のない断定」と誤採点する。
+    context: リプライ先・参照された投稿。無いと、文脈から正しく答えた内容
+    （通知への返信で「コードを出して」と頼まれた、など）まで断定扱いになる。"""
     ev = ""
+    if context:
+        ev += (f"【質問の文脈（リプライ先・参照された投稿）】\n"
+               f"{context[:CONTEXT_CHARS]}\n\n")
     if evidence:
-        ev = (f"【根拠（回答の途中で実際に使ったツールと結果）】\n{evidence[:1200]}\n\n"
+        ev += (f"【根拠（回答の途中で実際に使ったツールと結果）】\n"
+               f"{evidence[:EVIDENCE_CHARS]}\n\n"
               "上のツールで確認した事実に基づく言い切りは「根拠のない断定」と"
               "みなさない。逆に、チーム固有の事実をツールを使わずに断定していれば"
               "減点する。\n\n")
@@ -55,12 +65,14 @@ def parse(raw):
     return {"score": score, "issue": str(data.get("issue") or "")[:100]}
 
 
-def review(question, answer, *, model, invoke_fn=None, evidence=None):
+def review(question, answer, *, model, invoke_fn=None, evidence=None,
+           context=None):
     """1回の自己採点。失敗は None（best-effort・本流に影響させない）。"""
     fn = invoke_fn or (lambda p: invoke_claude.invoke(
         p, model=model, timeout=REVIEW_TIMEOUT_SEC,
         purpose="self_review").text)
     try:
-        return parse(fn(build_prompt(question, answer, evidence=evidence)))
+        return parse(fn(build_prompt(question, answer, evidence=evidence,
+                                     context=context)))
     except Exception:
         return None
