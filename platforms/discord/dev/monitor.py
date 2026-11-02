@@ -19,6 +19,7 @@ import os
 import re
 import subprocess
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Optional
 
 # --- 健全性の状態 -----------------------------------------------------------
@@ -26,6 +27,8 @@ OK = "ok"
 DOWN = "down"                    # プロセスが停止している（launchctlにPIDなし）
 DISCONNECTED = "disconnected"    # 生存しているがDiscord上でオフライン表示
 STALLED = "stalled"             # 生存・オンラインだがログが極端に長時間無音（要確認）
+AUTH = "auth"                    # claude の認証切れ＝ログインし直すまで全部失敗する
+FAILING = "failing"              # LLM呼び出しが連続失敗（認証以外）
 
 # 状態→日本語の見出し（通知文の組み立て用）
 _STATUS_LABEL = {
@@ -33,6 +36,8 @@ _STATUS_LABEL = {
     DOWN: "🔴 停止",
     DISCONNECTED: "🟡 接続切れ",
     STALLED: "🟠 無音（要確認）",
+    AUTH: "🔴 認証切れ",
+    FAILING: "🔴 連続失敗",
 }
 
 DEFAULT_STALL_AFTER_SEC = 1800   # 30分。ログ鮮度は補助なので長めに取る
@@ -94,6 +99,8 @@ def classify(sig: Signals, *, stall_after_sec: int = DEFAULT_STALL_AFTER_SEC) ->
 # ゲートウェイの瞬断（切れた→すぐ復帰）で🟡/✅が往復するspamを抑える。
 # DOWN（プロセス停止）はlaunchctlの確実な信号なので即時確定する。
 CONFIRM_AFTER = 2
+# 即確定する状態（launchctl / 認証エラーは確実な信号なので様子見しない）
+IMMEDIATE = (DOWN, AUTH)
 
 
 def confirm(candidate: Optional[str], streak: int, observed: str,
@@ -103,13 +110,77 @@ def confirm(candidate: Optional[str], streak: int, observed: str,
     candidate/streak: 前回までの確定待ち状態と連続観測回数（呼び出し側が保持）。
     戻り値 (candidate, streak, confirmed)。confirmed は確定した状態 or None（未確定）。
     """
-    if observed == DOWN:
+    if observed in IMMEDIATE:
         return (observed, need, observed)
     if observed == candidate:
         streak += 1
     else:
         candidate, streak = observed, 1
     return (candidate, streak, observed if streak >= need else None)
+
+
+# --- 頭脳（LLM呼び出し）の健全性 -------------------------------------------
+# claude の認証が切れると、回答・要約など**全部**の LLM 呼び出しが失敗する。それでも
+# プロセスも Discord 接続も正常なので、上の監視は全部緑のまま誰も気づかない。
+# 台帳（llm_calls）の直近の成否を見て、頭脳が止まっていることを知らせる。
+BRAIN = "エージェントの頭脳（LLM呼び出し）"
+BRAIN_SAMPLE = 10            # 直近いくつ見るか
+BRAIN_FAIL_STREAK = 3        # 認証以外は3連続で確定（単発の時間切れで騒がない）
+BRAIN_STALE_SEC = 6 * 3600   # 最後の呼び出しがこれより古ければ判定しない（＝黙る）
+# 認証・権限の失敗（人がログインし直すまで直らない＝1回でも知らせる）
+_AUTH_RE = re.compile(
+    r"authenticat|OAuth|credential|Unauthorized|not logged in|\b40[13]\b", re.I)
+
+
+def _parse_stamp(text):
+    try:
+        return datetime.fromisoformat(str(text)[:19])
+    except (TypeError, ValueError):
+        return None
+
+
+def brain_health(calls, *, now, stale_sec: int = BRAIN_STALE_SEC,
+                 streak: int = BRAIN_FAIL_STREAK) -> Optional[Health]:
+    """LLM呼び出しの台帳から頭脳の健全性を判定（純粋関数・テスト対象）。
+
+    calls: 新しい順の [{"purpose", "ok", "error", "created_at"}]。now は created_at と
+    同じ基準（naive JST）。戻り値 None は「判定しない」（記録が無い・古い＝呼び出し
+    自体が無い時間帯に騒がない）。認証エラーは1件でも異常、それ以外は streak 連続で異常。"""
+    if not calls:
+        return None
+    newest = _parse_stamp(calls[0].get("created_at"))
+    if newest is None or (now - newest).total_seconds() > stale_sec:
+        return None
+    failed = []
+    for call in calls:
+        if call.get("ok"):
+            break
+        failed.append(call)
+    if not failed:
+        return Health(OK, "LLM呼び出しは通っています")
+    auth = next((c for c in failed
+                 if _AUTH_RE.search(str(c.get("error") or ""))), None)
+    if auth is not None:
+        return Health(AUTH, f"claude の認証が切れています（{_err_line(auth)}）。"
+                            "ログインし直すまで、回答・要約など全部のLLM呼び出しが失敗します")
+    if len(failed) >= streak:
+        return Health(FAILING, f"LLM呼び出しが{len(failed)}回連続で失敗しています"
+                               f"（{_err_line(failed[0])}）")
+    return Health(OK, f"失敗{len(failed)}回（{streak}連続までは様子見）")
+
+
+def _err_line(call):
+    purpose = str(call.get("purpose") or "?")
+    error = " ".join(str(call.get("error") or "不明").split())[:120]
+    return f"{purpose}: {error}"
+
+
+def should_notify_brain(prev_status: Optional[str], new_status: str) -> bool:
+    """頭脳は初回観測でも異常なら知らせる（純粋関数）。開発BOTの再起動時に既に
+    頭脳が止まっている場合を取りこぼさないため（通常のターゲットは初回は黙る）。"""
+    if prev_status is None:
+        return new_status != OK
+    return prev_status != new_status
 
 
 def should_notify(prev_status: Optional[str], new_status: str) -> bool:

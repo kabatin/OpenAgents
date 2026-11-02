@@ -232,6 +232,34 @@ def _resolve_people(conn, names):
     return (" ".join(mentions) or None), (" ".join(labels) or None), unresolved
 
 
+_EVERYONE = ("everyone", "全員", "全体")
+
+
+def _resolve_groups(conn, ctx, names):
+    """全員・ロール宛てを先に取り出す → ((mention, label) or None, 注記, 残りの名前)。
+    大勢に通知が飛ぶので管理者だけ（ツールからは Discord のメンション権限を確かめられない）。
+    ロール名は archiver が書き出した guild_roles から引く（同名複数は解決しない）。"""
+    mentions, labels, rest, refused = [], [], [], []
+    for name in names:
+        if name.lower() in _EVERYONE:
+            target = ("@everyone", "@everyone")
+        else:
+            rows = db.roles_by_name(conn, name)
+            target = ((f"<@&{rows[0][0]}>", f"@{rows[0][1]}")
+                      if len(rows) == 1 else None)
+        if target is None:
+            rest.append(name)
+        elif not ctx.is_admin:
+            refused.append(target[1])
+        elif target[0] not in mentions:
+            mentions.append(target[0])
+            labels.append(target[1])
+    note = (f"-# ⚠️ {'・'.join(refused)} への通知は管理者だけ設定できます"
+            "（その宛先は外しました）") if refused else None
+    group = (" ".join(mentions), " ".join(labels)) if mentions else None
+    return group, note, rest
+
+
 def _resolve_channel(conn, ctx, token):
     """#名前 / <#id> → (channel_id, label, note)。発言者が投稿したことのある ch だけ
     （見えない ch への代理投稿を防ぐ近似。guild を持たないサーバ側の判定）。"""
@@ -282,10 +310,9 @@ def add_reminder(ctx, args):
         to_raw = str(args.get("to") or "")
         names = [n.strip().lstrip("@") for n in _TO_SPLIT_RE.split(to_raw)
                  if n.strip().lstrip("@")]
-        if any(n.lower() in ("everyone", "全員", "全体") for n in names):
-            notes.append("-# ⚠️ 全員/ロール宛はメンション権限を持つ人だけ"
-                         "設定できます。依頼者宛にしました")
-            names = []
+        group, gnote, names = _resolve_groups(conn, ctx, names)
+        if gnote:
+            notes.append(gnote)
         if names:
             mention, label, unresolved = _resolve_people(conn, names)
             if mention is None:
@@ -294,6 +321,9 @@ def add_reminder(ctx, args):
             elif unresolved:
                 notes.append("-# ⚠️ 宛先のうち「" + "、".join(unresolved)
                              + f"」は見つかりませんでした（{label} には届きます）")
+        if group:
+            mention = " ".join(m for m in (group[0], mention) if m)
+            label = " ".join(m for m in (group[1], label) if m)
         user_name = _actor_name(conn, ctx)
     entry, err = reminders.add_reminder(
         channel_id=deliver, user_id=ctx.actor_id, user_name=user_name,
@@ -314,15 +344,16 @@ register(Tool(
     description=(
         "リマインダーを登録する。due は 'YYYY-MM-DD HH:MM'（相対表現は自分で"
         "絶対日時に直す。現在時刻は文脈にある）。repeat: once/daily/weekly/"
-        "monthly/monthly_end。to は人名（カンマ区切り）、channel は '#名前' で"
-        "通知先チャンネル。省略時は依頼者宛・このチャンネル。"
+        "monthly/monthly_end。to は人名・ロール名・「全員」（カンマ区切り。ロールと"
+        "全員は管理者だけ）、channel は '#名前' で通知先チャンネル。"
+        "省略時は依頼者宛・このチャンネル。"
         "「リマインドしておく」と言うなら必ず呼び、結果の登録行を確認する。"),
     input_schema={"type": "object", "properties": {
         "content": {"type": "string"},
         "due": {"type": "string", "description": "YYYY-MM-DD HH:MM"},
         "repeat": {"type": "string",
                    "enum": list(reminders.REPEATS)},
-        "to": {"type": "string", "description": "宛先の人名（任意）"},
+        "to": {"type": "string", "description": "宛先の人名・ロール名・全員（任意）"},
         "channel": {"type": "string", "description": "#チャンネル名（任意）"}},
         "required": ["content", "due"]},
     kind="write", handler=add_reminder, skill="reminder"))
@@ -422,6 +453,41 @@ register(Tool(
         "content": {"type": "string"}},
         "required": ["id", "due"]},
     kind="write", handler=reschedule_reminder, skill="reminder"))
+
+
+def move_reminder(ctx, args):
+    """リマインダーの通知先チャンネルだけを付け替える（宛先・日時・繰り返しはそのまま）。"""
+    try:
+        rid = int(args.get("id") or 0)
+    except (TypeError, ValueError):
+        rid = 0
+    entry, err = _own_reminder(ctx, rid)
+    if err:
+        return err
+    with db.connect(ctx.db_path) as conn:
+        cid, label, note = _resolve_channel(conn, ctx, args.get("channel"))
+    if cid is None:
+        reason = (note or "").replace("このチャンネルに通知します", "付け替えていません")
+        return _ng("チャンネルを特定できない・書き込めない", reason)
+    reminders.set_channel(rid, cid, label)
+    line = reminders.format_entry_line(reminders.find_entry(rid))
+    return _ok(f"リマインダー id={rid} の通知先を {label} に付け替えた: {line}",
+               f"-# 登録: {line}", id=rid)
+
+
+register(Tool(
+    name="move_reminder", label="リマインダーの通知先の付け替え",
+    description=(
+        "リマインダーの通知先チャンネルを付け替える。宛先（人・ロールのメンション）・"
+        "日時・繰り返し・文面はそのまま残る（取り消して登録し直すと、ロール宛てが"
+        "引き継げないので、通知先だけ変えるときはこれを使う）。channel は '#名前'。"
+        "依頼者が書き込んだことのあるチャンネルだけ（管理者はどこでも）。"
+        "本人か管理者のみ。id は list_reminders で確認する。"),
+    input_schema={"type": "object", "properties": {
+        "id": {"type": "integer"},
+        "channel": {"type": "string", "description": "#チャンネル名"}},
+        "required": ["id", "channel"]},
+    kind="write", handler=move_reminder, skill="reminder"))
 
 
 def cancel_reminder(ctx, args):

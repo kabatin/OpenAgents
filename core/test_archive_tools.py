@@ -401,6 +401,99 @@ class WriteToolsTest(unittest.TestCase):
         self.assertTrue(honesty.SUCCESS_DEEDS["remind"].search(r["evidence"]))
         self.assertIn("shift_reminder", honesty.CLAIM_TOOLS["remind"])
 
+    def _posted_channel(self, cid=8, name="kintai"):
+        with db.connect(self.path) as conn:
+            db.upsert_channel(conn, id=cid, name=name, type="text")
+            db.insert_message(conn, id=900 + cid, channel_id=cid, author_id=100,
+                              content="x", created_at="2026-09-02T10:00")
+
+    def test_move_reminder_keeps_role_mention_and_schedule(self):
+        """通知先だけ付け替える（作り直すとロール宛てが引き継げない）。"""
+        from datetime import datetime
+        self._posted_channel()
+        e, _ = reminders.add_reminder("6", "100", "依頼者", "勤怠表の入力",
+                                      datetime(2099, 11, 30, 18, 0), "monthly_end",
+                                      mention="<@&777>", mention_label="@staff")
+        r = registry.dispatch(self._ctx(), "move_reminder",
+                              {"id": e["id"], "channel": "#kintai"})
+        self.assertTrue(r["ok"], r)
+        after = reminders.find_entry(e["id"])
+        self.assertEqual((after["channel_id"], after["channel_label"]), ("8", "#kintai"))
+        self.assertEqual((after["mention"], after["due"], after["repeat"],
+                          after["content"]),
+                         ("<@&777>", "2099-11-30T18:00", "monthly_end", "勤怠表の入力"))
+        self.assertTrue(honesty.SUCCESS_DEEDS["remind"].search(r["evidence"]))
+        self.assertIn("move_reminder", honesty.CLAIM_TOOLS["remind"])
+
+    def test_move_reminder_refuses_unknown_or_unposted_channel(self):
+        rid = self._weekly()
+        r = registry.dispatch(self._ctx(), "move_reminder", {"id": rid, "channel": "#nope"})
+        self.assertFalse(r["ok"])
+        self.assertIn("付け替えていません", r["evidence"])
+        r = registry.dispatch(self._ctx(), "move_reminder", {"id": rid, "channel": "#general"})
+        self.assertFalse(r["ok"])                     # 書き込んだことのない ch
+        self.assertEqual(reminders.find_entry(rid)["channel_id"], "6")
+        ok = registry.dispatch(self._ctx(is_admin=True), "move_reminder",
+                               {"id": rid, "channel": "#general"})
+        self.assertTrue(ok["ok"], ok)                 # 管理者はどこでも
+        self.assertEqual(reminders.find_entry(rid)["channel_id"], "5")
+
+    def test_move_reminder_only_owner_or_admin(self):
+        rid = self._weekly(user="200")
+        r = registry.dispatch(self._ctx(), "move_reminder", {"id": rid, "channel": "#friday"})
+        self.assertFalse(r["ok"])
+        self.assertEqual(reminders.find_entry(rid)["channel_id"], "6")
+
+    def _role(self, rid=777, name="staff"):
+        with db.connect(self.path) as conn:
+            db.replace_guild_roles(conn, [(rid, name)], "2026-10-31T10:00")
+
+    def test_replace_guild_roles_replaces_whole_list(self):
+        self._role(777, "staff")
+        with db.connect(self.path) as conn:
+            db.replace_guild_roles(conn, [(778, "crew"), (779, "crew")], "x")
+            self.assertEqual(db.roles_by_name(conn, "staff"), [])
+            self.assertEqual(len(db.roles_by_name(conn, "crew")), 2)
+
+    def test_add_reminder_to_role_for_admin(self):
+        """ツールに移したときに抜けたロール宛て。"""
+        self._role()
+        r = registry.dispatch(self._ctx(is_admin=True), "add_reminder", {
+            "content": "勤怠表", "due": "2099-11-30 18:00", "repeat": "monthly_end",
+            "to": "staff"})
+        self.assertTrue(r["ok"], r)
+        e = reminders.find_entry(r["id"])
+        self.assertEqual((e["mention"], e["mention_label"]), ("<@&777>", "@staff"))
+
+    def test_add_reminder_to_everyone_for_admin(self):
+        r = registry.dispatch(self._ctx(is_admin=True), "add_reminder", {
+            "content": "x", "due": "2099-11-30 18:00", "to": "全員"})
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(reminders.find_entry(r["id"])["mention"], "@everyone")
+
+    def test_add_reminder_role_and_everyone_refused_for_non_admin(self):
+        self._role()
+        for to in ("staff", "全員"):
+            r = registry.dispatch(self._ctx(), "add_reminder", {
+                "content": "x", "due": "2099-11-30 18:00", "to": to})
+            self.assertTrue(r["ok"], r)
+            self.assertIn("管理者だけ", r["evidence"])
+            self.assertIsNone(reminders.find_entry(r["id"])["mention"])
+
+    def test_add_reminder_role_plus_person(self):
+        self._role()
+        r = registry.dispatch(self._ctx(is_admin=True), "add_reminder", {
+            "content": "x", "due": "2099-11-30 18:00", "to": "staff, 担当者"})
+        self.assertEqual(reminders.find_entry(r["id"])["mention"], "<@&777> <@200>")
+
+    def test_add_reminder_ambiguous_role_not_resolved(self):
+        with db.connect(self.path) as conn:
+            db.replace_guild_roles(conn, [(1, "dup"), (2, "dup")], "x")
+        r = registry.dispatch(self._ctx(is_admin=True), "add_reminder", {
+            "content": "x", "due": "2099-11-30 18:00", "to": "dup"})
+        self.assertTrue(r["ok"], r)
+        self.assertIsNone(reminders.find_entry(r["id"])["mention"])
+
     def test_shift_reminder_only_owner_or_admin(self):
         rid = self._weekly(user="200")
         r = registry.dispatch(self._ctx(), "shift_reminder", {

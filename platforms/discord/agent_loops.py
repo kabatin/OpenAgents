@@ -143,7 +143,7 @@ class AgentLoopsMixin:
         target_roles = [discord.Object(id=int(i))
                         for i in re.findall(r"<@&(\d+)>", mention)]
         allowed = discord.AllowedMentions(
-            everyone=(mention == "@everyone"),
+            everyone=("@everyone" in mention.split()),
             roles=target_roles,
             users=True)
         await channel.send(text, allowed_mentions=allowed)

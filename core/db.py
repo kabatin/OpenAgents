@@ -754,6 +754,14 @@ CREATE TABLE IF NOT EXISTS sheet_registry (
 -- aliasはエージェント内で一意（activeなもののみ。解除→再登録を許す）
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sheet_alias
     ON sheet_registry(agent_id, alias) WHERE active=1;
+
+-- サーバーのロール一覧。ツールは Discord につながっていない別プロセスで動くため、
+-- ロール名→id を引けるよう archiver が起動時とロールの変更時に書き出す（リマインダーのロール宛て）
+CREATE TABLE IF NOT EXISTS guild_roles (
+    id          INTEGER PRIMARY KEY,
+    name        TEXT,
+    updated_at  TEXT
+);
 """
 
 
@@ -1785,6 +1793,15 @@ def write_quota_allow(conn, scope, user_id, day, limit):
         (scope, user_id, day))
     conn.execute("DELETE FROM write_quota WHERE day < ?", (day,))
     return True
+
+
+def recent_llm_calls(conn, limit=10):
+    """直近のLLM呼び出し（新しい順）。頭脳の健全性判定（開発BOTの監視）の入力。"""
+    rows = conn.execute(
+        """SELECT purpose, ok, error, created_at FROM llm_calls
+           ORDER BY id DESC LIMIT ?""", (limit,)).fetchall()
+    return [{"purpose": r[0], "ok": bool(r[1]), "error": r[2],
+             "created_at": r[3]} for r in rows]
 
 
 def llm_daily(conn, since):
@@ -3662,3 +3679,18 @@ def stats(conn):
     rules = conn.execute("SELECT COUNT(*) FROM rules WHERE active=1").fetchone()[0]
     return {"messages": msg, "attachments": att, "channels": ch,
             "active_rules": rules}
+
+
+# ---------------------------------------------------------- guild roles
+
+def replace_guild_roles(conn, roles, updated_at):
+    """ロール一覧を丸ごと置き換える。roles は [(id, name)]（@everyone は除く）。"""
+    conn.execute("DELETE FROM guild_roles")
+    conn.executemany("INSERT INTO guild_roles(id, name, updated_at) VALUES(?,?,?)",
+                     [(int(i), n, updated_at) for i, n in roles])
+
+
+def roles_by_name(conn, name):
+    """名前の一致するロール [(id, name)]（同名複数もそのまま返す）。"""
+    return conn.execute("SELECT CAST(id AS TEXT), name FROM guild_roles WHERE name=?",
+                        (name,)).fetchall()

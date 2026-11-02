@@ -117,5 +117,36 @@ class BackfillWindowTest(unittest.TestCase):
         self.assertEqual(ch.calls, [{"after": a, "before": None}])
 
 
+class SyncRolesTest(unittest.TestCase):
+    """ロール一覧の書き出し（ツールが別プロセスでロール名を引くため）。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.tmp.name, "t.db")
+        db.init_db(self.path)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    @staticmethod
+    def _role(rid, name, default=False):
+        return NS(id=rid, name=name, is_default=lambda: default)
+
+    def test_writes_roles_except_everyone(self):
+        guild = NS(roles=[self._role(1, "@everyone", default=True),
+                          self._role(777, "staff")])
+        archiving.sync_roles(guild, self.path)
+        with db.connect(self.path) as conn:
+            self.assertEqual(db.roles_by_name(conn, "staff"), [("777", "staff")])
+            self.assertEqual(db.roles_by_name(conn, "@everyone"), [])
+
+    def test_resync_drops_deleted_role(self):
+        archiving.sync_roles(NS(roles=[self._role(777, "staff")]), self.path)
+        archiving.sync_roles(NS(roles=[self._role(778, "crew")]), self.path)
+        with db.connect(self.path) as conn:
+            self.assertEqual(db.roles_by_name(conn, "staff"), [])
+            self.assertEqual(len(db.roles_by_name(conn, "crew")), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

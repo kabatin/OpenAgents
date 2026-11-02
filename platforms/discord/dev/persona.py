@@ -20,6 +20,20 @@ def startup(names, interval_sec):
             f"{interval_sec}秒ごとにしっかり見張っておきますね〜✨")
 
 
+def brain_alert(status, detail):
+    """頭脳（LLM呼び出し）の通知。異常時は人がやることまで書く
+    （この文は純粋な文字列＝頭脳が止まっていても出せる）。"""
+    if status == monitor.AUTH:
+        return (f"🔴 **エージェントの頭脳が止まってます！** {detail}\n"
+                "ターミナルで `claude` を開いて `/login` してもらえますか…！🙏")
+    if status == monitor.FAILING:
+        return (f"🔴 **エージェントの頭脳が止まってます！** {detail}\n"
+                "原因を見てきますね🔧")
+    if status == monitor.OK:
+        return "✅ エージェントの頭脳、復活です〜！LLM呼び出しが通ってます🎉"
+    return f"{monitor.BRAIN}: {status}"
+
+
 def alert(name, status):
     """状態遷移の通知（つむぎの一言）。"""
     if status == monitor.DOWN:

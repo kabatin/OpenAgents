@@ -129,7 +129,7 @@ LINK_RE = re.compile(r"https?://(?:\w+\.)?discord(?:app)?\.com/channels/")
 # ここに名前を1つ足すだけで済む（DEEDS の正規表現は旧マーカー経路の保険として残す）
 CLAIM_TOOLS = {
     "remind": {"add_reminder", "cancel_reminder", "shift_reminder",
-               "reschedule_reminder"},
+               "reschedule_reminder", "move_reminder"},
     "rule": {"save_rule", "cancel_rule"},
     "capability": {"request_capability"},
     "action": {"update_task"},

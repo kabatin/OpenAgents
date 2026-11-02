@@ -13,6 +13,7 @@ import discord
 
 from core import archive_window
 from core import db
+from core import reminders
 
 
 def store_message(conn, message):
@@ -142,3 +143,11 @@ async def backfill(guild, db_path, since=None):
             print(f"backfilled #{channel}: +{count}")
 
     print(f"backfill done: +{total} messages")
+
+
+def sync_roles(guild, db_path):
+    """ロール一覧を DB へ丸ごと書き出す（@everyone は除く）。ツールは Discord に
+    つながっていない別プロセスで動くので、リマインダーのロール宛てはここから引く。"""
+    roles = [(r.id, r.name) for r in guild.roles if not r.is_default()]
+    with db.connect(db_path) as conn:
+        db.replace_guild_roles(conn, roles, reminders.fmt(reminders.now_jst()))

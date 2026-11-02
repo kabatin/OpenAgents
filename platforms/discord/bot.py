@@ -261,6 +261,7 @@ class AgentClient(ToolLoopMixin, SkillHooksMixin, MarkerActionsMixin,
         if guild is None:
             print(f"[{self.agent['id']}] guild {GUILD_ID} not found")
             return
+        self._sync_roles(guild)
         print(f"backfilling guild: {guild.name}")
         # このアーカイブがどのサーバーのものかを覚える（起動時の突き合わせ用）
         with db.connect(DB_PATH) as conn:
@@ -1073,6 +1074,26 @@ class AgentClient(ToolLoopMixin, SkillHooksMixin, MarkerActionsMixin,
                 await notice.delete()
             except Exception:
                 pass
+
+    def _sync_roles(self, guild):
+        """ロール一覧を DB へ（ツールが別プロセスでロール名を引くため）。失敗しても起動は止めない。"""
+        try:
+            archiving.sync_roles(guild, DB_PATH)
+        except Exception as e:
+            print(f"[{self.agent['id']}] role sync failed: {e}")
+
+    async def _on_role_change(self, guild):
+        if self.is_archiver and guild is not None and guild.id == GUILD_ID:
+            await asyncio.to_thread(self._sync_roles, guild)
+
+    async def on_guild_role_create(self, role):
+        await self._on_role_change(role.guild)
+
+    async def on_guild_role_delete(self, role):
+        await self._on_role_change(role.guild)
+
+    async def on_guild_role_update(self, before, after):
+        await self._on_role_change(after.guild)
 
     async def on_message_edit(self, before, after):
         if not self.is_archiver:

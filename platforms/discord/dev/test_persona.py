@@ -72,5 +72,16 @@ class SanitizeReplyTest(unittest.TestCase):
         self.assertIn("4", persona.deploy_rolled_back(4))
 
 
+class BrainAlertTest(unittest.TestCase):
+    def test_auth_asks_for_login(self):
+        msg = persona.brain_alert(monitor.AUTH, "detail-x")
+        self.assertIn("detail-x", msg)
+        self.assertIn("/login", msg)
+
+    def test_failing_and_recovery(self):
+        self.assertIn("detail-y", persona.brain_alert(monitor.FAILING, "detail-y"))
+        self.assertIn("✅", persona.brain_alert(monitor.OK, ""))
+
+
 if __name__ == "__main__":
     unittest.main()

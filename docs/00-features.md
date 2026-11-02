@@ -134,7 +134,7 @@
 
 | 機能 | 説明 |
 |---|---|
-| ⚪ 開発BOT（macOS / Linux のみ） | Discordで開発を指示 → 隔離環境で実装しテストを回す → **人間の👍で本番反映**。実装後は別のコンテキストが起票と差分を照合して承認者に一言添え、中核ファイルに触れる変更には 🧠 の警告を出す。乗っ取り訓練の突破から来た起票では、反映前に直した隔離環境で本番と同じ点検をやり直し、結果を👍待ちの要約の先頭に貼る（突破が残っていれば「👍しないでください」）。回答品質の急落から来た起票は、調べた結果「直すものは無い」と判断すれば差分なしで閉じ、理由を書き残す（管理画面では「調べて変更なし」）。書き換えられるのは `core/` `platforms/` `integrations/` `dashboard/` `docs/` だけで、開発BOT自身のコード（承認ゲート・安全弁）は書き換えも反映もできない。👍待ちの提案は7日で保留にして次へ進む。ジョブごとの実行ログは `state/logs/dev-jobs/` に残る。他BOTの死活監視・週次開発レポート付き |
+| ⚪ 開発BOT（macOS / Linux のみ） | Discordで開発を指示 → 隔離環境で実装しテストを回す → **人間の👍で本番反映**。実装後は別のコンテキストが起票と差分を照合して承認者に一言添え、中核ファイルに触れる変更には 🧠 の警告を出す。乗っ取り訓練の突破から来た起票では、反映前に直した隔離環境で本番と同じ点検をやり直し、結果を👍待ちの要約の先頭に貼る（突破が残っていれば「👍しないでください」）。回答品質の急落から来た起票は、調べた結果「直すものは無い」と判断すれば差分なしで閉じ、理由を書き残す（管理画面では「調べて変更なし」）。書き換えられるのは `core/` `platforms/` `integrations/` `dashboard/` `docs/` だけで、開発BOT自身のコード（承認ゲート・安全弁）は書き換えも反映もできない。👍待ちの提案は7日で保留にして次へ進む。ジョブごとの実行ログは `state/logs/dev-jobs/` に残る。他BOTの死活監視（エージェントの LLM 呼び出しが認証切れや連続失敗で止まったときも知らせる）・週次開発レポート付き |
 | ⚪ 議事録BOT | ボイスチャンネルを録音 → 話者別に文字起こし → 議事録を自動投稿。話者名の名寄せ付き |
 
 ## 運用
@@ -156,7 +156,7 @@ Claude Code を選んでいるときだけ使えます。
 | 種別 | ツール |
 |---|---|
 | 読む | search_messages（過去ログ全文検索）/ get_facts（事実台帳）/ get_decisions（決定台帳）/ list_reminders / list_tasks（A=議事録TODO・H=宿題・R=リマインダー）/ lookup_terms（固有名詞辞書）/ recall_lessons（自分の教訓） |
-| 書く | save_fact・cancel_fact / save_rule・cancel_rule / add_reminder・cancel_reminder / shift_reminder（定期リマインダーの曜日・時刻を一時的または恒久的に変える。再開日もコードで計算）・reschedule_reminder（次回だけ動かす） / update_task（done・cancel・due・open）/ save_glossary・save_term / request_capability / save_lesson / set_proactive_quota（管理者） |
+| 書く | save_fact・cancel_fact / save_rule・cancel_rule / add_reminder・cancel_reminder / shift_reminder（定期リマインダーの曜日・時刻を一時的または恒久的に変える。再開日もコードで計算）・reschedule_reminder（次回だけ動かす）・move_reminder（通知先チャンネルだけ付け替える） / update_task（done・cancel・due・open）/ save_glossary・save_term / request_capability / save_lesson / set_proactive_quota（管理者） |
 
 スキルを持たないツールは一覧に出ず、Bot 起点の発言とシャドー中は書き込みが見えない。
 権限（本人・管理者・上限）はすべてサーバ側のコードで判定する。

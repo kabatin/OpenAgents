@@ -37,6 +37,7 @@ from core import db
 from core import heartbeat
 from core import invoke_claude
 from core import paths
+from core import reminders
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 # 設定・DBはリポジトリ共通のものを見る（tokenは dev_bot.token に貼る）
@@ -185,6 +186,10 @@ class DevBot(discord.Client):
                 await self._check_all()
             except Exception as e:                       # 1回の失敗でループを殺さない
                 print(f"monitor loop error: {e}")
+            try:
+                await self._check_brain()
+            except Exception as e:
+                print(f"brain check error: {e}")
             tick += 1
             if tick % 15 == 0:      # 約15分ごと: カナリア監視＋起票の拾い上げ
                 try:
@@ -278,6 +283,35 @@ class DevBot(discord.Client):
         guild = self.get_guild(self.guild_id)
         return guild.members if guild else []
 
+    async def _check_brain(self):
+        """頭脳（LLM呼び出し）の健全性。認証切れは1回でも即通知する。
+        通知文は純粋な文字列＝LLMを使わない（頭脳が止まっていても知らせられる）。"""
+        calls = await asyncio.to_thread(self._recent_llm_calls)
+        health = monitor.brain_health(calls, now=reminders.now_jst())
+        if health is None:
+            return                      # 呼び出しの記録が無い/古い＝判定しない
+        cand, streak = self._pending.get(monitor.BRAIN, (None, 0))
+        cand, streak, confirmed = monitor.confirm(cand, streak, health.status)
+        self._pending[monitor.BRAIN] = (cand, streak)
+        if confirmed is None:
+            return
+        if monitor.should_notify_brain(self._prev.get(monitor.BRAIN), confirmed):
+            await self._notify(persona.brain_alert(confirmed, health.detail))
+        self._prev[monitor.BRAIN] = confirmed
+
+    @staticmethod
+    def _recent_llm_calls():
+        with db.connect(DB_PATH) as conn:
+            return db.recent_llm_calls(conn, monitor.BRAIN_SAMPLE)
+
+    @staticmethod
+    def _brain_line(calls):
+        """!status 用の1行（判定できないときは「記録なし」と正直に出す）。"""
+        health = monitor.brain_health(calls, now=reminders.now_jst())
+        if health is None:
+            return f"⚪ **{monitor.BRAIN}**: 直近の呼び出しの記録がありません"
+        return monitor.format_notice(monitor.BRAIN, health)
+
     async def _notify(self, text):
         """AI開発室へ通知。送れたら Message を返す（呼び出し側は通常無視でよい）。"""
         print(f"[通知] {text}")               # 監査/実証用（送信内容を必ずログに残す）
@@ -312,6 +346,8 @@ class DevBot(discord.Client):
         if content in ("!status", "!監視"):
             async with message.channel.typing():
                 lines = await self._check_all(force=True)
+                lines.append(self._brain_line(
+                    await asyncio.to_thread(self._recent_llm_calls)))
                 dirty = await asyncio.to_thread(deploy.dirty_files)
             if dirty:
                 lines.append(f"⚠️ mainに未コミット変更 {len(dirty)}件"

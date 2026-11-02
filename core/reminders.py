@@ -252,6 +252,19 @@ def set_due(rid, due, content=None):
     return False
 
 
+def set_channel(rid, channel_id, channel_label):
+    """アクティブなリマインダーの通知先チャンネルを付け替える（宛先・日時・繰り返し・
+    文面はそのまま）。成功で True。取り消して作り直すとロール宛てが引き継げないため。"""
+    state = _load_state()
+    for r in state["reminders"]:
+        if r["id"] == int(rid) and r["status"] == "active":
+            r["channel_id"] = str(channel_id)
+            r["channel_label"] = channel_label
+            _save_state(state)
+            return True
+    return False
+
+
 def find_entry(rid):
     """id指定で1件（statusを問わない・診断用）。無ければ None。"""
     state = _load_state()
