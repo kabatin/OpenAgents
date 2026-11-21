@@ -80,6 +80,15 @@ class SaveExtractedTest(_DbCase):
         self.assertEqual((row["source_message_id"], row["channel_id"],
                           row["stated_by"]), (7, 5, "ユーザー"))
 
+    def test_marked_as_picked_up_not_taught(self):
+        """人が教えた事実（conversation）と、エージェントが会話から拾った事実を
+        見分けられるようにする＝画面で「自分で拾ったもの」だけ見直せる。"""
+        self._save([{"topic": "送料", "fact": "国内送料は800円"}])
+        with db.connect(self.path) as conn:
+            kind = conn.execute("SELECT source_kind FROM facts").fetchone()[0]
+        self.assertEqual(kind, facts.SOURCE_EXTRACTED)
+        self.assertNotEqual(kind, "conversation")
+
     def test_same_topic_supersedes_even_with_different_wording(self):
         self._save([{"topic": "ショップの送料", "fact": "国内送料は900円"}])
         self._save([{"topic": "ショップ送料", "fact": "国内送料は800円に変更"}])

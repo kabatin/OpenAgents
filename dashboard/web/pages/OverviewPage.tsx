@@ -24,6 +24,7 @@ import {
   STATUS_TONE,
 } from "../lib/format.ts";
 import type { ActivityRow, AgentSummary, ServiceStatus } from "../lib/types.ts";
+import { RequestCard } from "./data/RequestPanels.tsx";
 
 function QuotaBar({ used, limit }: { used: number; limit: number }) {
   const pct = limit === 0 ? 0 : Math.min(100, (used / limit) * 100);
@@ -468,6 +469,8 @@ export function OverviewPage({
               </ul>
             </Card>
           )}
+
+          <RequestCard />
 
           <Card title="今日の合計">
             <div className="grid grid-cols-2 gap-4 p-4">

@@ -11,12 +11,14 @@ import { PersonasPanel, SheetsPanel } from "./data/LinkPanels.tsx";
 import { BgTasksPanel } from "./data/BgTasksPanel.tsx";
 import { LlmPanel } from "./data/LlmPanel.tsx";
 import { MissesPanel } from "./data/MissesPanel.tsx";
-import { RulesPanel, TermsPanel } from "./data/MemoryPanels.tsx";
+import { FactsPanel, RulesPanel, TermsPanel } from "./data/MemoryPanels.tsx";
+import { RequestsPanel } from "./data/RequestPanels.tsx";
 import { RemindersPanel, TasksPanel } from "./data/TrackingPanels.tsx";
 import type { Summary } from "./data/types.ts";
 
 type PanelId =
   | "rules"
+  | "facts"
   | "terms"
   | "tasks"
   | "reminders"
@@ -29,6 +31,7 @@ type PanelId =
   | "colleague"
   | "personas"
   | "sheets"
+  | "requests"
   | "llm";
 
 /**
@@ -40,6 +43,7 @@ const SECTIONS: { label: string; items: { id: PanelId; label: string }[] }[] = [
     label: "覚えていること",
     items: [
       { id: "rules", label: "ルール記憶" },
+      { id: "facts", label: "事実台帳" },
       { id: "terms", label: "名前辞書・単語帳" },
     ],
   },
@@ -69,7 +73,13 @@ const SECTIONS: { label: string; items: { id: PanelId; label: string }[] }[] = [
       { id: "sheets", label: "シート登録簿" },
     ],
   },
-  { label: "コスト", items: [{ id: "llm", label: "AIの呼び出し" }] },
+  {
+    label: "使われ方・コスト",
+    items: [
+      { id: "requests", label: "頼まれごと" },
+      { id: "llm", label: "AIの呼び出し" },
+    ],
+  },
 ];
 
 const ALL_IDS: string[] = SECTIONS.flatMap((s) => s.items.map((i) => i.id));
@@ -99,6 +109,7 @@ export function DataPage() {
 
   const body: Record<PanelId, ReactNode> = {
     rules: <RulesPanel />,
+    facts: <FactsPanel />,
     terms: <TermsPanel />,
     tasks: <TasksPanel />,
     reminders: <RemindersPanel />,
@@ -111,6 +122,7 @@ export function DataPage() {
     colleague: <LearningPanel part="colleague" />,
     personas: <PersonasPanel summary={summary} />,
     sheets: <SheetsPanel summary={summary} />,
+    requests: <RequestsPanel />,
     llm: <LlmPanel />,
   };
 

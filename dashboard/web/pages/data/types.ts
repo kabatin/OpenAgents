@@ -100,6 +100,17 @@ export type GlossaryEntry = {
   createdBy: string | null;
   createdAt: string | null;
 };
+export type FactEntry = {
+  id: number;
+  agentId: string | null;
+  topic: string | null;
+  fact: string | null;
+  sourceKind: string | null;
+  status: string | null;
+  statedBy: string | null;
+  channelName: string | null;
+  createdAt: string | null;
+};
 export type GoldenRow = {
   id: number;
   agentId: string | null;

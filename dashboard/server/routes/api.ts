@@ -12,6 +12,8 @@ import {
   patchMeetingConfig,
   readConfig,
 } from "../config/store.ts";
+import { facts } from "../db/queries.facts.ts";
+import { requestLog } from "../db/queries.requests.ts";
 import {
   adviceLessons,
   capabilityRequests,
@@ -213,6 +215,10 @@ api.get("/data/summary", async (c) => {
 });
 
 api.get("/data/rules", (c) => c.json(rules()));
+// 事実台帳（教わったもの・会話から拾ったもの。見るだけ）
+api.get("/data/facts", (c) => c.json(facts()));
+// 人に頼まれた回答の記録（質問文と脚注は返さない）
+api.get("/data/requests", (c) => c.json(requestLog()));
 // 観察の実験（シャドー記録）と、いま効いている自己改善メモ
 api.get("/data/observations", (c) =>
   c.json({ shadow: observationShadow(), advice: adviceLessons(), golden: goldenRows() }),

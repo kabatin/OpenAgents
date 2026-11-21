@@ -10,7 +10,7 @@ import {
   scopeLabel,
   SubHead,
 } from "./common.tsx";
-import type { GlossaryEntry, Rule, TermEntry } from "./types.ts";
+import type { FactEntry, GlossaryEntry, Rule, TermEntry } from "./types.ts";
 
 /** 覚えていること①: 会話で教わったルール。 */
 export function RulesPanel() {
@@ -53,7 +53,58 @@ export function RulesPanel() {
   );
 }
 
-/** 覚えていること②: 固有名詞と、誤表記の置き換え。 */
+const FACT_STATUS: Record<string, string> = {
+  superseded: "置き換え済み",
+  cancelled: "取り消し済み",
+};
+
+/** 覚えていること②: いまの状況（教わったもの・会話から拾ったもの）。 */
+export function FactsPanel() {
+  const q = useFetch<FactEntry[]>("/data/facts");
+  const facts = q.data ?? [];
+  return (
+    <>
+      <PanelHead
+        title="事実台帳"
+        what="「送料は800円に変更」「登録は済んだ」のような、いまの状況の記録。「いまどうなってる？」に答えるとき、古い記録より優先して使います。「自分で拾った」は、エージェントが人同士の会話から拾ったものです"
+        how="Discordで「〜は〜になったよ」と教えます。間違っていたら「事実の3番を取り消して」と話しかけます"
+      />
+      <ul>
+        {facts.length === 0 ? (
+          <ListState q={q} empty="事実はまだありません" />
+        ) : (
+          facts.slice(0, LIST_MAX).map((f) => {
+            const live = f.status === "active";
+            return (
+              <Row key={f.id}>
+                <IdCell id={f.id} />
+                <Chip tone={f.sourceKind === "extracted" ? "warn" : "info"}>
+                  {f.sourceKind === "extracted" ? "自分で拾った" : "教わった"}
+                </Chip>
+                <span
+                  className={`min-w-0 flex-1 ${live ? "" : "text-faint line-through"}`}
+                >
+                  <span className="font-medium">{f.topic ?? ""}</span>
+                  {"　"}
+                  {f.fact ?? ""}
+                </span>
+                <span className="shrink-0 text-2xs text-muted">
+                  {[f.statedBy, f.createdAt?.slice(5, 10).replace("-", "/")]
+                    .filter(Boolean)
+                    .join("・")}
+                </span>
+                {!live && <Chip>{FACT_STATUS[f.status ?? ""] ?? "無効"}</Chip>}
+              </Row>
+            );
+          })
+        )}
+        <MoreRow total={facts.length} shown={LIST_MAX} />
+      </ul>
+    </>
+  );
+}
+
+/** 覚えていること③: 固有名詞と、誤表記の置き換え。 */
 export function TermsPanel() {
   const q = useFetch<{ terms: TermEntry[]; glossary: GlossaryEntry[] }>(
     "/data/dictionary",

@@ -28,6 +28,8 @@ MAX_TOPIC_LEN = 40
 MAX_FACT_LEN = 200
 MAX_PER_ANSWER = 3
 SEARCH_LIMIT = 8
+# エージェントが会話から自分で拾った事実の印。人が教えた事実（"conversation"）と分ける
+SOURCE_EXTRACTED = "extracted"
 
 
 def parse_fact(payload):
@@ -116,7 +118,7 @@ def save_extracted(db_path, agent_id, items, *, now=None):
                 continue
             fid, _ = db.add_fact(
                 conn, agent_id=agent_id, topic=topic, fact=fact,
-                source_kind="conversation",
+                source_kind=SOURCE_EXTRACTED,
                 source_message_id=it.get("message_id"),
                 channel_id=it.get("channel_id"),
                 stated_by=it.get("stated_by"), created_at=now)
