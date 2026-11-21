@@ -307,6 +307,56 @@ class ReviewInputsTest(unittest.TestCase):
                      ensure_ascii=False)}]}]}}]
         self.assertIn("id=50", evidence.summarize_for_review(events))
 
+    def test_recent_conversation_reaches_the_reviewer(self):
+        """回答者が見ていた直前の流れ。無いと、すぐ上の投稿（下書きのメモ・
+        朝の告知）を踏まえた回答まで「根拠のない断定」になる。"""
+        p = self_review.build_prompt(
+            "詳しく", "月1,800万円規模の提案です",
+            convo="agent1: メモ: 月間1,800万円規模の予算を伴う新規事業提案")
+        self.assertIn("直近の会話", p)
+        self.assertIn("月間1,800万円規模", p)
+
+    def test_recent_conversation_keeps_the_latest_part(self):
+        convo = "古い話" + "x" * (self_review.CONVO_CHARS + 500) + "直前の発言"
+        p = self_review.build_prompt("q", "a", convo=convo)
+        self.assertIn("直前の発言", p)
+        self.assertNotIn("古い話", p)
+
+    def test_no_conversation_no_block(self):
+        self.assertNotIn("直近の会話", self_review.build_prompt("q", "a"))
+
+    def test_review_passes_conversation(self):
+        seen = []
+        self_review.review("q", "a", model="m", convo="直前の発言",
+                           invoke_fn=lambda p: seen.append(p) or
+                           '{"score": 5, "issue": ""}')
+        self.assertIn("直前の発言", seen[0])
+
+    @staticmethod
+    def _events(bodies):
+        events = []
+        for i, body in enumerate(bodies):
+            events.append({"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "id": f"t{i}",
+                 "name": "mcp__archive__search_messages", "input": {}}]}})
+            events.append({"type": "user", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": f"t{i}",
+                 "content": [{"type": "text", "text": json.dumps(
+                     {"ok": True, "hits": 1, "message": body},
+                     ensure_ascii=False)}]}]}})
+        return events
+
+    def test_few_results_get_the_whole_budget(self):
+        """結果が少ないのに600字で切って、700字目の数字を落としていた。"""
+        body = "あ" * 700 + "月間1,800万円規模"
+        out = evidence.summarize_for_review(self._events([body, "短い結果"]))
+        self.assertIn("月間1,800万円規模", out)
+
+    def test_many_results_stay_within_the_budget(self):
+        out = evidence.summarize_for_review(self._events(["あ" * 5000] * 10))
+        self.assertLessEqual(len(out), evidence.REVIEW_TOTAL_CHARS + 2000)
+        self.assertEqual(out.count("search_messages"), 10)
+
 
 if __name__ == "__main__":
     unittest.main()

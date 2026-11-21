@@ -75,6 +75,7 @@ export const ACTION_LABEL: Record<string, string> = {
   event_proposed: "イベント案を提示",
   rescue_shadow: "救援（シャドー）",
   rescue_skip_resolved: "救援（解決済みと判断して見送り）",
+  rescue_skip_no_material: "救援（答える材料が無く見送り）",
   prep_shadow: "事前パック（シャドー）",
   stale_shadow: "状況確認（シャドー）",
   hw_track: "宿題を追跡開始",
@@ -117,6 +118,7 @@ export const KIND_LABEL: Record<string, string> = {
   homework: "宿題（「やっときます」）",
   attention: "会話への口出し",
   facts_extract: "会話から事実を拾う",
+  weekly_report: "週次の自己報告",
 };
 
 export function actionLabel(a: string): string {

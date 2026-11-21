@@ -37,6 +37,7 @@ from core import archive_window
 from core import config as app_config
 from core import db
 from core import episodes
+from core import facts
 from core import wiki
 from core import glossary
 from core import heartbeat
@@ -514,6 +515,10 @@ class AgentClient(ToolLoopMixin, SkillHooksMixin, MarkerActionsMixin,
             tool_live = self._tool_loop_live()
             if tool_on:
                 parts.append(tool_launch.skill_note(tool_live))
+            if tool_live:
+                # 本番のツール方式ではリマインダーの指示文（現在日時つき）を出さない
+                # ので、日時だけ渡す。無いと「30分後」を登録できない
+                ctx_parts.append(tool_launch.now_note(reminders.now_jst()))
             plugin_note = plugins.build_skill_notes(agent_runtime.PLUGINS)
             if plugin_note:
                 parts.append(plugin_note)
@@ -853,7 +858,8 @@ class AgentClient(ToolLoopMixin, SkillHooksMixin, MarkerActionsMixin,
                             question, answer, message,
                             events=(result.get("events") or []
                                     if tool_plan is not None else []),
-                            context=references))
+                            context=references,
+                            convo=search.build_history(history)))
                     self._bg_tasks.add(task)
                     task.add_done_callback(self._bg_tasks.discard)
             if task_instr:
@@ -952,11 +958,12 @@ class AgentClient(ToolLoopMixin, SkillHooksMixin, MarkerActionsMixin,
             print(f"[{self.agent['id']}] peer review request failed: {e}")
 
     async def _self_review_bg(self, question, answer, message, events=None,
-                              context=None):
+                              context=None, convo=None):
         """投稿後の自己採点（RM#14・シャドー）。結果はproactive_logへ記録のみ。
         events: ツールループの stream-json。使ったツールと結果を根拠として渡す
         （検索して答えた事実を「根拠のない断定」と誤採点しないため）。
-        context: リプライ先・参照された投稿（文脈から答えた内容の誤採点を防ぐ）。"""
+        context: リプライ先・参照された投稿（文脈から答えた内容の誤採点を防ぐ）。
+        convo: 回答者が見ていた直前の会話（その場の投稿を踏まえた回答の誤採点を防ぐ）。"""
         try:
             evidence = tool_evidence.summarize_for_review(events or [])
             async with ANSWER_SEM:
@@ -964,7 +971,8 @@ class AgentClient(ToolLoopMixin, SkillHooksMixin, MarkerActionsMixin,
                     self_review.review, question, answer,
                     model=self.proactive_cfg.get(
                         "screen_model", proactive.SCREEN_MODEL_DEFAULT),
-                    evidence=evidence or None, context=context or None)
+                    evidence=evidence or None, context=context or None,
+                    convo=convo or None)
             if r:
                 await asyncio.to_thread(
                     proactive.log_entry, DB_PATH, self.agent["id"],

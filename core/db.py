@@ -697,7 +697,7 @@ CREATE TABLE IF NOT EXISTS advice_promotions (
 );
 
 -- 未回答質問の救済（進化ロードマップ#31）。24時間放置された質問を判定・救済した
--- 記録（重複判定の防止台帳）。status: rescued / shadow / skipped_answered
+-- 記録（重複判定の防止台帳）。status: rescued / shadow / skipped_answered / skipped_no_material
 CREATE TABLE IF NOT EXISTS rescues (
     message_id         INTEGER PRIMARY KEY,
     agent_id           TEXT,
@@ -964,8 +964,11 @@ def _fts_reindex(conn, id, new_content):
     """external content FTS を正しく張り替える。旧内容を 'delete' で消してから
     新内容を挿入する（この順序でないと旧タームがインデックスに残留して
     検索が偽陽性を蓄積する。FTS5 external content の仕様）。"""
-    old = conn.execute("SELECT content FROM messages WHERE id=?", (id,)).fetchone()
-    if old is not None:
+    old = conn.execute("SELECT content, deleted FROM messages WHERE id=?",
+                       (id,)).fetchone()
+    # 削除済みの行は索引からもう外れている。無い行を 'delete' すると索引が壊れる
+    # （database disk image is malformed）ので、索引に載っている行だけ消す
+    if old is not None and old[1] == 0:
         conn.execute(
             "INSERT INTO messages_fts(messages_fts, rowid, content) "
             "VALUES('delete', ?, ?)", (id, old[0] or ""))
@@ -976,7 +979,10 @@ def _fts_reindex(conn, id, new_content):
 def insert_message(conn, *, id, channel_id, author_id, content,
                    created_at, edited_at=None, reply_to=None,
                    platform=LEGACY_PLATFORM, external_id=None):
-    """メッセージを保存。既存IDは上書き（バックフィルと再起動の重複を吸収）。"""
+    """メッセージを保存。既存IDは上書き（バックフィルと再起動の重複を吸収）。
+    墨消し済みは上書きしない（チャット側に残っている本文で復活させない）。"""
+    if _is_redacted(conn, id):
+        return
     _fts_reindex(conn, id, content)   # messagesをUPDATEする前に旧FTSを消す
     conn.execute(
         """INSERT INTO messages(id, channel_id, author_id, content,
@@ -1008,16 +1014,48 @@ def insert_attachment(conn, *, id, message_id, filename, content_type, size,
 def mark_deleted(conn, message_id):
     # 論理削除。FTSからも旧タームを除去（search側のdeleted=0で隠れるが
     # インデックス肥大を防ぐ）
-    row = conn.execute("SELECT content FROM messages WHERE id=?",
+    row = conn.execute("SELECT content, deleted FROM messages WHERE id=?",
                        (message_id,)).fetchone()
-    if row is not None:
-        conn.execute(
-            "INSERT INTO messages_fts(messages_fts, rowid, content) "
-            "VALUES('delete', ?, ?)", (message_id, row[0] or ""))
+    if row is None or row[1] != 0:    # 削除済み・墨消し済みは触らない
+        return
+    conn.execute(
+        "INSERT INTO messages_fts(messages_fts, rowid, content) "
+        "VALUES('delete', ?, ?)", (message_id, row[0] or ""))
     conn.execute("UPDATE messages SET deleted=1 WHERE id=?", (message_id,))
 
 
+# 墨消し。論理削除は本文を残すので、パスワード等が投稿されたときは
+# 本文そのものを消す。deleted=2 は「墨消し済み」。検索・要約などは全部
+# deleted=0 で絞っているので、列を足さずにそのまま隠れる。
+DELETED_REDACTED = 2
+REDACTED_TEXT = "（機密情報を含むため本文を消去しました）"
+
+
+def _is_redacted(conn, message_id):
+    row = conn.execute("SELECT deleted FROM messages WHERE id=?",
+                       (message_id,)).fetchone()
+    return row is not None and row[0] == DELETED_REDACTED
+
+
+def redact_message(conn, message_id):
+    """投稿の本文を消し、検索の索引からも外す。消したら True。
+    無いID・墨消し済みは False（何もしない）。"""
+    row = conn.execute("SELECT content, deleted FROM messages WHERE id=?",
+                       (message_id,)).fetchone()
+    if row is None or row[1] == DELETED_REDACTED:
+        return False
+    if row[1] == 0:    # 論理削除済みなら索引からはもう外れている
+        conn.execute(
+            "INSERT INTO messages_fts(messages_fts, rowid, content) "
+            "VALUES('delete', ?, ?)", (message_id, row[0] or ""))
+    conn.execute("UPDATE messages SET content=?, deleted=? WHERE id=?",
+                 (REDACTED_TEXT, DELETED_REDACTED, message_id))
+    return True
+
+
 def update_content(conn, *, id, content, edited_at):
+    if _is_redacted(conn, id):        # 編集イベントで本文を戻さない
+        return
     _fts_reindex(conn, id, content)   # messagesをUPDATEする前に旧FTSを消す
     conn.execute("UPDATE messages SET content=?, edited_at=? WHERE id=?",
                  (content, edited_at, id))

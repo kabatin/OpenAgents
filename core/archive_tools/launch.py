@@ -47,6 +47,15 @@ WRITE_NOTE = (
     "同僚の自発発言枠は set_proactive_quota（見えているときだけ使える）。")
 
 
+def now_note(now):
+    """いまの日時（曜日つき）。「30分後」「来週月曜」を絶対日時に直す基準。
+    分単位で変わるので system ではなく会話ごとの前提（context）に入れる。"""
+    from core import reminders
+    return (f"現在日時: {now.year}-{now.month:02d}-{now.day:02d}"
+            f"({reminders.WEEKDAYS[now.weekday()]}) "
+            f"{now.hour:02d}:{now.minute:02d} JST")
+
+
 def skill_note(live):
     """system に足す告知。live（本番）では書き込みツールの使い方も含める。"""
     return SKILL_NOTE + ("\n" + WRITE_NOTE if live else "")

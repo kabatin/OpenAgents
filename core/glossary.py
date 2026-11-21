@@ -55,13 +55,37 @@ def extract_markers(answer):
     return text.strip(), adds, cancels, errors
 
 
+def _contrasted(line, wrong, correct):
+    """誤と正を並べて書いた行か（登録の報告・「AではなくB」）。表記そのものの
+    話なので、その語は直さない。片方がもう片方を含む組は、含まれない側が
+    単独でも現れるときだけ「並べた」とみなす。"""
+    if wrong not in line or correct not in line:
+        return False
+    if wrong in correct:
+        return any(wrong in part for part in line.split(correct))
+    return correct in line.replace(wrong, "\0")
+
+
+def _replace(line, wrong, correct):
+    """正の一部として現れる誤（会議室→会議室A の「会議室A」）は触らない。"""
+    if wrong in correct:
+        return correct.join(part.replace(wrong, correct)
+                            for part in line.split(correct))
+    return line.replace(wrong, correct)
+
+
 def apply(text, pairs):
     """誤→正の決定論置換（純粋関数）。長い誤語から先に置換して
-    部分一致の置換事故を防ぐ。"""
-    out = text or ""
-    for wrong, correct in sorted(pairs, key=lambda p: -len(p[0])):
-        out = out.replace(wrong, correct)
-    return out
+    部分一致の置換事故を防ぐ。行ごとに当て、誤と正を並べた行のその語は残す
+    （登録直後の報告が「正 → 正」になってしまうため）。"""
+    ordered = sorted(pairs, key=lambda p: -len(p[0]))
+    lines = []
+    for line in (text or "").split("\n"):
+        active = [(w, c) for w, c in ordered if not _contrasted(line, w, c)]
+        for wrong, correct in active:
+            line = _replace(line, wrong, correct)
+        lines.append(line)
+    return "\n".join(lines)
 
 
 def load_pairs(db_path):

@@ -1400,9 +1400,11 @@ class AgentLoopsMixin:
             return
         cand = cands[0]   # 1周期1件（保守的に）
         follow = await asyncio.to_thread(rescue.followups, DB_PATH, cand)
+        reacts = await asyncio.to_thread(
+            rescue.question_reactions, DB_PATH, cand)
         async with ANSWER_SEM:
             verdict = await asyncio.to_thread(
-                rescue.judge, cand, follow,
+                rescue.judge, cand, follow, reactions=reacts,
                 model=cfg.get("screen_model", proactive.SCREEN_MODEL_DEFAULT))
         if not verdict["rescue"]:
             await asyncio.to_thread(
@@ -1438,17 +1440,19 @@ class AgentLoopsMixin:
                 runner_answer.answer_question, DB_PATH, str(GUILD_ID),
                 cand["content"], search.DEFAULT_MODEL, None,
                 rescue.answer_history(follow), agent_param, **tool_kw)
-        if rescue.is_resolved_reply(result["answer"]):
-            # 判定役は見落としたが、流れを読んだ回答役が解決済みと判断した＝投稿しない
+        hold = rescue.hold_reason(result["answer"])
+        if hold:
+            # 判定役は通したが、回答役が「解決済み」か「答える根拠が無い」と判断した。
+            # 頼まれていない投稿なので、どちらも出さない
+            status, action, note = rescue.HOLD_RECORD[hold]
             await asyncio.to_thread(
-                rescue.record, DB_PATH, cand["id"], self.agent["id"],
-                "skipped_answered")
+                rescue.record, DB_PATH, cand["id"], self.agent["id"], status)
             await asyncio.to_thread(
                 proactive.log_entry, DB_PATH, self.agent["id"],
-                kind="rescue", action="rescue_skip_resolved",
+                kind="rescue", action=action,
                 channel_id=cand["channel_id"], trigger_message_id=cand["id"],
-                detail=f"回答役が解決済みと判断: {cand['content'][:100]}")
-            print(f"[{self.agent['id']}] rescue skipped (resolved) "
+                detail=f"{note}: {cand['content'][:100]}")
+            print(f"[{self.agent['id']}] rescue skipped ({hold}) "
                   f"in #{cand['channel']}")
             return
         channel = (self.get_channel(int(cand["channel_id"]))
@@ -2207,6 +2211,17 @@ class AgentLoopsMixin:
                            "suppressed": n_sup, "hit": hit})
         text = proactive.build_weekly_report(
             stats, roster, (now - timedelta(days=7)).strftime("%m/%d"))
+        if not self.proactive_cfg.get("weekly_report_to_discord", True):
+            # 読む人がいないチャンネルに流し続けない。文面は活動ログに残し、
+            # 管理画面で読めるようにする（出した印は付け、毎周期つくり直さない）
+            await asyncio.to_thread(
+                proactive.log_entry, DB_PATH, self.agent["id"],
+                kind="weekly_report", action="shadow",
+                channel_id=self.home_channel_id, detail=text)
+            await asyncio.to_thread(
+                proactive.mark_weekly_report_sent, DB_PATH, self.agent["id"])
+            print(f"[{self.agent['id']}] weekly proactive report logged only")
+            return
         channel = (self.get_channel(self.home_channel_id)
                    or await self.fetch_channel(self.home_channel_id))
         # ダッシュボード画像（RM#76）: 数字をSVGの横棒グラフで添える

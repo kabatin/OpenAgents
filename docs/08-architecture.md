@@ -112,6 +112,15 @@ tail -f state/logs/archivebot.log                            # ログ
 # 既定は本番と同じ構成（agents[].tool_loop の prompt_style・注入件数・同じツール）で測る。
 # 結果は state/golden_eval/<日時>.json に残り、最新の平均点と
 # 「根拠の投稿を引けた: ○/○問」（答え直しの間にツールが根拠の投稿を返したか）が週次レポートに出る
+# 続けて頼まれごとの操作（core/golden_ops.py・リマインダー/単語帳/訂正/ルールの7問）を
+# 予行（ToolContext.rehearse＝書き込みツールは見せるが実行しない）で答えさせ、
+# 「正しく実行できた: ○/○問」も出す。エージェントに見えないツールの問題は外す。--no-ops で省略
+
+# 機密情報を含む投稿の本文を記録から消す（既定は確認だけ。--yes で実行）
+./venv/bin/python -m core.redact_message <メッセージID…> [--yes]
+# 本文を定型文に置き換えて検索索引からも外し、空き領域も上書きする。以後の編集・削除
+# イベントでも本文は戻らない。チャット上の投稿そのものは別に削除する。
+# 要約・事実台帳など、その投稿から作られた派生の記録は消えないので手で確認する
 ```
 
 ### 止まったBOTの起こし直し（core/supervisor.py）
@@ -271,7 +280,7 @@ runner経路のエージェントに有効。
   に起票する（❌は理由つきだけ数える。能力リクエストと見本は起票しない）
 - **点検で赤**: 乗っ取り訓練の突破（`injection_drill.record_breaches`）と模範Q&Aの
   平均点の急落（`golden_eval.report_red_if_dropped`。同じ設定の直近3回以上の平均から
-  0.4点以上の下落）は、トピックが `security:` / `quality:` で始まり1件で即起票される
+  0.4点以上の下落）、頼まれごとの操作が2問以上落ちたとき（`report_red_if_ops_failed`）は、トピックが `security:` / `quality:` で始まり1件で即起票される
 - **フィードバック**: エージェントの投稿への👍👎リアクションを `feedback` テーブルに
   収集（物差しの原料。archiverが raw reaction イベントで記録、著者はarchive.dbから照会）
 - **勝ちパターン学習**: 自発発言への👍は「良い例」として教訓帳
@@ -459,7 +468,11 @@ BOTは短い返事だけをすぐ返して、作業は裏で進める（`skills.
    指示文も注入しない（マーカーとツールの二重経路を作らない）。「できたフリ」は
    **成功した**ツール（`evidence.tools_succeeded`）で判定する。呼んだが失敗した
    ツールは裏付けにならない
-4. 自己採点（self_review）には `evidence.summarize_for_review(events)` を渡す
+4. 自己採点（self_review）には `evidence.summarize_for_review(events)` と、回答者が
+   見ていた直前の会話（`search.build_history(history)`）を渡す
+4a. 本番では現在日時（`launch.now_note`）を会話ごとの前提（context）に入れる。
+   リマインダーの指示文を出さないので、無いと「30分後」を絶対日時に直せない。
+   分ごとに変わる値なので、キャッシュされる system 側には入れない
 5. 観察ループ（二次判定 `proactive.decide_reply`・放置質問の救出）にも
    `_observe_tool_kwargs` で **読み取りのみ**（dry_run）のツールを渡す
 

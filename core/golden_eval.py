@@ -11,6 +11,9 @@
   ./venv/bin/python -m core.golden_eval --no-tools       # ツールループ無し（ベースライン）
   ./venv/bin/python -m core.golden_eval --seed 1 --n 8   # 同じ抽出で再実行（比較用）
   ./venv/bin/python -m core.golden_eval --inject-search 0 --no-inject-facts --prompt v4
+  ./venv/bin/python -m core.golden_eval --no-ops         # 操作の回帰チェックを回さない
+頼まれごとの操作（リマインダー・単語帳・訂正・ルール）は core/golden_ops.py が
+予行（書き込みは実行しない）で答えさせ、正しいツールと引数で呼んだかを数える。
 結果は state/golden_eval/<日時>.json と標準出力の要約。週次レポートが最新の
 JSON（mean / scored）を読む。
 コスト目安: 1問あたり回答 $0.15〜0.3 ＋ 採点（haiku）$0.01。"""
@@ -321,6 +324,22 @@ def report_red_if_dropped(db_path, report, path, out_dir=None):
     return why
 
 
+def report_red_if_ops_failed(db_path, report, path):
+    """頼まれごとの操作が複数落ちたら、同じく「点検で赤」として失敗の台帳へ。"""
+    from core import golden_ops
+    from core import misses
+    ops = report.get("ops")
+    why = golden_ops.red(ops["items"]) if ops else None
+    if why is None:
+        return None
+    misses.record_gap(db_path, agent_id=report["config"].get("agent") or "",
+                      source="quality_drop",
+                      context="頼まれごとの操作の回帰チェック（毎週）",
+                      detail=f"{why}\n結果: {os.path.basename(path)}",
+                      topic="quality:ops")
+    return why
+
+
 def load_rows(conn, agent_id, golden_set="curated", kind="all"):
     """評価対象の行を選ぶ（curated が無ければ auto へ倒す）。"""
     if golden_set == "curated":
@@ -354,6 +373,8 @@ def main(argv=None):
     ap.add_argument("--inject-search", type=int, default=None,
                     help="事前注入する関連メッセージ上限（既定は本番設定・0で注入なし）")
     ap.add_argument("--no-inject-facts", action="store_true")
+    ap.add_argument("--no-ops", action="store_true",
+                    help="頼まれごとの操作チェック（golden_ops）を回さない")
     ap.add_argument("--prompt", choices=["v3", "v4"], default=None,
                     help="プロンプト形式（既定は本番設定）")
     args = ap.parse_args(argv)
@@ -387,18 +408,28 @@ def main(argv=None):
                       prompt_style=variant["prompt_style"], skills=skills)
     report["config"] = {"n": args.n, "seed": args.seed, "agent": agent["id"],
                         "model": args.model or search.DEFAULT_MODEL}
+    if not (args.no_ops or args.no_tools):
+        from core import golden_ops
+        report["ops"] = golden_ops.evaluate(db_path, agent, cfg,
+                                            answer_model=args.model)
     path = save_report(report)
     why = report_red_if_dropped(db_path, report, path)
     if why:
         print(f"⚠️ 点検で赤: {why}（失敗と間違いの台帳へ・開発BOTへ起票されます）")
-    cost = sum(i.get("cost_usd") or 0 for i in report["items"])
+    ops_why = report_red_if_ops_failed(db_path, report, path)
+    if ops_why:
+        print(f"⚠️ 点検で赤: {ops_why}")
+    cost = sum(i.get("cost_usd") or 0 for i in report["items"]
+               + (report.get("ops") or {}).get("items", []))
     rc = report.get("recall") or {}
     got, cit = rc.get("retrieved") or {}, rc.get("cited") or {}
     print(f"mean(info)={report['mean']} ({report['scored']} 採点・action "
           f"{report['action_excluded']}件は参考) "
           f"根拠を引けた {got.get('hits')}/{got.get('n')}・"
           f"引用 {cit.get('hits')}/{cit.get('n')} "
-          f"cost=${cost:.2f} → {path}")
+          + (f"操作 {report['ops']['passed']}/{report['ops']['n']} "
+             if report.get("ops") else "")
+          + f"cost=${cost:.2f} → {path}")
 
 
 if __name__ == "__main__":

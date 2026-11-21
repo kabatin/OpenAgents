@@ -50,6 +50,39 @@ class ApplyTest(unittest.TestCase):
     def test_empty_pairs_no_change(self):
         self.assertEqual(glossary.apply("そのまま", []), "そのまま")
 
+    def test_registration_report_keeps_the_wrong_spelling(self):
+        """登録の報告まで置換されて「アーカイブ → アーカイブ」と出ていた。
+        誤と正を並べて書いた行は表記そのものの話なので、その語は直さない。"""
+        pairs = [("アーカイプ", "アーカイブ"), ("ダッシュボート", "ダッシュボード")]
+        text = ("単語帳に登録しました💪\n"
+                "- アーカイプ → アーカイブ\n"
+                "- ダッシュボート → ダッシュボード\n"
+                "-# 📖 単語帳に登録: 「アーカイプ」→「アーカイブ」（今後の議事録・回答・検索に反映）")
+        self.assertEqual(glossary.apply(text, pairs), text)
+
+    def test_other_lines_are_still_corrected(self):
+        pairs = [("アーカイプ", "アーカイブ"), ("ダッシュボート", "ダッシュボード")]
+        out = glossary.apply(
+            "アーカイプ → アーカイブ に直しました\nアーカイプとダッシュボートの件", pairs)
+        self.assertEqual(
+            out, "アーカイプ → アーカイブ に直しました\nアーカイブとダッシュボードの件")
+
+    def test_only_the_contrasted_pair_is_kept_in_a_line(self):
+        pairs = [("アーカイプ", "アーカイブ"), ("ダッシュボート", "ダッシュボード")]
+        out = glossary.apply("アーカイプ → アーカイブ（ダッシュボートの件）", pairs)
+        self.assertEqual(out, "アーカイプ → アーカイブ（ダッシュボードの件）")
+
+    def test_correct_containing_wrong_is_not_replaced_twice(self):
+        pairs = [("会議室", "会議室A")]
+        self.assertEqual(glossary.apply("会議室Aで打ち合わせ", pairs), "会議室Aで打ち合わせ")
+        self.assertEqual(glossary.apply("会議室で打ち合わせ", pairs), "会議室Aで打ち合わせ")
+
+    def test_wrong_containing_correct_is_still_fixed(self):
+        pairs = [("サンプル社", "サンプル")]
+        self.assertEqual(glossary.apply("サンプル社の件", pairs), "サンプルの件")
+        self.assertEqual(glossary.apply("サンプル社 → サンプル", pairs),
+                         "サンプル社 → サンプル")
+
 
 class SaveTest(unittest.TestCase):
     def setUp(self):

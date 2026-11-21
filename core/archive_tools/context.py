@@ -14,6 +14,7 @@ class ToolContext:
     message_id: int | None = None
     bot_turn: bool = False        # Bot 起点ターン: write 系を見せない
     dry_run: bool = False         # シャドー: write 系を見せない（read のみ）
+    rehearse: bool = False        # 評価用の予行: write 系を見せるが実行しない
     is_admin: bool = False
     skills: frozenset = field(default_factory=frozenset)
     reminder_max_active: int | None = None   # エージェント設定（上限）
@@ -33,6 +34,8 @@ class ToolContext:
             args.append("--bot-turn")
         if self.dry_run:
             args.append("--dry-run")
+        if self.rehearse:
+            args.append("--rehearse")
         if self.is_admin:
             args.append("--admin")
         if self.reminder_max_active:
@@ -56,6 +59,7 @@ class ToolContext:
         p.add_argument("--message", type=int, default=None)
         p.add_argument("--bot-turn", action="store_true")
         p.add_argument("--dry-run", action="store_true")
+        p.add_argument("--rehearse", action="store_true")
         p.add_argument("--admin", action="store_true")
         p.add_argument("--reminder-max", type=int, default=None)
         p.add_argument("--question", default="")
@@ -65,7 +69,8 @@ class ToolContext:
         return cls(agent_id=a.agent, actor_id=a.actor, db_path=a.db,
                    guild_id=a.guild, channel_id=a.channel,
                    message_id=a.message, bot_turn=a.bot_turn,
-                   dry_run=a.dry_run, is_admin=a.admin, skills=skills,
+                   dry_run=a.dry_run, rehearse=a.rehearse,
+                   is_admin=a.admin, skills=skills,
                    reminder_max_active=a.reminder_max,
                    question=a.question or "",
                    agent_ids=tuple(x for x in a.agents.split(",") if x))

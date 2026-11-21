@@ -76,6 +76,10 @@ def dispatch(ctx, name, args, tools=None):
     tool = by_name.get(name)
     if tool is None:
         return {"ok": False, "error": f"unknown tool: {name}"}
+    if tool.kind == "write" and ctx.rehearse:
+        # 評価用の予行（golden_ops）: 呼び出しと引数を採点するだけで、実行しない。
+        # 回答は投稿されないので「完了」と返してよい。本番の文脈では立てない
+        return {"ok": True, "rehearsed": True, "message": "完了した"}
     try:
         res = tool.handler(ctx, dict(args or {}))
     except Exception as e:  # noqa: BLE001 - 失敗はモデルに見せる

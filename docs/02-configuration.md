@@ -206,6 +206,8 @@ DBに記録します（複数だと同じ発言が二重に記録されます）
   "deadline": { "announce": true, "nudge": true, "stale_notice": true },
   "facts_extract": { "enabled": true, "shadow": true },  // 会話から「いまの状況」を事実台帳へ
   "summaries": { "enabled": true, "min_new_messages": 6 }, // チャンネル要約の追いつき
+  "weekly_report": true,             // 金曜夕方の週次レポート
+  "weekly_report_to_discord": true,  // false でチャンネルに出さず活動ログにだけ残す
   // …ほかにも多数（管理画面の「エージェント → 自分から動く機能」で一覧できます）
 }
 ```

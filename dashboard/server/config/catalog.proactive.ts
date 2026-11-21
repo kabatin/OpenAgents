@@ -181,6 +181,13 @@ const CYCLES: Setting[] = [
         kind: "bool",
         default: true,
       },
+      {
+        path: "proactive.weekly_report_to_discord",
+        label: "Discordに投稿する",
+        desc: "OFFにするとチャンネルには投稿せず、この画面の活動ログにだけ文面を残します。読む人がいないときはOFFに。",
+        kind: "bool",
+        default: true,
+      },
     ],
   },
   {
@@ -188,7 +195,7 @@ const CYCLES: Setting[] = [
     level: "basic",
     category: "conversation",
     label: "見捨てられた質問を拾う",
-    desc: "24時間誰も答えていない質問を見つけて、代わりに答えます。",
+    desc: "24時間誰も答えていない質問を見つけて、代わりに答えます。その後の会話やリアクションで返事が出ている質問と、答えの根拠になる記録が見つからない質問には投稿しません。",
     kind: "tri",
     default: { enabled: false, shadow: true },
   },

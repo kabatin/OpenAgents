@@ -790,6 +790,17 @@ class WeeklyReportV4Test(unittest.TestCase):
                     json.dump({"mean": mean, "scored": 15}, f)
             g = proactive.golden_eval_latest(d)
         self.assertEqual((g["mean"], g["n"], g["date"]), (3.4, 15, "20260913"))
+        self.assertIsNone(g["ops_n"])
+
+    def test_ops_result_reaches_the_weekly_report(self):
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "20261114-0330.json"), "w") as f:
+                json.dump({"mean": 3.4, "scored": 15,
+                           "ops": {"passed": 6, "n": 7, "items": []}}, f)
+            g = proactive.golden_eval_latest(d)
+        text = proactive.build_weekly_report(
+            {"agents": {}, "golden_latest": g}, [], "11/07")
+        self.assertIn("正しく実行できた: 6/7問", text)
 
     def test_golden_eval_latest_ignores_broken_json(self):
         with tempfile.TemporaryDirectory() as d:

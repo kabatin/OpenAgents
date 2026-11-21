@@ -974,9 +974,11 @@ def golden_eval_latest(dir_path=None):
     except (OSError, ValueError):
         return None
     got = ((rep.get("recall") or {}).get("retrieved")) or {}
+    ops = rep.get("ops") or {}
     return {"mean": rep.get("mean"), "n": rep.get("scored"),
             "date": os.path.basename(files[-1])[:8],
-            "retrieved": got.get("hits"), "retrieved_n": got.get("n")}
+            "retrieved": got.get("hits"), "retrieved_n": got.get("n"),
+            "ops_passed": ops.get("passed"), "ops_n": ops.get("n")}
 
 
 def build_weekly_report(stats, roster, since_label):
@@ -1040,6 +1042,9 @@ def build_weekly_report(stats, roster, since_label):
         if g.get("retrieved_n"):
             lines.append(f"- 根拠の投稿を引けた: "
                          f"{g['retrieved']}/{g['retrieved_n']}問")
+        if g.get("ops_n"):
+            lines.append(f"- 頼まれごとの操作（リマインダー・単語帳など）を"
+                         f"正しく実行できた: {g['ops_passed']}/{g['ops_n']}問")
     if stats.get("golden_total"):
         lines.append(f"- ゴールデンセット: 累計{stats['golden_total']}問"
                      "（👍回答から自動蓄積）")
